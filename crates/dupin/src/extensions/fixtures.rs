@@ -426,6 +426,8 @@ pub struct Snapped {
     pub width: u16,
     pub height: u32,
     pub scale: u8,
+    /// Every text the panel shows, in the order it lays them out.
+    pub shown: Vec<String>,
 }
 
 /// Renders the panel after step `step` (counting from 1; the last by default) of the fixture at
@@ -483,10 +485,7 @@ pub fn snap(
         .and_then(|()| {
             std::fs::write(
                 config.join("config.toml"),
-                format!(
-                    "hotkey = \"\"\nauto_update = false\ninput_source = \"keep\"\nweb_searches = {{}}\nextensions = true\n\n[theme]\npanel_width = {}\n",
-                    environment.window.width
-                ),
+                scratch_config(&extension, environment.window.width),
             )
         })
         .and_then(|()| std::fs::create_dir_all(root.join("data")))
@@ -509,14 +508,27 @@ pub fn snap(
                 .hint("Run `dupin ext test` on the package to see each step's outcome."),
         );
     }
-    std::fs::write(&script, script_for(steps).to_string())
+    let clipboard_events: Vec<bool> = parsed
+        .steps
+        .iter()
+        .map(|step| {
+            matches!(
+                step.action(),
+                fixture::Action::Event(services::CLIPBOARD_EVENT, _)
+            )
+        })
+        .collect();
+    let (events, played) = script_for(steps, &clipboard_events);
+    std::fs::write(&script, events.to_string())
         .map_err(|error| render_failed(format!("couldn't write the input script: {error}")))?;
     let handed = root.join("fixture.json");
     std::fs::write(&handed, fixture::to_json(&parsed))
         .map_err(|error| render_failed(format!("couldn't write the fixture: {error}")))?;
     let handed = serde_json::to_string(&services::HeadlessFixture {
         fixture: handed,
-        package: extension.package.to_string(),
+        name: extension.id.clone(),
+        revision: extension.revision.as_str().to_owned(),
+        events: played,
     })
     .unwrap_or_default();
 
@@ -564,6 +576,7 @@ pub fn snap(
     };
     let size = format!("{}x{height}", environment.window.width);
     let scale = environment.window.scale.to_string();
+    let drawn = root.join("drawn.json");
     launcher(&[
         OsStr::new("--snap"),
         output.as_os_str(),
@@ -571,17 +584,33 @@ pub fn snap(
         OsStr::new(&size),
         OsStr::new("--scale"),
         OsStr::new(&scale),
+        OsStr::new("--tree"),
+        drawn.as_os_str(),
     ])?;
     if !output.is_file() {
         return Err(render_failed("the headless run wrote no PNG".into()));
     }
+    let shown = shown_text(&drawn).map_err(render_failed)?;
     Ok(Snapped {
         png: output.to_owned(),
         step: last,
         width: environment.window.width,
         height,
         scale: environment.window.scale,
+        shown,
     })
+}
+
+/// The scratch home's config.toml: Extensions on, the panel `width` points wide, and, for a
+/// package a built-in ships as, that built-in on, since only then does the package answer.
+fn scratch_config(extension: &Extension, width: u16) -> String {
+    let mut config = dupin_core::Config::parse(
+        "hotkey = \"\"\nauto_update = false\ninput_source = \"keep\"\nweb_searches = {}\nextensions = true\n",
+    )
+    .expect("the scratch config parses");
+    config.theme.panel_width = width;
+    crate::features::turn_on_ported(&extension.id, &mut config);
+    toml::to_string(&config).expect("a config serializes")
 }
 
 /// The package's manifest, modules and own icon, which are all the launcher reads, copied so
@@ -618,11 +647,18 @@ fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
 }
 
 /// The keys a person would press for `steps`, as the replay worked them out, a step's keys
-/// close together and each step given time to answer.
-fn script_for(steps: &[StepResult]) -> Value {
+/// close together and each step given time to answer, and when each step that
+/// `clipboard_events` marks, by index, copies, which the launcher is handed at that time.
+fn script_for(steps: &[StepResult], clipboard_events: &[bool]) -> (Value, Vec<(usize, f64)>) {
     let mut events = Vec::new();
+    let mut copies = Vec::new();
     let mut at = FIRST_KEY;
-    for step in steps {
+    for (index, step) in steps.iter().enumerate() {
+        if clipboard_events.get(index).copied().unwrap_or_default() {
+            copies.push((index, at));
+            at += STEP_SECONDS;
+            continue;
+        }
         if step.presses.is_empty() {
             continue;
         }
@@ -644,7 +680,7 @@ fn script_for(steps: &[StepResult]) -> Value {
         at += STEP_SECONDS;
     }
     events.push(json!({ "t": at + STEP_SECONDS, "type": "mark", "name": "end" }));
-    json!({ "events": events })
+    (json!({ "events": events }), copies)
 }
 
 /// Runs `command` to completion within [`RENDER_DEADLINE`] unless `cancelled`, with the last
@@ -693,6 +729,19 @@ fn run_bounded(mut command: Command, cancelled: &dyn Fn() -> bool) -> Result<(),
         .find(|line| !line.trim().is_empty())
         .unwrap_or("no output");
     Err(format!("the headless run failed ({status}): {last}"))
+}
+
+/// Every text the panel shows, in the order it lays them out, from a `--tree` dump.
+fn shown_text(tree: &Path) -> Result<Vec<String>, String> {
+    let bytes = std::fs::read(tree).map_err(|error| format!("couldn't read the element tree: {error}"))?;
+    let tree: Value = serde_json::from_slice(&bytes).map_err(|_| "the element tree isn't JSON".to_owned())?;
+    Ok(tree["elements"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|element| element["text"].as_str())
+        .map(str::to_owned)
+        .collect())
 }
 
 /// The panel's laid-out height in points, rounded up, from a `--tree` dump.

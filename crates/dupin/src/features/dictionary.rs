@@ -21,6 +21,7 @@ pub(super) const FEATURE: Feature = Feature {
         main_search: false,
         paste_notice: None,
         enabled: |_| true,
+        turn_on: |_| {},
     }),
     ..Feature::EMPTY
 };

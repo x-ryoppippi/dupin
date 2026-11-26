@@ -87,6 +87,8 @@ pub(super) struct Bundled {
     pub paste_notice: Option<&'static str>,
     /// Whether the feature is on, and so may the package watch on its behalf.
     pub enabled: fn(&Config) -> bool,
+    /// Turns the feature on in `config`.
+    pub turn_on: fn(&mut Config),
     /// Whether the command answers the main search rather than a keyword of its own.
     pub main_search: bool,
 }
@@ -94,6 +96,14 @@ pub(super) struct Bundled {
 /// Whether the feature that ships as the extension called `package` is on, if one does.
 pub(crate) fn ported_enabled(package: &str, config: &Config) -> Option<bool> {
     bundled(package).map(|bundled| (bundled.enabled)(config))
+}
+
+/// Turns on the feature that ships as the extension called `package`, if one does, so the
+/// extension answers its command.
+pub(crate) fn turn_on_ported(package: &str, config: &mut Config) {
+    if let Some(bundled) = bundled(package) {
+        (bundled.turn_on)(config);
+    }
 }
 
 /// The row a built-in command that a bundled extension answers shows while the package is off
@@ -115,6 +125,15 @@ fn bundled(package: &str) -> Option<Bundled> {
         .iter()
         .filter_map(|feature| feature.bundled)
         .find(|bundled| bundled.package == package)
+}
+
+/// The package that ships as the built-in `command`, if a bundled extension answers it.
+pub(crate) fn ported_package(command: &str) -> Option<&'static str> {
+    MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .find(|bundled| bundled.command == command)
+        .map(|bundled| bundled.package)
 }
 
 /// The built-in command the extension called `package` answers, if a feature ships as it.
@@ -207,4 +226,24 @@ pub(super) fn reload(ui: &mut Ui, config: &Config, commands: &mut ConfiguredComm
 
 fn default_query(ui: &Ui) -> bool {
     ui.session.command_id().as_str() == apps::APPS && !ui.session.query().trim().is_empty()
+}
+
+#[cfg(test)]
+#[test]
+fn turning_a_ported_feature_on_turns_on_the_command_its_package_answers() {
+    for bundled in MANIFEST.iter().filter_map(|feature| feature.bundled) {
+        let mut config = Config {
+            calculator: false,
+            ..Config::default()
+        };
+        config.calendar.enabled = false;
+        config.clipboard.enabled = false;
+        turn_on_ported(bundled.package, &mut config);
+        assert_eq!(
+            ported_enabled(bundled.package, &config),
+            Some(true),
+            "{}",
+            bundled.package
+        );
+    }
 }

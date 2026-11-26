@@ -1,6 +1,6 @@
 # Clipboard history
 
-Turn on clipboard history in Settings → Search (it is off by default; see [configuration](#configuration)). Then type `clip`, or an [alias](./keywords.md#aliases) for `clipboard`, and Space: a "Clipboard" chip shows the mode and the list starts with your most recent copies, each with how long ago it was copied. Type to keep only entries containing every word, ignoring case; the list stays newest first. ↑ and ↓ move through the list even with an empty query. Clipboard search terms are not kept for query recall.
+Turn on clipboard history in Settings → Search (it is off by default; see [configuration](#configuration)). Then type `clip`, or an [alias](./keywords.md#aliases) for `clipboard`, and Space, or press a [shortcut](./hotkeys.md#configuration) bound to `clipboard`, such as ⇧⌘V: a "Clipboard" chip shows the mode and the list starts with your most recent copies, each with how long ago it was copied. Type to keep only entries containing every word, ignoring case; the list stays newest first. ↑ and ↓ move through the list even with an empty query. Clipboard search terms are not kept for query recall.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/clipboard/history-dark.png" />

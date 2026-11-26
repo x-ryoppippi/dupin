@@ -8,11 +8,7 @@
 # that window, `width` points wide, instead of the panel.
 #
 # Spotlight indexes nothing in the scratch home, and on some Macs not even a fresh disk image, so
-# no image shows a Spotlight search; the files scenarios start from Recent items instead. The
-# bundled extensions render through the launcher scenarios scripts/headless already has:
-# `dupin ext snap` of a bundled package shows its keyword with no results (calendar, window
-# management) or "isn't available" (dictionary), and only the steps of a long fixture render
-# reliably.
+# no image shows a Spotlight search; the files scenarios start from Recent items instead.
 
 # What the scratch home opened before, the first most often and most recently.
 recent = [
@@ -210,3 +206,35 @@ name = "permissions"
 scenario = "scripts/docs-images/settings-permissions.json"
 window = "prefs"
 width = 760
+
+# A clip is a short recording of `steps` played into the panel, rendered to
+# docs/images/<page>/<name>-<theme>.webp with a caption below the panel naming each key it
+# presses and the text it types. A step types text one character at a time (`type`, or all at
+# once with `burst = true`, for a search that would answer each prefix), presses a key (`key`,
+# with `cmd`, `shift`, `alt` or `ctrl`) or waits (`wait`, in seconds). `fixtures` names a scenario
+# whose sidecar fixtures the clip runs with, and `config` a configuration in place of the default
+# one. Every clip is embedded under the steps of its page.
+#
+# A clip never types into a Spotlight search (Files after Space, or `in`): Spotlight answers
+# from this Mac's index, whatever the scratch home holds. Files clips start from Recent items and
+# folder browsing, which read only the scratch home.
+
+[[clips]]
+page = "tutorial"
+name = "apps"
+steps = [{ type = "maps" }, { key = "k", cmd = true }]
+
+[[clips]]
+page = "tutorial"
+name = "files"
+steps = [{ wait = 1.2 }, { key = "tab" }, { type = "ann" }]
+
+[[clips]]
+page = "tutorial"
+name = "dictionary"
+steps = [{ type = "d" }, { key = "space" }, { type = "serendipity", burst = true }]
+
+[[clips]]
+page = "tutorial"
+name = "keywords"
+steps = [{ type = "?" }, { key = "down" }, { key = "down" }]

@@ -16,21 +16,22 @@ Open **Settings → Sync** (<kbd>⌘,</kbd> in the panel), or use `dupin sync` i
 
 - Usage history, the ranking Dupin learns from what you open. Each Mac keeps its own log and every Mac ranks with all of them added together.
 - The [snippets](./snippets.md) you add in Dupin, one per keyword: the later edit of a keyword wins, deleting one deletes it on every Mac, and `config.toml`'s snippets stay on each Mac, winning a keyword both hold.
+- Settings saved over a read-only `config.toml`, such as one Home Manager writes: the keys every Mac shares (theme, web searches, keyword lists and the like). Device-local ones (hotkeys, display, permissions-related switches, `[sync]`) never leave the Mac, and a writable `config.toml` is still each Mac's own.
 
-Settings, extensions and, if you choose, clipboard history follow.
+Extensions and, if you choose, clipboard history follow.
 
 ## What you can do
 
-| Key / action                                                            | What it does                                                                                                               |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Turn On Sync**, `dupin sync on`                                       | Starts a vault in iCloud Drive's `Dupin` folder when iCloud Drive is set up, with a generated passphrase                   |
-| **Choose Folder…**, `dupin sync on --folder ~/Dropbox/Dupin`            | Uses another folder                                                                                                        |
-| **Turn On With Passphrase…**, `dupin sync on --passphrase-stdin`        | Uses a passphrase of your own (read from stdin on the command line)                                                        |
-| **Join…**, `dupin sync join [--folder …]`                               | Joins another Mac's vault in the same folder; asks for the passphrase in a prompt that never shows it                      |
-| **Sync Now**, `dupin sync now`                                          | Syncs at once; otherwise Dupin syncs every five minutes                                                                    |
-| `dupin sync status`                                                     | Shows the folder, how the key travels, this Mac's device ID, the other Macs with when they last synced, and anything wrong |
-| **Remove This Mac** on another Mac's row, `dupin sync remove-device ID` | Removes a Mac you no longer use                                                                                            |
-| **Turn Off**, `dupin sync off`                                          | Stops syncing on this Mac                                                                                                  |
+| Key / action                                                            | What it does                                                                                                                                                                                       |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Turn On Sync**, `dupin sync on`                                       | Starts a vault in iCloud Drive's `Dupin` folder when iCloud Drive is set up, with a generated passphrase                                                                                           |
+| **Choose Folder…**, `dupin sync on --folder ~/Dropbox/Dupin`            | Uses another folder                                                                                                                                                                                |
+| **Turn On With Passphrase…**, `dupin sync on --passphrase-stdin`        | Uses a passphrase of your own (read from stdin on the command line)                                                                                                                                |
+| **Join…**, `dupin sync join [--folder …]`                               | Joins another Mac's vault in the same folder; asks for the passphrase in a prompt that never shows it                                                                                              |
+| **Sync Now**, `dupin sync now`                                          | Syncs at once. Otherwise a change goes to the folder about two seconds after you make it, another Mac's changes are read as soon as the folder shows them, and a full pass runs every five minutes |
+| `dupin sync status`                                                     | Shows the folder, how the key travels, this Mac's device ID, the other Macs with when they last synced, and anything wrong                                                                         |
+| **Remove This Mac** on another Mac's row, `dupin sync remove-device ID` | Removes a Mac you no longer use                                                                                                                                                                    |
+| **Turn Off**, `dupin sync off`                                          | Stops syncing on this Mac                                                                                                                                                                          |
 
 Add `--json` to `dupin sync` commands for scripts.
 

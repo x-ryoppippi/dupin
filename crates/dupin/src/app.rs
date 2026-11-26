@@ -150,6 +150,14 @@ pub(crate) fn run() {
         let panel = handle.clone();
         move |update| panel.update(move |s, tx| s.reload_config(update, tx))
     }));
+    settings::overlay::on_synced({
+        let settings = Arc::downgrade(&settings);
+        move || {
+            if let Some(settings) = settings.upgrade() {
+                settings.reread();
+            }
+        }
+    });
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let current_config = Rc::new(RefCell::new(config.clone()));
     let welcome = prefs::welcome::first_run();
@@ -204,7 +212,10 @@ pub(crate) fn run() {
                     },
                     updater,
                     configuration,
-                    dupin_core::History::default(),
+                    match rune::tooling::is_headless() {
+                        true => crate::store::headless_history(),
+                        false => dupin_core::History::default(),
+                    },
                     calendar_access,
                     quick_look,
                     running,
@@ -214,6 +225,7 @@ pub(crate) fn run() {
             }
         })
         .on_ready(move |window| {
+            crate::extensions::headless_ready();
             let panel = window.clone();
             handle.update(move |ui, _| ui.set_panel_window(panel));
             install_quick_look(window, &handle, &quick_look);

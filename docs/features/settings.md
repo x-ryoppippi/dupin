@@ -24,18 +24,18 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 
 ## What you can do
 
-| Key / action                                               | What it does                                                                                                                                   |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| <kbd>⌘,</kbd> in the panel                                 | Opens Settings                                                                                                                                 |
-| Type a pane's name, such as `bluetooth`, then <kbd>↩</kbd> | Opens that pane in System Settings                                                                                                             |
-| Settings → Keywords                                        | Lists every keyword and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords                                    |
-| Settings → Snippets                                        | Lists every [snippet](./snippets.md#adding-and-editing), adds, edits and deletes the ones stored in Dupin, and shows `config.toml`'s read-only |
-| **Launch at login**                                        | Starts Dupin at login; see [Launch at login](#launch-at-login)                                                                                 |
-| **Relaunch**                                               | Restarts Dupin, installing a staged update first                                                                                               |
-| **Open config.toml**                                       | Opens the file in its default editor                                                                                                           |
-| **Open Config Folder**                                     | Shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist                            |
-| **Show Welcome**                                           | Brings back the [first-run](#first-run) welcome                                                                                                |
-| **Acknowledgements**                                       | Opens the licences and copyright notices of the open-source code and data Dupin includes                                                       |
+| Key / action                                               | What it does                                                                                                                                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <kbd>⌘,</kbd> in the panel                                 | Opens Settings                                                                                                                                                                        |
+| Type a pane's name, such as `bluetooth`, then <kbd>↩</kbd> | Opens that pane in System Settings                                                                                                                                                    |
+| Settings → Keywords                                        | Lists every keyword, records the [shortcut](./keywords.md#shortcuts) that opens each command, and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords |
+| Settings → Snippets                                        | Lists every [snippet](./snippets.md#adding-and-editing), adds, edits and deletes the ones stored in Dupin, and shows `config.toml`'s read-only                                        |
+| **Launch at login**                                        | Starts Dupin at login; see [Launch at login](#launch-at-login)                                                                                                                        |
+| **Relaunch**                                               | Restarts Dupin, installing a staged update first                                                                                                                                      |
+| **Open config.toml**                                       | Opens the file in its default editor                                                                                                                                                  |
+| **Open Config Folder**                                     | Shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist                                                                   |
+| **Show Welcome**                                           | Brings back the [first-run](#first-run) welcome                                                                                                                                       |
+| **Acknowledgements**                                       | Opens the licences and copyright notices of the open-source code and data Dupin includes                                                                                              |
 
 ## Notes
 

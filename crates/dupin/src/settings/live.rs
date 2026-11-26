@@ -53,6 +53,11 @@ impl Service {
         let _ = self.sender.send(Job::Activate);
     }
 
+    /// Reads the layers again, as a change on disk would make it.
+    pub fn reread(&self) {
+        let _ = self.sender.send(Job::Changed { rebuild: false });
+    }
+
     pub fn revision(&self) -> u64 {
         *self.next_revision.lock().unwrap_or_else(|e| e.into_inner())
     }

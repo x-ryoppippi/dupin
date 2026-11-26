@@ -76,6 +76,12 @@ pub struct Windows {
     pub scripts: AppHandle<crate::scripts::output::Output>,
 }
 
+type BoundAgainst = (
+    std::collections::BTreeMap<String, dupin_core::config::HotkeyTarget>,
+    Vec<String>,
+    bool,
+);
+
 pub struct Configuration {
     pub values: Rc<RefCell<Config>>,
     pub locked_keys: crate::settings::LockedKeys,
@@ -116,6 +122,9 @@ pub struct Ui {
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
     bindings_applied: bool,
+    /// The bindings, commands and whether the extensions had loaded when the shortcuts were
+    /// last applied, since a `target = "dupin"` binding registers once its command is there.
+    bound_against: Option<BoundAgainst>,
     pub icons: HashMap<dupin_core::Icon, Image>,
     /// The images extension rows name, made off the panel's thread.
     pub(crate) thumbnails: thumbnails::Thumbnails,
@@ -307,6 +316,7 @@ impl Ui {
             notices: Notices::default(),
             acknowledged_config: config.clone(),
             bindings_applied: false,
+            bound_against: None,
             session: registration.session,
             query,
             config_problem: None,

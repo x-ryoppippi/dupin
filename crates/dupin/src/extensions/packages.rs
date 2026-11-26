@@ -75,12 +75,16 @@ impl Packages {
             Origin::Bundled => self.bundled = Some(extensions),
             Origin::User => self.user = extensions,
         }
+        let fixture = super::fixtures::headless();
         for extension in self.bundled.iter().flatten() {
+            // A fixture's consent is every grant its package has, as `dupin ext test` replays it.
+            if fixture.is_some_and(|fixture| fixture.renders(extension)) {
+                continue;
+            }
             let on = !super::bundled::OFF_UNTIL_TURNED_ON.contains(&extension.id.as_str());
             self.bridge
                 .set_bundled(&extension.package, extension.revision.clone(), on);
         }
-        let fixture = super::fixtures::headless();
         for (kind, extension) in self.present() {
             let install = if kind == Kind::Bundled {
                 Bridge::install_bundled

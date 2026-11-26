@@ -1,7 +1,8 @@
 //! What Settings saves over a read-only config.toml, such as one Nix manages: encrypted storage,
 //! one record per top-level key, in `settings` for the keys every Mac shares and `settings-local`
 //! for the rest, as the [sync design](../../../../docs/design/sync.md#settings) assigns them.
-//! Nothing syncs yet; both stay on this Mac.
+//! While sync is on, `settings` is sealed under the vault key and syncs; `settings-local` never
+//! leaves the Mac.
 //!
 //! One `Overlay` per process owns both namespaces once it opens them. In the launcher that is the
 //! one [`shared`] returns; another process, such as `dupin ext install`, then finds them
@@ -36,10 +37,20 @@ pub struct Overlay {
 }
 
 struct Open {
-    shared: Store,
-    local: Store,
+    shared: Arc<Store>,
+    local: Arc<Store>,
     /// Every stored key, with whether it sits in `settings`, as this process last read or wrote it.
     stored: BTreeMap<String, (bool, toml::Value)>,
+}
+
+type Listener = Box<dyn Fn() + Send + Sync>;
+
+/// Told when sync brought another Mac's shared settings, so the configuration is read again.
+static LISTENER: OnceLock<Listener> = OnceLock::new();
+
+/// Calls `listener` whenever sync changed the stored shared settings.
+pub fn on_synced(listener: impl Fn() + Send + Sync + 'static) {
+    let _ = LISTENER.set(Box::new(listener));
 }
 
 /// The launcher's overlay over the data directory's storage; none in a headless run or a test,
@@ -112,6 +123,9 @@ impl Overlay {
                     blobs: Vec::new(),
                 },
             )?;
+            if shared {
+                crate::sync::wrote();
+            }
             open.stored.insert(key.clone(), (shared, value.clone()));
         }
         let removed: Vec<_> = open
@@ -129,17 +143,58 @@ impl Overlay {
         Ok(())
     }
 
+    /// Closes both namespaces and opens them again, under the key sync now calls for.
+    fn reopen(&self) {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if open.take().is_some()
+            && let Err(error) = self.opened(&mut open)
+        {
+            crate::log::warn(&format!("stored settings: {error}"));
+        }
+    }
+
+    /// Reads both namespaces again after sync changed the shared one, then says so.
+    fn resynced(&self) {
+        {
+            let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(opened) = open.as_mut() else {
+                return;
+            };
+            match read_both(&opened.shared, &opened.local) {
+                Ok(stored) => opened.stored = stored,
+                Err(error) => {
+                    crate::log::warn(&format!("stored settings: {error}"));
+                    return;
+                }
+            }
+        }
+        if let Some(listener) = LISTENER.get() {
+            listener();
+        }
+    }
+
     /// Both namespaces, opened and read on first use, and again after a failure, as a Keychain
     /// that was locked may have been unlocked since.
     fn opened<'a>(&self, open: &'a mut Option<Open>) -> Result<&'a mut Open, Error> {
         if open.is_none() {
-            let shared = self.storage.open(SHARED, LIMITS)?;
-            let local = self.storage.open(LOCAL, LIMITS)?;
-            let mut stored = BTreeMap::new();
-            for (namespace, in_shared) in [(&shared, true), (&local, false)] {
-                for (key, value) in entries(namespace)? {
-                    stored.insert(key, (in_shared, value));
-                }
+            let shared = crate::synced::open(&self.storage, SHARED, LIMITS)?;
+            let local = Arc::new(self.storage.open(LOCAL, LIMITS)?);
+            let stored = read_both(&shared, &local)?;
+            if !cfg!(test) && !rune::tooling::is_headless() {
+                crate::synced::register(
+                    SHARED,
+                    &shared,
+                    || {
+                        if let Some(overlay) = shared_overlay() {
+                            overlay.reopen();
+                        }
+                    },
+                    || {
+                        if let Some(overlay) = shared_overlay() {
+                            overlay.resynced();
+                        }
+                    },
+                );
             }
             *open = Some(Open {
                 shared,
@@ -149,6 +204,21 @@ impl Overlay {
         }
         Ok(open.as_mut().expect("opened above"))
     }
+}
+
+fn shared_overlay() -> Option<Arc<Overlay>> {
+    shared()
+}
+
+/// Every stored key, with whether it sits in `settings`.
+fn read_both(shared: &Store, local: &Store) -> Result<BTreeMap<String, (bool, toml::Value)>, Error> {
+    let mut stored = BTreeMap::new();
+    for (namespace, in_shared) in [(shared, true), (local, false)] {
+        for (key, value) in entries(namespace)? {
+            stored.insert(key, (in_shared, value));
+        }
+    }
+    Ok(stored)
 }
 
 fn entries(namespace: &Store) -> Result<Vec<(String, toml::Value)>, Error> {

@@ -13,6 +13,7 @@ use dupin_sync::Mode;
 pub const SYNCED: &[(&str, Mode)] = &[
     ("usage", Mode::PerDevice),
     (crate::snippets::NAMESPACE, Mode::Lww),
+    (crate::settings::overlay::SHARED, Mode::Lww),
 ];
 
 type Callback = Arc<dyn Fn() + Send + Sync>;
@@ -116,7 +117,12 @@ mod tests {
         assert_eq!(mode("usage"), Some(Mode::PerDevice));
         assert_eq!(mode("snippets"), Some(Mode::Lww));
         assert_eq!(mode("snapshots"), None, "the design keeps snapshots on each Mac");
-        assert_eq!(mode("settings-local"), None);
+        assert_eq!(mode("settings"), Some(Mode::Lww));
+        assert_eq!(
+            mode("settings-local"),
+            None,
+            "device-local settings never leave the Mac"
+        );
     }
 
     #[test]

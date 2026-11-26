@@ -3,6 +3,7 @@
 ## Getting started
 
 - [Using Dupin](./usage.md): keys, app search, file and content search
+- [Tutorial](./tutorial.md): first steps, from opening an app to your own shortcuts
 - [Configuration](./configuration.md): `config.toml`, the home-manager module, the hotkey and what happens when it's taken
 - [Keywords](./features/keywords.md)
 
@@ -62,4 +63,5 @@ Write, install and test extensions of your own.
 
 ## About
 
+- [Philosophy](./philosophy.md): keywords first, extensions as text, local first
 - [The name](./name.md): why Dupin, and the Mac launchers it descends from

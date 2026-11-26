@@ -210,6 +210,7 @@
               input_source = "ascii";
               file_limit = 100;
               aliases = { c = "calendar"; ff = "app:org.mozilla.firefox"; };
+              bindings."cmd+shift+v" = { target = "dupin"; command = "clipboard"; };
               advanced.kinds.file.actions = [
                 { title = "Open in Zed"; script = "open-in-zed"; }
               ];
@@ -221,6 +222,8 @@
             contains are locked in Settings and other edits are saved, encrypted, in
             Dupin's data directory. `aliases` maps shorthands to commands, apps, web searches and
             files; see <https://github.com/x-ryoppippi/dupin/blob/main/docs/features/keywords.md>.
+            `bindings` maps global shortcuts to Dupin's commands, apps, shell commands and
+            scripts; see <https://github.com/x-ryoppippi/dupin/blob/main/docs/features/hotkeys.md>.
             `advanced` recomposes the built-in sources, filters and kinds; see
             <https://github.com/x-ryoppippi/dupin/blob/main/docs/features/advanced.md>.
             See <https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md>.

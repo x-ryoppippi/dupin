@@ -386,7 +386,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
     .key("preview-appearance");
     let well = col()
         .w_full()
-        .h(156.0)
+        .h(176.0)
         .padding(10.0)
         .gap(6.0)
         .radius(k.radius.md)
@@ -407,11 +407,12 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                 )
                 .child(toggle),
         )
-        .child(el().w_full().grow(1.0).center().child(crate::view::theme_preview(
-            t,
-            s.preview_dark.unwrap_or(dark),
-            414.0,
-        )));
+        .child(
+            crate::view::theme_preview(t, s.preview_dark.unwrap_or(dark), 414.0)
+                .grow(1.0)
+                .radius(k.radius.sm)
+                .clip_rounded(k.radius.sm),
+        );
     let mut reset = value_button(k, "reset-theme", "Reset", &icons::REFRESH);
     if locked || *t == Theme::default() {
         reset = reset.disabled(true).layer_opacity(0.5);

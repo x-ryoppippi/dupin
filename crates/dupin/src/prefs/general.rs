@@ -393,15 +393,22 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                 .parse::<Shortcut>()
                 .map_or_else(|_| chord.clone(), |shortcut| shortcut.keycaps().join(""));
             let (kind, name) = match target {
-                HotkeyTarget::App { bundle_id, .. } => ("App", bundle_id),
-                HotkeyTarget::Command { command } => ("Command", command),
-                HotkeyTarget::Script { script, .. } => ("Script", script),
+                HotkeyTarget::App { bundle_id, .. } => ("App", bundle_id.clone()),
+                HotkeyTarget::Command { command } => ("Command", command.clone()),
+                HotkeyTarget::Script { script, .. } => ("Script", script.clone()),
+                HotkeyTarget::Dupin { command, query } => (
+                    "Dupin command",
+                    match query {
+                        Some(query) => format!("{command} · {query}"),
+                        None => command.clone(),
+                    },
+                ),
             };
             setting_with_lock(
                 k,
                 &icons::KEYBOARD,
                 kind,
-                Some(name),
+                Some(&name),
                 text(keys).font(k.ty.ui).color(k.c.text_base),
                 s.lock_note(s.locked("bindings")),
             )

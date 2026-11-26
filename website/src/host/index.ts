@@ -11,6 +11,7 @@ import Docs from '../pages/Docs.svelte';
 import NotFound from '../pages/NotFound.svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
 import { downloadMarkdown, homeMarkdown } from '../markdown.ts';
+import { imageRoute, imageTypes, linkedImages } from '../docs/links.ts';
 import {
 	docPaths,
 	docRoute,
@@ -227,18 +228,28 @@ async function docsRoutes(root: string): Promise<OxContentCustomHostRoute[]> {
 			},
 		};
 	});
-	const images = await readdir(path.join(docsDir(root), 'images'), { recursive: true });
-	const imageRoutes = images
-		.filter((file) => file.endsWith('.png'))
-		.map((file): OxContentCustomHostRoute => ({
-			path: `/docs/images/${file.split(path.sep).join('/')}`,
-			async render() {
-				return {
-					body: await readFile(path.join(docsDir(root), 'images', file)),
-					contentType: 'image/png',
-				};
-			},
-		}));
+	// Every image in docs/images, and any other image of the repository a published page links to.
+	const repoRoot = path.join(root, '..');
+	const docsImages = (await readdir(path.join(docsDir(root), 'images'), { recursive: true })).map(
+		(file) => `docs/images/${file.split(path.sep).join('/')}`,
+	);
+	const linked = docPaths.flatMap((page) =>
+		linkedImages(repoRoot, path.join(docsDir(root), page), sources.get(page) ?? ''),
+	);
+	const imageRoutes = [...new Set([...docsImages, ...linked])].flatMap(
+		(repoPath): OxContentCustomHostRoute[] => {
+			const contentType = imageTypes[path.extname(repoPath).toLowerCase()];
+			if (!contentType) return [];
+			return [
+				{
+					path: imageRoute(repoPath),
+					async render() {
+						return { body: await readFile(path.join(repoRoot, repoPath)), contentType };
+					},
+				},
+			];
+		},
+	);
 	return [...pagesRoutes, ...imageRoutes];
 }
 

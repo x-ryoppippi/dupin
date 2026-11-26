@@ -23,6 +23,15 @@ pub fn legacy_history_path() -> Option<PathBuf> {
     support_dir().map(|dir| dir.join(LEGACY_HISTORY))
 }
 
+/// The usage history a headless run starts with. It never opens storage, so a scenario's history
+/// fixture sits where `history.json` did, and is read and left in place.
+pub fn headless_history() -> dupin_core::History {
+    legacy_history_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| dupin_core::History::from_json(&text).ok())
+        .unwrap_or_default()
+}
+
 /// The usage history namespace's directory, whose presence means Dupin was used before.
 pub fn usage_dir() -> Option<PathBuf> {
     crate::extensions::access::storage_path().map(|dir| dir.join("usage"))

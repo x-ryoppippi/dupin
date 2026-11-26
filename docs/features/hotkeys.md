@@ -1,6 +1,6 @@
 # Hotkeys
 
-Use a global shortcut to launch an app, bring it to the front, or run a shell command. Set `hide_if_frontmost = true` to hide an app if it is already frontmost. A shell command runs silently in the background, so you can use it to open the panel with a preset query or run a CLI directly. See [hotkey configuration](#configuration).
+Use a global shortcut to open one of Dupin's commands, launch an app, bring it to the front, or run a shell command. A command shortcut shows the panel already in that command, such as ⇧⌘V for clipboard history, and pressing it again hides the panel. Set `hide_if_frontmost = true` to hide an app if it is already frontmost. A shell command runs silently in the background, so you can use it to run a CLI directly. See [hotkey configuration](#configuration).
 
 ## Configuration
 
@@ -10,7 +10,24 @@ hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 
 An empty `hotkey` disables the panel shortcut.
 
-Add a table to `config.toml` for each shortcut. An app binding uses the app's macOS bundle identifier.
+Add a table to `config.toml` for each shortcut. A Dupin binding opens one of Dupin's commands, named as an [alias](./keywords.md#aliases) names it: `files`, `contents`, `calendar`, `clipboard`, `dictionary`, `snippets`, `snapshots`, or an extension's package name.
+
+```toml
+[bindings."cmd+shift+v"]
+target = "dupin"
+command = "clipboard" # ⇧⌘V opens clipboard history
+
+[bindings."alt+cmd+d"]
+target = "dupin"
+command = "dictionary"
+query = "serendipity" # optional: typed into the command's search
+```
+
+The panel shows the command at once, from whatever it showed before, without starting a process. Pressing the shortcut again while the panel shows that command hides it, as the panel's own hotkey does. Settings → Keywords records these shortcuts too (see [Keywords › Settings](./keywords.md#settings)), and the command's row in `?` and as you type shows its shortcut beside its keywords.
+
+A command name is lowercase letters, digits and hyphens, and a query is at most 1024 bytes on one line; anything else makes `config.toml` invalid. A binding whose command isn't available, because its feature is off or no extension that is on has that package name, is skipped with a notice that names it, and the rest of the configuration applies. Turning the feature or the extension on makes the shortcut work without a restart.
+
+An app binding uses the app's macOS bundle identifier.
 
 ```toml
 [bindings."ctrl+alt+c"]
@@ -24,8 +41,10 @@ A command binding runs a shell command line.
 ```toml
 [bindings."alt+cmd+g"]
 target = "command"
-command = "dupin open --query 'gh '"
+command = "say 'Back to work'"
 ```
+
+To open the panel in one of Dupin's commands, use a Dupin binding instead: a shell command such as `dupin open --query 'clip '` starts a shell and the CLI on every press and takes one of the four command slots.
 
 Dupin runs commands in the background from your home directory using `$SHELL -lc` (with `/bin/zsh` as the fallback). Standard input is closed. Successful commands run silently. On failure, Dupin shows a notice with the error or exit status and up to four lines from the end of stderr. Up to four commands can run at a time.
 
@@ -40,7 +59,18 @@ script = "echo-message.sh"
 args = ["Hello from Dupin"]
 ```
 
-Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes and invalid script bindings in Settings and in the panel. If the script is missing, unavailable or its arguments are invalid, Dupin skips that binding and applies the rest of the configuration. Fixing the script or binding makes the shortcut available automatically.
+Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes, unavailable commands and invalid script bindings in Settings and in the panel.
+
+With Home Manager, declare bindings in `programs.dupin.settings.bindings`:
+
+```nix
+programs.dupin.settings.bindings."cmd+shift+v" = {
+  target = "dupin";
+  command = "clipboard";
+};
+```
+
+`bindings` is then set in a read-only `config.toml`, so Settings shows the recorders on Keywords locked, **Managed by Nix**. If the script is missing, unavailable or its arguments are invalid, Dupin skips that binding and applies the rest of the configuration. Fixing the script or binding makes the shortcut available automatically.
 
 ## Freeing the hotkey
 

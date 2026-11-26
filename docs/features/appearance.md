@@ -8,7 +8,7 @@ Open **Settings → Appearance** (<kbd>⌘,</kbd> in the panel), or set `[theme]
 
 ## What you see
 
-- A preview at the configured width, with **Light**, **Dark** and **System** to choose which appearance it shows.
+- A scaled-down preview of the panel, as glass over a still wallpaper tinted by the palette's accent (the backdrop shader doesn't run there), with **Light**, **Dark** and **System** to choose which appearance it shows.
 - Menus for **Palette**, **Font**, **Font size**, **Width**, **Rows** and **Corners**, and **Reset**.
 - **Backdrop**, the shader behind the panel, and the **Shaders folder** row.
 
@@ -100,7 +100,7 @@ The background remains a tint over Liquid Glass; headless rendering uses its opa
 <details>
 <summary>Editing in Settings and reloads</summary>
 
-Settings → Appearance shows light and dark previews at the configured width (scroll to see wide panels), with a menu for palette, font and geometry presets. Edit TOML for precise values.
+Settings → Appearance shows a scaled-down preview of the panel in light, dark or the system appearance, as glass over a still wallpaper tinted by the palette's accent (the backdrop shader doesn't run there), with controls for palette, font and geometry presets. Edit TOML for precise values.
 
 Changes use the usual settings save/conflict handling; the theme section is one setting for conflict detection. The menu is locked only when a read-only `config.toml` sets `[theme]`; otherwise edits are saved in Dupin's encrypted storage. Invalid reloads keep the last good configuration and show an error.
 
