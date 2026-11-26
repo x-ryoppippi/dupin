@@ -6,7 +6,7 @@ export const siteUrl = 'https://dupin.app';
 export const siteName = 'Dupin';
 export const tagline = 'type a keyword, reach anything';
 export const siteDescription =
-	"A light, always-ready Mac launcher: Alfred's successor, with extensions your agent can write.";
+	"A light, always-ready Mac launcher in Alfred's line, with extensions your agent can write.";
 
 export const channels = {
 	stable: {

@@ -3,7 +3,7 @@
     <h1>Dupin</h1>
     <p><a href="./docs/name.md">/dy.pɛ̃/</a></p>
     <p><strong>type a keyword, reach anything</strong></p>
-    <p>A light, always-ready Mac launcher: Alfred's successor, with extensions your agent can write.</p>
+    <p>A light, always-ready Mac launcher in Alfred's line, with extensions your agent can write.</p>
     <p>
         <a href="https://dupin.app">Website</a> ·
         <a href="https://dupin.app/docs/">Docs</a> ·
