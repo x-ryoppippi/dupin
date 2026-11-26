@@ -119,7 +119,7 @@ def main [
     let captured = $recorded | reduce --fold $captured {|clip, all|
         $all | upsert $clip.image ($clip | select macos wallpaper scale)
     }
-    {clips: $captured} | to json --indent 2 | save --force $GLASS
+    {clips: $captured} | to json --tabs 1 | $"($in)\n" | save --force $GLASS
     $recorded | select image bytes wallpaper scale
 }
 

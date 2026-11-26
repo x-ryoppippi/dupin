@@ -6,7 +6,7 @@
 	// The home page's recordings from scripts/docs-images/images.toml: a tab per feature over
 	// Liquid Glass, and the Apps tab again over each backdrop shader. Only the one shown is in the
 	// page, so the rest load when picked.
-	type Recording = { src: string; poster: string; width: number; height: number; label: string };
+	type Recording = { src: string; poster: string; label: string };
 
 	const tabs: { id: string; title: string; key?: string; recording: Recording }[] = [
 		{
@@ -15,8 +15,6 @@
 			recording: {
 				src: '/docs/images/home/apps-dark.mp4',
 				poster: '/docs/images/home/apps-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: 'Typing maps lists Maps first; ⌘K opens its actions.',
 			},
 		},
@@ -26,8 +24,6 @@
 			recording: {
 				src: '/docs/images/home/files-dark.mp4',
 				poster: '/docs/images/home/files-dark-poster.webp',
-				width: 680,
-				height: 450,
 				label: 'Recent items lists the Reports folder; Tab browses into it and the arrows move through its files.',
 			},
 		},
@@ -37,8 +33,6 @@
 			recording: {
 				src: '/docs/images/home/in-files-dark.mp4',
 				poster: '/docs/images/home/in-files-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: 'Typing in and Space switches to searching inside files with Spotlight.',
 			},
 		},
@@ -48,8 +42,6 @@
 			recording: {
 				src: '/docs/images/home/dictionary-dark.mp4',
 				poster: '/docs/images/home/dictionary-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: 'd and Space looks up serendipity in the dictionary.',
 			},
 		},
@@ -60,8 +52,6 @@
 			recording: {
 				src: '/docs/images/home/keywords-dark.mp4',
 				poster: '/docs/images/home/keywords-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: '? lists every command with its keyword.',
 			},
 		},
@@ -71,8 +61,6 @@
 			recording: {
 				src: '/docs/images/home/clipboard-dark.mp4',
 				poster: '/docs/images/home/clipboard-dark-poster.webp',
-				width: 680,
-				height: 578,
 				label: 'clip and Space lists the clipboard history, text and images, newest first.',
 			},
 		},
@@ -88,8 +76,6 @@
 			recording: {
 				src: '/docs/images/home/apps-flow-dark.mp4',
 				poster: '/docs/images/home/apps-flow-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: `${apps}, over the Flow backdrop.`,
 			},
 		},
@@ -100,8 +86,6 @@
 			recording: {
 				src: '/docs/images/home/apps-aurora-dark.mp4',
 				poster: '/docs/images/home/apps-aurora-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: `${apps}, over the Aurora backdrop.`,
 			},
 		},
@@ -112,8 +96,6 @@
 			recording: {
 				src: '/docs/images/home/apps-embers-dark.mp4',
 				poster: '/docs/images/home/apps-embers-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: `${apps}, over the Embers backdrop.`,
 			},
 		},
@@ -124,8 +106,6 @@
 			recording: {
 				src: '/docs/images/home/apps-snow-dark.mp4',
 				poster: '/docs/images/home/apps-snow-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: `${apps}, over the Snow backdrop.`,
 			},
 		},
@@ -136,8 +116,6 @@
 			recording: {
 				src: '/docs/images/home/apps-matrix-dark.mp4',
 				poster: '/docs/images/home/apps-matrix-dark-poster.webp',
-				width: 680,
-				height: 554,
 				label: `${apps}, over the Matrix backdrop.`,
 			},
 		},
@@ -222,8 +200,8 @@
 				class="stage-clip"
 				src={recording.src}
 				poster={recording.poster}
-				width={recording.width}
-				height={recording.height}
+				width={680}
+				height={578}
 				preload="auto"
 				label={recording.label}
 			/>
