@@ -10,16 +10,7 @@
 	type Still = { src: string; width: number; height: number };
 
 	// In the order the bento reads at every width; the grid areas below place each tile by its id.
-	// `beside` sets a wide, short still beside the text rather than under it.
-	const features: {
-		id: string;
-		title: string;
-		text: string;
-		href: string;
-		icon?: string;
-		still?: Still;
-		beside?: boolean;
-	}[] = [
+	const features: { id: string; title: string; text: string; href: string; icon?: string; still?: Still }[] = [
 		{
 			id: 'apps',
 			title: 'Apps and files',
@@ -75,7 +66,6 @@
 			text: 'Save a calculation, search or extension view to read again later, and let an AI agent read and drive Dupin over MCP.',
 			href: '/docs/features/snapshots/',
 			still: { src: '/docs/images/snapshots/list-dark.png', width: 1360, height: 362 },
-			beside: true,
 		},
 	];
 
@@ -204,8 +194,8 @@
 			<h2 id="features-title" class="section-title">What it does</h2>
 			<ul class="bento feature-grid">
 				{#each features as feature (feature.id)}
-					<li style:grid-area={feature.id}>
-						<a class={['tile', feature.beside && 'beside']} href={feature.href}>
+					<li class="feature-{feature.id}" style:grid-area={feature.id}>
+						<a class="tile" href={feature.href}>
 							<div class="tile-text">
 								{#if feature.icon}
 									<span class={['tile-icon', feature.icon]} aria-hidden="true"></span>
@@ -459,13 +449,19 @@
 			'doorway doorway keys extensions';
 	}
 
+	/*
+	 * Twelve columns so a row's spans can follow its stills' aspect ratios: Answers (2.7:1) takes seven
+	 * and Extensions (1.9:1) five, which brings both stills to about the same height. Equal halves
+	 * would leave Answers some 80px short, stretched by the row into a gap.
+	 */
 	.feature-grid {
+		grid-template-columns: repeat(12, minmax(0, 1fr));
 		grid-template-areas:
-			'apps apps keywords keywords'
-			'clipboard clipboard keywords keywords'
-			'clipboard clipboard commands commands'
-			'answers answers extensions extensions'
-			'account snapshots snapshots snapshots';
+			'apps apps apps apps apps apps keywords keywords keywords keywords keywords keywords'
+			'clipboard clipboard clipboard clipboard clipboard clipboard keywords keywords keywords keywords keywords keywords'
+			'clipboard clipboard clipboard clipboard clipboard clipboard commands commands commands commands commands commands'
+			'answers answers answers answers answers answers answers extensions extensions extensions extensions extensions'
+			'account account account snapshots snapshots snapshots snapshots snapshots snapshots snapshots snapshots snapshots';
 	}
 
 	.feature-grid li {
@@ -522,9 +518,7 @@
 		font-size: 0.92em;
 	}
 
-	/* On the tile's foot, so the space a tall tile leaves falls between text and screenshot. */
 	.still {
-		margin-top: auto;
 		mask-image: linear-gradient(to bottom, black 70%, transparent);
 	}
 
@@ -540,21 +534,23 @@
 		transform: translateY(-4px);
 	}
 
-	.tile.beside {
+	/* A tile wide enough sets its short still beside the text rather than under it. */
+	.feature-snapshots .tile {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
 		align-items: center;
 	}
 
-	.beside .still {
-		margin-top: 0;
+	.feature-snapshots .still {
 		mask-image: none;
 	}
 
+	/* The doorway tile spans two rows that the tiles beside it size, so its steps spread to fill them. */
 	.loop {
 		display: flex;
+		flex-grow: 1;
 		flex-direction: column;
-		margin: auto 0 0;
+		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
@@ -565,6 +561,10 @@
 		flex-direction: column;
 		gap: 2px;
 		padding: 0 0 20px 28px;
+	}
+
+	.loop li:not(:last-child) {
+		flex-grow: 1;
 	}
 
 	.loop li:last-child {
@@ -693,21 +693,31 @@
 				'keys extensions';
 		}
 
+		/* Two columns are too narrow to balance Answers against Extensions, so each takes a row. */
 		.feature-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 			grid-template-areas:
 				'apps keywords'
 				'clipboard keywords'
 				'clipboard commands'
-				'answers extensions'
+				'answers answers'
+				'extensions extensions'
 				'account snapshots';
 		}
 
-		.tile.beside {
+		.feature-answers .tile,
+		.feature-extensions .tile {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+			align-items: center;
+		}
+
+		.feature-snapshots .tile {
 			display: flex;
 		}
 
-		.beside .still {
-			margin-top: auto;
+		.feature-snapshots .still {
+			mask-image: linear-gradient(to bottom, black 70%, transparent);
 		}
 	}
 
@@ -732,7 +742,10 @@
 			grid-template-areas: 'apps' 'keywords' 'clipboard' 'commands' 'answers' 'extensions' 'account' 'snapshots';
 		}
 
-		.tile {
+		.tile,
+		.feature-answers .tile,
+		.feature-extensions .tile {
+			display: flex;
 			padding: 20px;
 		}
 
