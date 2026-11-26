@@ -64,5 +64,5 @@ Write, install and test extensions of your own.
 
 ## About
 
-- [Philosophy](./philosophy.md): keywords first, extensions as text, local first
+- [Philosophy](./philosophy.md): built for searching, fast by rule, extended with plain TypeScript
 - [The name](./name.md): why Dupin, and the Mac launchers it descends from

@@ -1,6 +1,6 @@
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use dupin_mac::{PathWatcher, watcher::canonical_root};
@@ -22,14 +22,17 @@ pub(crate) struct Watch {
 }
 
 impl Watch {
+    /// `scan` adds to its last argument the files within the trees its result was read from,
+    /// so an in-place write to one is seen even if FSEvents never reports it.
     pub(crate) fn start<T>(
         directory: PathBuf,
         depth: Depth,
-        mut scan: impl FnMut(&Path, Option<String>) -> Option<T> + Send + 'static,
+        mut scan: impl FnMut(&Path, Option<String>, &mut Vec<PathBuf>) -> Option<T> + Send + 'static,
         deliver: impl Fn(T) + Send + 'static,
     ) -> io::Result<Self> {
         let (events, received) = mpsc::channel();
         let worker_events = events.clone();
+        let files = Arc::new(Mutex::new(Vec::new()));
         thread::Builder::new()
             .name("dupin-catalog-watch".into())
             .spawn(move || {
@@ -41,7 +44,7 @@ impl Watch {
                     let mut watch_problem = None;
                     if root_moved || watched.as_ref() != Some(&requested) {
                         let events = worker_events.clone();
-                        match requested.watch(move |root_moved| {
+                        match requested.watch(files.clone(), move |root_moved| {
                             let _ = events.send(Event::Changed { root_moved });
                         }) {
                             Ok(next) => {
@@ -61,7 +64,10 @@ impl Watch {
                             }
                         }
                     }
-                    if let Some(result) = scan(&directory, watch_problem) {
+                    let mut read = Vec::new();
+                    let result = scan(&directory, watch_problem, &mut read);
+                    *files.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = read;
+                    if let Some(result) = result {
                         deliver(result);
                     }
 
@@ -101,12 +107,24 @@ impl Roots {
         }
     }
 
-    fn watch(&self, changed: impl Fn(bool) + Send + Sync + 'static) -> Result<PathWatcher, &'static str> {
+    fn watch(
+        &self,
+        files: Arc<Mutex<Vec<PathBuf>>>,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<PathWatcher, &'static str> {
         match self {
             Self::Entries(directory) => PathWatcher::start_entries(vec![directory.clone()], changed),
-            Self::Trees(roots) => {
-                PathWatcher::start_scoped(roots.shallow.clone(), roots.recursive.clone(), changed)
-            }
+            Self::Trees(roots) => PathWatcher::start_scoped(
+                roots.shallow.clone(),
+                roots.recursive.clone(),
+                move || {
+                    files
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone()
+                },
+                changed,
+            ),
         }
     }
 }

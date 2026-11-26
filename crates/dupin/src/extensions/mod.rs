@@ -493,6 +493,8 @@ struct Scanner {
     integrity: Option<Integrity>,
     /// Whether the folder holds the packages that ship with Dupin.
     bundled: bool,
+    /// The package folders the last scan read.
+    folders: Vec<PathBuf>,
 }
 
 impl Scanner {
@@ -514,8 +516,32 @@ impl Scanner {
         Some(catalog)
     }
 
+    /// The files the last scan read packages from: each folder's package.json, and the modules
+    /// and icon of each package it loaded or, of one it couldn't load, the modules its manifest
+    /// leads to.
+    fn files(&self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        for folder in &self.folders {
+            files.push(folder.join(manifest::PACKAGE_JSON));
+            match self.loaded.get(folder) {
+                Some(loaded) => {
+                    files.extend(loaded.files.iter().map(|file| file.path.clone()));
+                    files.extend(loaded.icon.as_ref().map(|icon| icon.stamp.path.clone()));
+                }
+                None => {
+                    let sources = manifest::Stamps::read(folder)
+                        .and_then(|stamps| manifest::read(&stamps))
+                        .and_then(|manifest| dupin_js_runtime::source_files(folder, &manifest.entry));
+                    files.extend(sources.into_iter().flatten().map(|(_, path)| path));
+                }
+            }
+        }
+        files
+    }
+
     fn scan(&mut self, directory: &Path) -> Catalog {
         let mut previous = std::mem::take(&mut self.loaded);
+        self.folders.clear();
         let mut catalog = Catalog::default();
         let entries = match std::fs::read_dir(directory) {
             Ok(entries) => entries,
@@ -540,6 +566,7 @@ impl Scanner {
             ));
             folders.truncate(MAX_EXTENSIONS);
         }
+        self.folders.clone_from(&folders);
         for folder in folders {
             if let Some(problem) = self.integrity.as_mut().and_then(|integrity| integrity(&folder)) {
                 catalog
@@ -894,7 +921,11 @@ fn watch_with(
     Watch::start(
         directory,
         crate::catalog_watch::Depth::Trees,
-        move |directory, problem| scanner.update(directory, problem),
+        move |directory, problem, files| {
+            let catalog = scanner.update(directory, problem);
+            files.extend(scanner.files());
+            catalog
+        },
         deliver,
     )
 }
@@ -1164,6 +1195,46 @@ pub(crate) mod tests {
         .unwrap();
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
+    }
+
+    #[test]
+    fn a_scan_names_the_files_of_packages_it_loaded_and_of_those_it_could_not() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let fixture = folder();
+        let directory = fixture.path().join("extensions");
+        install_javascript(
+            &directory,
+            "words",
+            "words",
+            "words",
+            &[
+                ("main.js", "export { search } from './lib/search.js';"),
+                ("lib/search.js", SEARCH),
+            ],
+        );
+        install_javascript(
+            &directory,
+            "broken",
+            "broken",
+            "broken",
+            &[("main.js", "export const = ;")],
+        );
+        let mut scanner = Scanner::default();
+        let catalog = scanner.scan(&directory);
+        assert_eq!(catalog.extensions.len(), 1, "{:?}", catalog.problems);
+
+        let canonical = directory.canonicalize().unwrap();
+        let mut files = scanner.files();
+        files.sort();
+        let mut expected = vec![
+            directory.join("broken").join(PACKAGE_JSON),
+            canonical.join("broken/main.js"),
+            directory.join("words").join(PACKAGE_JSON),
+            canonical.join("words/lib/search.js"),
+            canonical.join("words/main.js"),
+        ];
+        expected.sort();
+        assert_eq!(files, expected);
     }
 
     #[test]

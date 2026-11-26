@@ -13,7 +13,7 @@ fn watch_catalog(
     Watch::start(
         directory,
         Depth::Entries,
-        |directory, watch_problem| {
+        |directory, watch_problem, _| {
             let mut catalog = catalog::Catalog::scan(directory);
             if let Some(problem) = watch_problem {
                 catalog.notice = Some(match catalog.notice {

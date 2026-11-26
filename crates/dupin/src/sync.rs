@@ -596,9 +596,14 @@ impl Worker {
     /// still finds them.
     fn watch(&mut self, folder: &Path) {
         let jobs = self.jobs.clone();
-        match dupin_mac::watcher::PathWatcher::start_scoped(Vec::new(), vec![folder.to_owned()], move |_| {
-            let _ = jobs.send(Job::FolderChanged);
-        }) {
+        match dupin_mac::watcher::PathWatcher::start_scoped(
+            Vec::new(),
+            vec![folder.to_owned()],
+            Vec::new,
+            move |_| {
+                let _ = jobs.send(Job::FolderChanged);
+            },
+        ) {
             Ok(watcher) => self.watcher = Some(watcher),
             Err(error) => {
                 self.watcher = None;
