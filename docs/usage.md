@@ -1,6 +1,6 @@
 # Using Dupin
 
-Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Space by default; see [configuration](./configuration.md)) shows the panel; pressing it again, Esc, or clicking elsewhere hides it.
+Dupin runs in the background with no Dock icon or menu bar. Press its hotkey (⌘Space by default; see [Configuration](./configuration.md)) to show the panel, type, and press ↩. Press the hotkey again, Esc, or click elsewhere to hide it.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="images/usage/search-dark.png" />
@@ -32,38 +32,16 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 | ⌘Q                                      | Quit Dupin                                                                        |
 | ⌘,                                      | Open Settings                                                                     |
 
-Completed searches are remembered for the current Dupin process when you clear
-the input, hide the panel or activate a result. With an empty input, ↑ recalls the
-latest term in the current mode from the first row; further ↑ and ↓ walk through those terms and
-back to the empty input. Editing a recalled term restores normal result selection.
-This history holds up to 100 terms and is separate from app-ranking history.
+<details>
+<summary>How search recall works</summary>
+
+Completed searches are remembered for the current Dupin process when you clear the input, hide the panel or activate a result. With an empty input, ↑ recalls the latest term in the current mode from the first row; further ↑ and ↓ walk through those terms and back to the empty input. Editing a recalled term restores normal result selection. This history holds up to 100 terms and is separate from app-ranking history.
+
+</details>
 
 ## Features
 
-- [Keywords](./features/keywords.md)
-- [Apps](./features/apps.md)
-- [Recent items](./features/recent-items.md)
-- [Files](./features/files.md)
-- [Folder browsing](./features/folder-browsing.md)
-- [File actions](./features/file-actions.md)
-- [Send to](./features/send-to.md)
-- [Dictionary](./features/dictionary.md)
-- [Web searches](./features/web-searches.md)
-- [Maps](./features/maps.md)
-- [Calculator](./features/calculator.md)
-- [Calendar](./features/calendar.md)
-- [Clipboard history](./features/clipboard.md)
-- [Snippets](./features/snippets.md)
-- [Emoji & Symbols](./features/emoji.md)
-- [Script commands](./features/scripts.md)
-- [Hotkeys](./features/hotkeys.md)
-- [Search selected text](./features/selected-text.md)
-- [Window management](./features/window-management.md)
-- [System commands](./features/system-commands.md)
-- [Snapshots](./features/snapshots.md)
-- [Extensions](./features/extensions.md)
-- [Settings](./features/settings.md)
-- [Permissions](./features/permissions.md)
-- [Updates](./features/updates.md)
-- [Appearance](./features/appearance.md)
-- [MCP server](./features/mcp.md)
+- **Searching**: [Keywords](./features/keywords.md), [Apps](./features/apps.md), [Recent items](./features/recent-items.md), [Files](./features/files.md), [Folder browsing](./features/folder-browsing.md), [File actions](./features/file-actions.md), [Send to](./features/send-to.md), [Dictionary](./features/dictionary.md), [Web searches](./features/web-searches.md), [Maps](./features/maps.md), [Calculator](./features/calculator.md), [Calendar](./features/calendar.md), [Clipboard history](./features/clipboard.md), [Snippets](./features/snippets.md), [Emoji & Symbols](./features/emoji.md), [Snapshots](./features/snapshots.md)
+- **Commands**: [Script commands](./features/scripts.md), [Hotkeys](./features/hotkeys.md), [Search selected text](./features/selected-text.md), [Window management](./features/window-management.md), [System commands](./features/system-commands.md)
+- **The app**: [Settings](./features/settings.md), [Appearance](./features/appearance.md), [Permissions](./features/permissions.md), [Storage](./features/storage.md), [Sync](./features/sync.md), [Updates](./features/updates.md)
+- **Extending**: [Extensions](./features/extensions.md), [Advanced composition](./features/advanced.md), [MCP server](./features/mcp.md)
