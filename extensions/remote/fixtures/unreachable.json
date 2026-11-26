@@ -1,0 +1,182 @@
+{
+	"fixture": 1,
+	"description": "A host ssh can't reach, or that refuses the agent's keys, is fetched no further: only its processes command runs, the row says why and its cached rows stay marked.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host db1 old\n"
+		},
+		"storage": [
+			{
+				"kind": "host",
+				"host": "db1",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": false
+			},
+			{
+				"kind": "host",
+				"host": "old",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": false
+			},
+			{
+				"kind": "probe",
+				"host": "db1",
+				"probe": "ps",
+				"fetchedAt": 1795680000000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"pid": "812",
+						"user": "root",
+						"cpu": "0.0",
+						"mem": "0.0",
+						"elapsed": "41-03:11:58",
+						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+					}
+				]
+			}
+		],
+		"exec": [
+			{
+				"profile": "processes",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-o",
+					"BatchMode=yes",
+					"-o",
+					"ConnectTimeout=5",
+					"-o",
+					"ServerAliveInterval=5",
+					"-o",
+					"ServerAliveCountMax=2",
+					"-o",
+					"StrictHostKeyChecking=yes",
+					"-o",
+					"UpdateHostKeys=no",
+					"-o",
+					"ClearAllForwardings=yes",
+					"-o",
+					"PermitLocalCommand=no",
+					"-o",
+					"RemoteCommand=none",
+					"-o",
+					"ControlMaster=no",
+					"-o",
+					"LogLevel=ERROR",
+					"db1",
+					"--",
+					"ps",
+					"-A",
+					"-o",
+					"pid=",
+					"-o",
+					"user=",
+					"-o",
+					"pcpu=",
+					"-o",
+					"pmem=",
+					"-o",
+					"etime=",
+					"-o",
+					"args="
+				],
+				"status": 255,
+				"stdout": "",
+				"stderr": "ssh: connect to host 10.0.0.12 port 22: Operation timed out\r\n"
+			},
+			{
+				"profile": "processes",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-o",
+					"BatchMode=yes",
+					"-o",
+					"ConnectTimeout=5",
+					"-o",
+					"ServerAliveInterval=5",
+					"-o",
+					"ServerAliveCountMax=2",
+					"-o",
+					"StrictHostKeyChecking=yes",
+					"-o",
+					"UpdateHostKeys=no",
+					"-o",
+					"ClearAllForwardings=yes",
+					"-o",
+					"PermitLocalCommand=no",
+					"-o",
+					"RemoteCommand=none",
+					"-o",
+					"ControlMaster=no",
+					"-o",
+					"LogLevel=ERROR",
+					"old",
+					"--",
+					"ps",
+					"-A",
+					"-o",
+					"pid=",
+					"-o",
+					"user=",
+					"-o",
+					"pcpu=",
+					"-o",
+					"pmem=",
+					"-o",
+					"etime=",
+					"-o",
+					"args="
+				],
+				"status": 255,
+				"stdout": "",
+				"stderr": "deploy@old: Permission denied (publickey).\r\n"
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "db1"
+		},
+		{
+			"activate": "Refresh db1"
+		},
+		{
+			"query": "db1"
+		},
+		{
+			"query": "old"
+		},
+		{
+			"activate": "Refresh old"
+		},
+		{
+			"query": "old"
+		}
+	]
+}

@@ -1,0 +1,54 @@
+{
+	"fixture": 1,
+	"description": "Open SSH Session opens ssh://host in the terminal app Remote Settings name, through /usr/bin/open, and hides the panel.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host web1\n"
+		},
+		"storage": [
+			{
+				"kind": "settings",
+				"terminal": "iTerm",
+				"hosts": []
+			},
+			{
+				"kind": "host",
+				"host": "web1",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": false
+			}
+		],
+		"exec": [
+			{
+				"profile": "terminal",
+				"args": ["-a", "iTerm", "ssh://web1"],
+				"status": 0,
+				"stdout": "",
+				"stderr": ""
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "web1"
+		},
+		{
+			"activate": "Open SSH Session"
+		}
+	]
+}

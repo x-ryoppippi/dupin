@@ -1,0 +1,52 @@
+{
+	"fixture": 1,
+	"description": "Configure a host in a form: units must be unit names and logs and folders absolute paths with no character a remote shell would read, so nothing typed there can become a command; a valid form saves the host's settings.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host web1\n"
+		}
+	},
+	"steps": [
+		{
+			"query": "web1"
+		},
+		{
+			"activate": "Configure web1\u2026"
+		},
+		{
+			"fill": {
+				"enabled": true,
+				"units": "nginx.service\nnginx; rm -rf ~",
+				"logs": "var/log/syslog",
+				"dirs": "/srv/$(id)",
+				"lines": "1000"
+			}
+		},
+		{
+			"submit": true
+		},
+		{
+			"fill": {
+				"units": "nginx.service\npostgresql@16-main.service",
+				"logs": "/var/log/syslog",
+				"dirs": "/srv/app",
+				"lines": "100",
+				"allowTerminate": true
+			}
+		},
+		{
+			"submit": true
+		}
+	]
+}

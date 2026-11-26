@@ -1,0 +1,216 @@
+{
+	"fixture": 1,
+	"description": "Terminate is offered only on a host whose settings allow it, asks first, sends TERM to that one PID over ssh and fetches the processes again.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host web1 web2\n"
+		},
+		"storage": [
+			{
+				"kind": "host",
+				"host": "web1",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": true
+			},
+			{
+				"kind": "host",
+				"host": "web2",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": false
+			},
+			{
+				"kind": "probe",
+				"host": "web1",
+				"probe": "ps",
+				"fetchedAt": 1795683558000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"pid": "812",
+						"user": "root",
+						"cpu": "0.0",
+						"mem": "0.0",
+						"elapsed": "41-03:11:58",
+						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+					},
+					{
+						"pid": "813",
+						"user": "www-data",
+						"cpu": "0.3",
+						"mem": "0.4",
+						"elapsed": "41-03:11:58",
+						"command": "nginx: worker process"
+					},
+					{
+						"pid": "2417",
+						"user": "deploy",
+						"cpu": "4.2",
+						"mem": "6.1",
+						"elapsed": "03:12:45",
+						"command": "/usr/bin/node /srv/app/server.js --port 3000"
+					}
+				]
+			},
+			{
+				"kind": "probe",
+				"host": "web2",
+				"probe": "ps",
+				"fetchedAt": 1795683558000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"pid": "812",
+						"user": "root",
+						"cpu": "0.0",
+						"mem": "0.0",
+						"elapsed": "41-03:11:58",
+						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+					},
+					{
+						"pid": "813",
+						"user": "www-data",
+						"cpu": "0.3",
+						"mem": "0.4",
+						"elapsed": "41-03:11:58",
+						"command": "nginx: worker process"
+					},
+					{
+						"pid": "2417",
+						"user": "deploy",
+						"cpu": "4.2",
+						"mem": "6.1",
+						"elapsed": "03:12:45",
+						"command": "/usr/bin/node /srv/app/server.js --port 3000"
+					}
+				]
+			}
+		],
+		"exec": [
+			{
+				"profile": "terminate",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-o",
+					"BatchMode=yes",
+					"-o",
+					"ConnectTimeout=5",
+					"-o",
+					"ServerAliveInterval=5",
+					"-o",
+					"ServerAliveCountMax=2",
+					"-o",
+					"StrictHostKeyChecking=yes",
+					"-o",
+					"UpdateHostKeys=no",
+					"-o",
+					"ClearAllForwardings=yes",
+					"-o",
+					"PermitLocalCommand=no",
+					"-o",
+					"RemoteCommand=none",
+					"-o",
+					"ControlMaster=no",
+					"-o",
+					"LogLevel=ERROR",
+					"web1",
+					"--",
+					"kill",
+					"-s",
+					"TERM",
+					"2417"
+				],
+				"status": 0,
+				"stdout": "",
+				"stderr": ""
+			},
+			{
+				"profile": "processes",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-o",
+					"BatchMode=yes",
+					"-o",
+					"ConnectTimeout=5",
+					"-o",
+					"ServerAliveInterval=5",
+					"-o",
+					"ServerAliveCountMax=2",
+					"-o",
+					"StrictHostKeyChecking=yes",
+					"-o",
+					"UpdateHostKeys=no",
+					"-o",
+					"ClearAllForwardings=yes",
+					"-o",
+					"PermitLocalCommand=no",
+					"-o",
+					"RemoteCommand=none",
+					"-o",
+					"ControlMaster=no",
+					"-o",
+					"LogLevel=ERROR",
+					"web1",
+					"--",
+					"ps",
+					"-A",
+					"-o",
+					"pid=",
+					"-o",
+					"user=",
+					"-o",
+					"pcpu=",
+					"-o",
+					"pmem=",
+					"-o",
+					"etime=",
+					"-o",
+					"args="
+				],
+				"status": 0,
+				"stdout": "    1 root      0.0  0.1 41-03:12:09 /sbin/init\n  812 root      0.0  0.0 41-03:11:58 nginx: master process /usr/sbin/nginx -g daemon on; master_process on;\n  813 www-data  0.3  0.4 41-03:11:58 nginx: worker process\n 3301 postgres  1.1  3.2 10-02:01:33 postgres: 16/main: checkpointer\n",
+				"stderr": ""
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "web2 ps node"
+		},
+		{
+			"query": "web1 ps node"
+		},
+		{
+			"activate": "Terminate"
+		},
+		{
+			"query": "web1 ps node"
+		}
+	]
+}

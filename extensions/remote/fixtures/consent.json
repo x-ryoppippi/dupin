@@ -1,0 +1,47 @@
+{
+	"fixture": 1,
+	"description": "Until the SSH config and the ssh profiles are allowed, Remote still lists what it has and says what to allow; Dupin asks for each scope.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"storage": [
+			{
+				"kind": "host",
+				"host": "web1",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": false
+			}
+		],
+		"consent": {
+			"files:ssh-config": "pending",
+			"exec:processes": "pending"
+		}
+	},
+	"steps": [
+		{
+			"query": ""
+		},
+		{
+			"query": "web1"
+		},
+		{
+			"activate": "Refresh web1"
+		},
+		{
+			"query": "web1"
+		}
+	]
+}

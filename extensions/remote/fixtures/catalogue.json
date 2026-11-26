@@ -1,0 +1,184 @@
+{
+	"fixture": 1,
+	"description": "remote lists the enabled hosts with how they answered last, then the other hosts in ~/.ssh/config and its Include folder, literal names only; typing a host and a sub-scope such as ps keeps that host's processes, from what Remote fetched before, without running anything.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "# Fixture SSH configuration\nInclude ~/.ssh/config.d/*\n\nHost web1\n  HostName web1.example.com\n  User deploy\n\nHost db1 \"staging\"\n  HostName 10.0.0.12\n\nHost *.internal !bastion\n  ProxyJump bastion\n\nHost -oProxyCommand=touch\n\nMatch host foo\n  User bar\n",
+			"ssh-include": {
+				"work": "Host build1\n  User ci\n",
+				".hidden": "Host secret\n"
+			}
+		},
+		"storage": [
+			{
+				"kind": "settings",
+				"terminal": "Terminal",
+				"hosts": ["deploy@build.example.com"]
+			},
+			{
+				"kind": "host",
+				"host": "web1",
+				"enabled": true,
+				"units": ["nginx.service"],
+				"logs": ["/var/log/app.log"],
+				"dirs": ["/srv/app"],
+				"lines": 50,
+				"allowTerminate": false
+			},
+			{
+				"kind": "host",
+				"host": "db1",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": false
+			},
+			{
+				"kind": "probe",
+				"host": "web1",
+				"probe": "ps",
+				"fetchedAt": 1795683558000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"pid": "812",
+						"user": "root",
+						"cpu": "0.0",
+						"mem": "0.0",
+						"elapsed": "41-03:11:58",
+						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+					},
+					{
+						"pid": "813",
+						"user": "www-data",
+						"cpu": "0.3",
+						"mem": "0.4",
+						"elapsed": "41-03:11:58",
+						"command": "nginx: worker process"
+					},
+					{
+						"pid": "2417",
+						"user": "deploy",
+						"cpu": "4.2",
+						"mem": "6.1",
+						"elapsed": "03:12:45",
+						"command": "/usr/bin/node /srv/app/server.js --port 3000"
+					}
+				]
+			},
+			{
+				"kind": "probe",
+				"host": "web1",
+				"probe": "ports",
+				"fetchedAt": 1795683558000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"proto": "tcp",
+						"state": "LISTEN",
+						"local": "0.0.0.0:80",
+						"peer": "0.0.0.0:*",
+						"process": "users:((\"nginx\",pid=812,fd=6))"
+					},
+					{
+						"proto": "tcp",
+						"state": "LISTEN",
+						"local": "*:3000",
+						"peer": "*:*",
+						"process": "users:((\"node\",pid=2417,fd=21))"
+					}
+				]
+			},
+			{
+				"kind": "probe",
+				"host": "web1",
+				"probe": "unit:nginx.service",
+				"fetchedAt": 1795683558000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"line": "2026-11-26T08:59:12+0000 web1 systemd[1]: Reloading nginx.service - A high performance web server..."
+					}
+				]
+			},
+			{
+				"kind": "probe",
+				"host": "web1",
+				"probe": "log:/var/log/app.log",
+				"fetchedAt": 1795683558000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"line": "[2026-11-26 09:00:01] WARN slow query: 812 ms"
+					}
+				]
+			},
+			{
+				"kind": "probe",
+				"host": "web1",
+				"probe": "dir:/srv/app",
+				"fetchedAt": 1795683558000,
+				"state": "ok",
+				"truncated": false,
+				"rows": [
+					{
+						"path": "/srv/app/server.js"
+					},
+					{
+						"path": "/srv/app/config/production.json"
+					}
+				]
+			},
+			{
+				"kind": "probe",
+				"host": "db1",
+				"probe": "ps",
+				"fetchedAt": 1795683000000,
+				"state": "unreachable",
+				"truncated": false,
+				"rows": [],
+				"message": "ssh: connect to host 10.0.0.12 port 22: Operation timed out"
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": ""
+		},
+		{
+			"query": "web1 ps nginx"
+		},
+		{
+			"select": 1
+		},
+		{
+			"activate": "Show Details"
+		},
+		{
+			"back": true
+		},
+		{
+			"query": "db1"
+		},
+		{
+			"query": "web1 files"
+		}
+	]
+}

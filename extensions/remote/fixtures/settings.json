@@ -1,0 +1,48 @@
+{
+	"fixture": 1,
+	"description": "Remote Settings choose the terminal app and add hosts beside ~/.ssh/config; a host that could read as an ssh option is refused.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host web1\n"
+		}
+	},
+	"steps": [
+		{
+			"query": "settings"
+		},
+		{
+			"activate": "Remote Settings\u2026"
+		},
+		{
+			"fill": {
+				"terminal": "iTerm",
+				"hosts": "deploy@build.example.com\n-oProxyCommand=touch"
+			}
+		},
+		{
+			"submit": true
+		},
+		{
+			"fill": {
+				"hosts": "deploy@build.example.com"
+			}
+		},
+		{
+			"submit": true
+		},
+		{
+			"query": "build"
+		}
+	]
+}

@@ -1,0 +1,126 @@
+{
+	"fixture": 1,
+	"description": "Enable on a host from the SSH config turns it on and fetches it at once.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host build1\n"
+		},
+		"exec": [
+			{
+				"profile": "processes",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-o",
+					"BatchMode=yes",
+					"-o",
+					"ConnectTimeout=5",
+					"-o",
+					"ServerAliveInterval=5",
+					"-o",
+					"ServerAliveCountMax=2",
+					"-o",
+					"StrictHostKeyChecking=yes",
+					"-o",
+					"UpdateHostKeys=no",
+					"-o",
+					"ClearAllForwardings=yes",
+					"-o",
+					"PermitLocalCommand=no",
+					"-o",
+					"RemoteCommand=none",
+					"-o",
+					"ControlMaster=no",
+					"-o",
+					"LogLevel=ERROR",
+					"build1",
+					"--",
+					"ps",
+					"-A",
+					"-o",
+					"pid=",
+					"-o",
+					"user=",
+					"-o",
+					"pcpu=",
+					"-o",
+					"pmem=",
+					"-o",
+					"etime=",
+					"-o",
+					"args="
+				],
+				"status": 0,
+				"stdout": "    1 root      0.0  0.1 41-03:12:09 /sbin/init\n  812 root      0.0  0.0 41-03:11:58 nginx: master process /usr/sbin/nginx -g daemon on; master_process on;\n  813 www-data  0.3  0.4 41-03:11:58 nginx: worker process\n 2417 deploy    4.2  6.1    03:12:45 /usr/bin/node /srv/app/server.js --port 3000\n 3301 postgres  1.1  3.2 10-02:01:33 postgres: 16/main: checkpointer\n",
+				"stderr": ""
+			},
+			{
+				"profile": "ports",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-o",
+					"BatchMode=yes",
+					"-o",
+					"ConnectTimeout=5",
+					"-o",
+					"ServerAliveInterval=5",
+					"-o",
+					"ServerAliveCountMax=2",
+					"-o",
+					"StrictHostKeyChecking=yes",
+					"-o",
+					"UpdateHostKeys=no",
+					"-o",
+					"ClearAllForwardings=yes",
+					"-o",
+					"PermitLocalCommand=no",
+					"-o",
+					"RemoteCommand=none",
+					"-o",
+					"ControlMaster=no",
+					"-o",
+					"LogLevel=ERROR",
+					"build1",
+					"--",
+					"ss",
+					"-H",
+					"-l",
+					"-n",
+					"-t",
+					"-u",
+					"-p"
+				],
+				"status": 0,
+				"stdout": "tcp   LISTEN 0      511          0.0.0.0:80         0.0.0.0:*    users:((\"nginx\",pid=812,fd=6))\ntcp   LISTEN 0      4096       127.0.0.1:5432       0.0.0.0:*    users:((\"postgres\",pid=3300,fd=5))\ntcp   LISTEN 0      511                *:3000             *:*    users:((\"node\",pid=2417,fd=21))\nudp   UNCONN 0      0      127.0.0.53%lo:53         0.0.0.0:*\n",
+				"stderr": ""
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "build1"
+		},
+		{
+			"activate": "Enable build1"
+		},
+		{
+			"query": "build1"
+		}
+	]
+}
