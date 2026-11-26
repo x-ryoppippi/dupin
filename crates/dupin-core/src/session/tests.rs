@@ -2872,6 +2872,32 @@ fn an_actions_effects_land_only_on_the_view_it_was_chosen_on() {
 }
 
 #[test]
+fn an_action_enters_another_command_only_from_the_view_it_was_chosen_on() {
+    let (mut s, _) = pushable_session("stats");
+    let root = s.anchor();
+    let Navigated::Done(_) = s.open_page(&root, page("first")) else {
+        panic!()
+    };
+    let on_page = s.anchor();
+    assert_eq!(
+        s.enter_command_from(&root, &contents_command(), "3000"),
+        Navigated::Stale,
+        "an action that ends after the user moved on enters nothing"
+    );
+    let Navigated::Done(effects) = s.enter_command_from(&on_page, &contents_command(), "3000") else {
+        panic!()
+    };
+    assert_eq!(effects[0], Effect::ReplaceQuery("3000".into()));
+    assert_eq!(s.command_id(), &contents_command());
+    assert_eq!((s.page(), s.depth(), s.query()), (None, 0, "3000"));
+    assert_eq!(
+        s.enter_command_from(&on_page, &dictionary_command(), "x"),
+        Navigated::Stale,
+        "entering moved the panel on"
+    );
+}
+
+#[test]
 fn effects_open_no_more_views_than_the_session_keeps() {
     let (mut s, _) = pushable_session("stats");
     for depth in 1..=MAX_PAGE_DEPTH {

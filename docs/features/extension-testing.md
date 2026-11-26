@@ -68,7 +68,7 @@ The workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and
 <details>
 <summary><code>dupin.d.ts</code></summary>
 
-`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 4 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, accessories and answers, item actions, `views` with their lists, details and forms, `actions` with their effects on pages, `events`, the `filters` and kind actions a package [provides to `[advanced]`](./advanced.md#extensions), the capabilities and `DupinError`.
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 5 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, accessories and answers, item actions, `views` with their lists, details and forms, `actions` with their effects on pages, `events`, the `filters` and kind actions a package [provides to `[advanced]`](./advanced.md#extensions), the capabilities and `DupinError`.
 
 </details>
 
@@ -265,7 +265,7 @@ Each step does one thing and may `expect` what it produced; only the keys `expec
 
 Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, `windows`, each frame it moved the focused window to, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it.
 
-`expect` names any of `rows`, `selected`, `effect`, `toasts`, `panel` (`"hide"` or `"paste"` when an action hides the panel), `clipboard`, `windows`, `storage`, `invalidated`, `error` and `view`. Only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`.
+`expect` names any of `rows`, `selected`, `effect`, `toasts`, `panel` (`"hide"` or `"paste"` when an action hides the panel, `{ "enter": { "command", "query" } }` when it enters another command), `clipboard`, `windows`, `storage`, `invalidated`, `error` and `view`. Only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`.
 
 </details>
 

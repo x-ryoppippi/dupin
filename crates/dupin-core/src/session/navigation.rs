@@ -100,6 +100,16 @@ impl Session {
         Navigated::Done(self.visit(anchor.origin.clone(), SearchLocation::Page(page)))
     }
 
+    /// Leaves `anchor`'s view for `command`'s search with `query` typed, as typing its keyword
+    /// and the query would.
+    pub fn enter_command_from(&mut self, anchor: &Anchor, command: &CommandId, query: &str) -> Navigated {
+        if !self.is_current(anchor) {
+            return Navigated::Stale;
+        }
+        self.enter_command(command, query)
+            .map_or(Navigated::NoPage, Navigated::Done)
+    }
+
     /// Closes `anchor`'s view, as Esc does.
     pub fn close_page(&mut self, anchor: &Anchor) -> Navigated {
         if !self.is_current(anchor) {

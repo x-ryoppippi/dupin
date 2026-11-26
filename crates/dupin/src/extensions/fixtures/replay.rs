@@ -610,6 +610,12 @@ impl Replayer<'_> {
             Some(ActionEffect::Paste) => {
                 outcome.insert("panel".into(), "paste".into());
             }
+            Some(ActionEffect::Enter { command, query }) => {
+                outcome.insert(
+                    "panel".into(),
+                    json!({ "enter": { "command": command, "query": query } }),
+                );
+            }
             Some(ActionEffect::Push {
                 view, title, state, ..
             }) => {

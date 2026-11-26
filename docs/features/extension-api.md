@@ -55,20 +55,20 @@ Enter runs the first action: **Open URL** when the item has a `url`, then **Copy
 <details>
 <summary>Every item field</summary>
 
-| Item field    | Limit                            | Meaning                                                                                                                                |
-| ------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `title`       | One line, 512 bytes              | Required.                                                                                                                              |
-| `subtitle`    | 2,048 bytes                      |                                                                                                                                        |
-| `id`          | 128 bytes                        | Unique among the items. Optional for `search`, where Dupin numbers items without one; required for `items`.                            |
-| `url`         | 2,048 bytes                      | An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](./extension-permissions.md#calendar): **Open URL** opens it. |
-| `text`        | 16 KiB                           | **Copy** copies it.                                                                                                                    |
-| `icon`        |                                  | An image in the package or `sf:` and an SF Symbol's name, such as `sf:star.fill`.                                                      |
-| `image`       |                                  | A stored image, by its handle, in place of `icon`; see [Images](#images).                                                              |
-| `section`     | One line, 128 bytes              | The heading the item is listed under.                                                                                                  |
-| `detail`      |                                  | `{ image, markdown, metadata }`, shown while the row is selected; see [Details](#details).                                             |
-| `actions`     | Eight in all                     | More actions, after the ones `url` and `text` add; see [Actions](#actions).                                                            |
-| `accessories` | Three, each one line of 64 bytes | `{ text }`, shown as it is, or `{ tag }`, shown as a label, at the row's end.                                                          |
-| `answer`      | One or two lines, 512 bytes      | From `search` or a [view](#views-and-forms) only: shown beside the `title` as two values, as a calculation is.                         |
+| Item field    | Limit                       | Meaning                                                                                                                                |
+| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`       | One line, 512 bytes         | Required.                                                                                                                              |
+| `subtitle`    | 2,048 bytes                 |                                                                                                                                        |
+| `id`          | 128 bytes                   | Unique among the items. Optional for `search`, where Dupin numbers items without one; required for `items`.                            |
+| `url`         | 2,048 bytes                 | An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](./extension-permissions.md#calendar): **Open URL** opens it. |
+| `text`        | 16 KiB                      | **Copy** copies it.                                                                                                                    |
+| `icon`        |                             | An image in the package or `sf:` and an SF Symbol's name, such as `sf:star.fill`.                                                      |
+| `image`       |                             | A stored image, by its handle, in place of `icon`; see [Images](#images).                                                              |
+| `section`     | One line, 128 bytes         | The heading the item is listed under.                                                                                                  |
+| `detail`      |                             | `{ image, markdown, metadata }`, shown while the row is selected; see [Details](#details).                                             |
+| `actions`     | Eight in all                | More actions, after the ones `url` and `text` add; see [Actions](#actions).                                                            |
+| `accessories` | Three                       | At the row's end; see [Accessories](#accessories).                                                                                     |
+| `answer`      | One or two lines, 512 bytes | From `search` or a [view](#views-and-forms) only: shown beside the `title` as two values, as a calculation is.                         |
 
 </details>
 
@@ -79,6 +79,39 @@ Enter runs the first action: **Open URL** when the item has a `url`, then **Copy
 - Items of a list's `sections` get their section's title as `section`.
 - An item without any action shows but does nothing; a [`push`](#views-and-forms) action opens a view of the package's own.
 - Every value is checked. An unknown field, a value of the wrong type, an empty `text` or a URL with another scheme fails the whole answer with a row that says which item and field.
+
+</details>
+
+### Accessories
+
+Up to three accessories sit at a row's end, each an object with one key:
+
+| Accessory       | Shows                                                                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ text }`      | The text as it is: one line of up to 64 bytes.                                                                                            |
+| `{ tag }`       | The text as a label in the accent colour: one line of up to 64 bytes.                                                                     |
+| `{ freshness }` | How long ago the row's data was read, from milliseconds since the epoch as `Date.now()` gives them: `12 s ago`, `5 min ago`, `2 h ago`.   |
+| `{ state }`     | `"offline"`, shown as a red **Offline** label, for a source that can't be reached, or `"stale"`, an orange **Stale** label, for old data. |
+
+<details>
+<summary>Freshness and state</summary>
+
+Dupin writes a freshness each time it draws the row, by its own clock, so a row from a catalogue Dupin holds says how old it is now rather than when `items` answered; a time ahead of the clock reads as `0 s ago`. `dupin ext render` and `dupin ext test` use the fixture's clock. The words and colours are Dupin's, the same for every package in light and dark, so a package says what state a row is in rather than how to draw it.
+
+```js
+export async function items() {
+	const read = Date.now();
+	const { ok, services } = await poll();
+	return {
+		ttl: 10,
+		items: services.map((service) => ({
+			id: service.name,
+			title: service.name,
+			accessories: [{ freshness: read }, ...(ok ? [] : [{ state: 'offline' }])],
+		})),
+	};
+}
+```
 
 </details>
 
@@ -623,7 +656,7 @@ export const actions = {
 
 ### Effects on pages
 
-An action, or a form's submit, may return `push`, `pop`, `refresh`, `replaceState` or `fieldErrors` instead of a toast, to change the page it was chosen on.
+An action, or a form's submit, may return `push`, `pop`, `refresh`, `replaceState` or `fieldErrors` instead of a toast, to change the page it was chosen on, or `enter` to hand what was chosen to another command.
 
 <details>
 <summary>Effects and edge cases</summary>
@@ -635,8 +668,19 @@ An action, or a form's submit, may return `push`, `pop`, `refresh`, `replaceStat
 | `{ type: "refresh", toast }`                  | Asks the page's view again, or searches again under the keyword.                                                                                 |
 | `{ type: "replaceState", state, toast }`      | Gives the page `state` and asks its view again.                                                                                                  |
 | `{ type: "fieldErrors", errors }`             | From a form's submit only: shows each message (one line, 256 bytes) under the field whose `id` keys it, for up to 16 fields, and keeps the form. |
+| `{ type: "enter", command, query }`           | Leaves the page for the command `command` names, with `query` (optional, one line of up to 1 KiB) typed after its keyword.                       |
 
 `toast` is optional, one line of up to 512 bytes shown once Dupin has done the rest, and `state` is at most 16 KiB of JSON nested 16 levels deep.
+
+`enter` names a command as an [alias](./keywords.md#aliases) or a shortcut does: a built-in's name, such as `calendar` or `dictionary`, or an extension's package name, such as `port`, so it reaches the command whatever keyword you gave it. It enters the command as typing its keyword and the query does, so the command searches the query as if you had typed it and you see it in the field; one package hands another nothing else. A command that isn't on fails as a notice that names it.
+
+```js
+export const actions = {
+	ports({ pid }) {
+		return { type: 'enter', command: 'port', query: String(pid) };
+	},
+};
+```
 
 Each effect lands only while the page the action was chosen on is still the one on screen, so an action that ends after you moved on, or a second action of the same page after the first moved it, changes nothing; a toast still shows. An effect of any other shape, a ninth page, or `fieldErrors` anywhere but a submit, fails as a notice and changes nothing.
 
@@ -716,7 +760,7 @@ The engine has modules, `async`/`await`, regular expressions, `Date` and `JSON`,
 
 | `dupin` export                                                                                                 | What it is                                                                           |
 | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `apiVersion`                                                                                                   | `4`                                                                                  |
+| `apiVersion`                                                                                                   | `5`                                                                                  |
 | `DupinError`                                                                                                   | What a failed request rejects with; see [Errors](./extension-permissions.md#errors). |
 | `items`                                                                                                        | Its `invalidate()` is called from an action or event handler.                        |
 | `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows` | One object per capability, whose functions return promises.                          |

@@ -628,6 +628,15 @@ impl Ui {
             Some(ActionEffect::Pop { .. }) => self.session.close_page(anchor),
             Some(ActionEffect::Refresh { .. }) => self.session.refresh_page(anchor),
             Some(ActionEffect::ReplaceState { state, .. }) => self.session.replace_page_state(anchor, state),
+            Some(ActionEffect::Enter { command, query }) => {
+                match crate::features::aliases::command(&command, &self.session.command_ids()) {
+                    Ok(id) => self.session.enter_command_from(anchor, &id, &query),
+                    Err(problem) => {
+                        self.show_notice(format!("{name} failed: its `enter` {problem}"), tx);
+                        Navigated::Done(Vec::new())
+                    }
+                }
+            }
             Some(ActionEffect::FieldErrors { errors }) => match self.show_field_errors(anchor, errors, tx) {
                 Navigated::NoPage => {
                     self.show_notice(

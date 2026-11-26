@@ -238,3 +238,64 @@ fn render_opens_views_and_fills_forms_as_the_fixture_does() {
     assert!(list_png != form_png);
     assert!(render("4", 1).1 == form_png, "two renders of one form differ");
 }
+
+/// A row's freshness is written by the fixture's clock and its state as a label, both by the
+/// production panel, and an action that enters another command says so to `test`.
+#[test]
+fn render_writes_freshness_and_state_and_test_records_an_entered_command() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let root = tempfile::tempdir().unwrap();
+    let package = root.path().join("status");
+    std::fs::create_dir_all(package.join("fixtures")).unwrap();
+    std::fs::write(
+        package.join("package.json"),
+        r#"{ "name": "status", "version": "0.1.0", "type": "module",
+             "dupin": { "title": "Status", "keyword": "st" } }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        package.join("main.js"),
+        r#"export const search = () => [
+               { title: 'api', accessories: [{ freshness: Date.now() - 12000 }, { state: 'offline' }],
+                 actions: [{ title: 'Show Port', run: 'port', data: 3000 }] },
+               { title: 'cache', accessories: [{ freshness: Date.now() - 300000 }, { state: 'stale' }] },
+           ];
+           export const actions = { port: (port) => ({ type: 'enter', command: 'port', query: String(port) }) };"#,
+    )
+    .unwrap();
+    let fixture = package.join("fixtures/status.json");
+    std::fs::write(
+        &fixture,
+        r#"{ "fixture": 1, "steps": [
+               { "query": "x", "expect": { "selected": 0 } },
+               { "activate": "Show Port", "expect": { "panel": { "enter": { "command": "port", "query": "3000" } } } }
+           ] }"#,
+    )
+    .unwrap();
+
+    let tested = dupin(&[
+        "ext".as_ref(),
+        "test".as_ref(),
+        package.as_os_str(),
+        "--json".as_ref(),
+    ]);
+    assert!(tested.status.success(), "{tested:?}");
+    assert_eq!(json(&tested)["passed"], true);
+
+    let png = root.path().join("status.png");
+    let output = dupin(&[
+        "ext".as_ref(),
+        "render".as_ref(),
+        package.as_os_str(),
+        fixture.as_os_str(),
+        png.as_os_str(),
+        "--step".as_ref(),
+        "1".as_ref(),
+        "--json".as_ref(),
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let shown: Vec<String> = serde_json::from_value(json(&output)["shown"].clone()).unwrap();
+    for text in ["12 s ago", "Offline", "5 min ago", "Stale"] {
+        assert!(shown.iter().any(|shown| shown == text), "{text} in {shown:?}");
+    }
+}

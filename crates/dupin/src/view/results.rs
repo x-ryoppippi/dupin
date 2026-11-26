@@ -1,6 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use dupin_core::{Accessory, Item, View};
+use dupin_core::{Accessory, Item, RowState, View};
 use rune::tok::type_;
 use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Span, TextStyle, col, el, rich, row, text};
 
@@ -450,9 +450,8 @@ pub(super) fn text_row(
         accessories,
     } = labels;
     let ink = if on { t.selected_text } else { t.text_secondary };
-    let accessories = accessories.iter().map(|accessory| match accessory {
-        Accessory::Text(text) => rune::text(text).font(t.font(type_::LABEL)).color(ink).truncate(),
-        Accessory::Tag(tag) => row()
+    let label = |text: &str, colour: Color| {
+        row()
             .h(22.0)
             .px(8.0)
             .radius(6.0)
@@ -460,14 +459,32 @@ pub(super) fn text_row(
             .fill(if on {
                 t.selected_text.alpha(0.2)
             } else {
-                accent.alpha(0.16)
+                colour.alpha(0.16)
             })
             .child(
-                rune::text(tag)
+                rune::text(text)
                     .font(t.font(type_::LABEL))
-                    .color(if on { t.selected_text } else { accent })
+                    .color(if on { t.selected_text } else { colour })
                     .truncate(),
-            ),
+            )
+    };
+    let accessories = accessories.iter().map(|accessory| match accessory {
+        Accessory::Text(text) => rune::text(text).font(t.font(type_::LABEL)).color(ink).truncate(),
+        Accessory::Freshness(time) => {
+            let now = crate::extensions::Clock::launcher().now_ms();
+            rune::text(dupin_core::ago_ms(now, *time))
+                .font(t.font(type_::LABEL))
+                .color(ink)
+                .truncate()
+        }
+        Accessory::Tag(tag) => label(tag, accent),
+        Accessory::State(state) => label(
+            state.label(),
+            match state {
+                RowState::Offline => t.destructive,
+                RowState::Stale => t.warning,
+            },
+        ),
     });
     row().w_full().h(height).px(LIST_PAD).child(
         row()

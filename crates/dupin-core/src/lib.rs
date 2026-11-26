@@ -31,7 +31,7 @@ pub use history::History;
 pub(crate) use item::ActionDisposition;
 pub use item::{
     Accessory, Action, AppCommand, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction,
-    Page, Payload, ShareTarget, SystemCommand, View,
+    Page, Payload, RowState, ShareTarget, SystemCommand, View, ago_ms,
 };
 pub use provider::{Batch, Cancellation, Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};

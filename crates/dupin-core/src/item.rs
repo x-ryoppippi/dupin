@@ -240,6 +240,39 @@ pub enum Accessory {
     Text(String),
     /// Drawn as a label.
     Tag(String),
+    /// When the row's data was read, in Unix milliseconds, written as how long ago that was
+    /// each time the row is drawn.
+    Freshness(u64),
+    /// Drawn as a label in the state's own colour.
+    State(RowState),
+}
+
+/// What a row says of a source Dupin couldn't read as it is now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowState {
+    Offline,
+    Stale,
+}
+
+impl RowState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Offline => "Offline",
+            Self::Stale => "Stale",
+        }
+    }
+}
+
+/// How long before `now` the Unix millisecond `then` was, to the second within a minute, as
+/// a freshness accessory says it.
+pub fn ago_ms(now: u64, then: u64) -> String {
+    let seconds = now.saturating_sub(then) / 1000;
+    match seconds {
+        0..60 => format!("{seconds} s ago"),
+        60..3600 => format!("{} min ago", seconds / 60),
+        3600..86_400 => format!("{} h ago", seconds / 3600),
+        _ => format!("{} d ago", seconds / 86_400),
+    }
 }
 
 /// What a row's icon shows.
@@ -420,6 +453,27 @@ pub fn tilde(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn freshness_is_written_to_the_second_within_a_minute() {
+        let at = 1_700_000_000_000;
+        for (later, written) in [
+            (0, "0 s ago"),
+            (999, "0 s ago"),
+            (12_345, "12 s ago"),
+            (59_999, "59 s ago"),
+            (60_000, "1 min ago"),
+            (7_200_000, "2 h ago"),
+            (3 * 86_400_000, "3 d ago"),
+        ] {
+            assert_eq!(ago_ms(at + later, at), written, "{later}");
+        }
+        assert_eq!(
+            ago_ms(at, at + 5_000),
+            "0 s ago",
+            "a time ahead of the clock reads as now"
+        );
+    }
 
     #[test]
     fn symbol_names_are_ascii_words_joined_by_dots() {

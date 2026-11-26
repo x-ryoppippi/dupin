@@ -13,7 +13,7 @@ use crate::row::{
     MAX_ID_BYTES, MAX_IMAGE_HANDLE_BYTES, MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES,
     MAX_MARKDOWN_BYTES, MAX_MATCH_TEXT_BYTES, MAX_METADATA, MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES,
     MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES, MAX_TEXT_BYTES, MAX_TIME_MS, MAX_TITLE_BYTES,
-    MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail, RowEffect, RowImage, Source,
+    MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail, RowEffect, RowImage, RowState, Source,
 };
 use crate::view::{
     self, Field, FieldKind, Form, MAX_EMPTY_TEXT_BYTES, MAX_FIELD_ID_BYTES, MAX_FIELD_TITLE_BYTES,
@@ -33,6 +33,9 @@ fn join(field: &str, key: &str) -> String {
 }
 
 const MAX_TOAST_BYTES: usize = 512;
+/// What an `enter` effect types into the command it enters.
+pub const MAX_ENTER_QUERY_BYTES: usize = 1024;
+const MAX_COMMAND_NAME_BYTES: usize = 64;
 
 /// What an action asks Dupin to do once it has run. The effects that move between pages or
 /// change one may carry a `toast` too, which Dupin shows once it has done so.
@@ -75,6 +78,13 @@ pub enum ActionEffect {
     FieldErrors {
         errors: std::collections::BTreeMap<String, String>,
     },
+    /// Enter the command `command` names, as an alias or a binding names one, with `query`
+    /// typed, as though the user had typed its keyword and the query.
+    Enter {
+        command: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        query: String,
+    },
 }
 
 impl ActionEffect {
@@ -86,7 +96,10 @@ impl ActionEffect {
             | ActionEffect::Pop { toast }
             | ActionEffect::Refresh { toast }
             | ActionEffect::ReplaceState { toast, .. } => toast.as_deref(),
-            ActionEffect::Hide | ActionEffect::Paste | ActionEffect::FieldErrors { .. } => None,
+            ActionEffect::Hide
+            | ActionEffect::Paste
+            | ActionEffect::FieldErrors { .. }
+            | ActionEffect::Enter { .. } => None,
         }
     }
 
@@ -112,6 +125,14 @@ impl ActionEffect {
                 }
             }
             ActionEffect::ReplaceState { state, .. } => row::check_state(state)?,
+            ActionEffect::Enter { command, query } => {
+                check_command_name(command)?;
+                if query.len() > MAX_ENTER_QUERY_BYTES || printable(query).is_err() {
+                    return Err(format!(
+                        "an entered command's `query` must be one line of up to {MAX_ENTER_QUERY_BYTES} bytes"
+                    ));
+                }
+            }
             ActionEffect::FieldErrors { errors } => {
                 if errors.is_empty() || errors.len() > crate::view::MAX_FIELDS {
                     return Err(format!(
@@ -143,7 +164,24 @@ impl ActionEffect {
     }
 }
 
-const EFFECT_HINT: &str = "Return nothing, or one of `{ type: \"toast\", text }`, `{ type: \"hide\" }`, `{ type: \"paste\" }`, `{ type: \"push\", view, title?, state? }`, `{ type: \"pop\" }`, `{ type: \"refresh\" }`, `{ type: \"replaceState\", state }` and `{ type: \"fieldErrors\", errors }`; the ones that move or change a page take a `toast` too.";
+const EFFECT_HINT: &str = "Return nothing, or one of `{ type: \"toast\", text }`, `{ type: \"hide\" }`, `{ type: \"paste\" }`, `{ type: \"push\", view, title?, state? }`, `{ type: \"pop\" }`, `{ type: \"refresh\" }`, `{ type: \"replaceState\", state }`, `{ type: \"fieldErrors\", errors }` and `{ type: \"enter\", command, query? }`; the ones that move or change a page take a `toast` too.";
+
+/// A command's name as an alias or a binding gives it: a built-in's, such as `calendar`, or an
+/// extension's package name.
+fn check_command_name(name: &str) -> Result<(), String> {
+    let valid = !name.is_empty()
+        && name.len() <= MAX_COMMAND_NAME_BYTES
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "`command` must name a command or an extension: 1–{MAX_COMMAND_NAME_BYTES} lowercase letters, digits or hyphens"
+        ))
+    }
+}
 
 /// Reads an action's answer: nothing, or one effect.
 pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffect>, Failure> {
@@ -173,10 +211,11 @@ pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffe
         Some("pop" | "refresh") => &["type", "toast"],
         Some("replaceState") => &["type", "state", "toast"],
         Some("fieldErrors") => &["type", "errors"],
+        Some("enter") => &["type", "command", "query"],
         _ => {
             return Err(invalid(
                 "type",
-                "must be \"toast\", \"hide\", \"paste\", \"push\", \"pop\", \"refresh\", \"replaceState\" or \"fieldErrors\"",
+                "must be \"toast\", \"hide\", \"paste\", \"push\", \"pop\", \"refresh\", \"replaceState\", \"fieldErrors\" or \"enter\"",
             ));
         }
     };
@@ -244,6 +283,25 @@ pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffe
             state: state(true)?.expect("required"),
             toast: line("toast", MAX_TOAST_BYTES)?,
         },
+        "enter" => {
+            let command =
+                line("command", MAX_COMMAND_NAME_BYTES)?.ok_or_else(|| invalid("command", "is required"))?;
+            check_command_name(&command)
+                .map_err(|message| invalid("command", &message.replace("`command` ", "")))?;
+            let query: Value = object.get("query")?;
+            let query = match query.as_string() {
+                _ if query.is_undefined() => String::new(),
+                Some(query) => query.to_string()?,
+                None => return Err(invalid("query", "must be a string")),
+            };
+            if query.len() > MAX_ENTER_QUERY_BYTES || printable(&query).is_err() {
+                return Err(invalid(
+                    "query",
+                    &format!("must be one line of up to {MAX_ENTER_QUERY_BYTES} bytes"),
+                ));
+            }
+            ActionEffect::Enter { command, query }
+        }
         _ => {
             let errors: Value = object.get("errors")?;
             let Some(errors) = plain_object(&errors) else {
@@ -293,7 +351,7 @@ const ITEM_FIELDS: [&str; 12] = [
 ];
 const ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `image`, `section`, `detail`, `actions`, `accessories` and `answer`.";
 const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `aliases`, `keywords`, `matchText`, `time`, `file`, `text`, `url`, `icon`, `image`, `section`, `detail`, `actions`, `accessories` and `webSearch`.";
-const ACCESSORY_HINT: &str = "Give up to three `{ text: \"2 KB\" }` or `{ tag: \"New\" }`.";
+const ACCESSORY_HINT: &str = "Give up to three `{ text: \"2 KB\" }`, `{ tag: \"New\" }`, `{ freshness: Date.now() }` or `{ state: \"offline\" }`.";
 const IMAGE_HINT: &str = "Give a stored blob's `handle`, or a copied file's `{ path, handle }` as the clipboard watch delivered it.";
 const WEB_SEARCH_HINT: &str = "Give `webSearch` an `alias` such as `\"g\"`, a `url` such as `\"https://www.google.com/search?q={query}\"`, a `title` such as `\"Search Google for {query}\"` and optionally a `fallback` position.";
 /// Fields only an `items()` catalogue's items take.
@@ -828,7 +886,7 @@ impl<'a> Reader<'a> {
         let aliases = self.words(&item, &field("aliases"), "aliases")?;
         let keywords = self.words(&item, &field("keywords"), "keywords")?;
         let match_text = self.string(&item, &field("matchText"), "matchText", MAX_MATCH_TEXT_BYTES)?;
-        let time = self.time(&item, &field("time"))?;
+        let time = self.time(&item, &field("time"), "time")?;
         let file = self.string(&item, &field("file"), "file", MAX_FILE_BYTES)?;
         if let Some(file) = &file {
             row::check_file(file).map_err(|message| {
@@ -923,7 +981,11 @@ impl<'a> Reader<'a> {
             let shape = |reader: &Self| {
                 Failure::from(
                     reader
-                        .invalid("invalid-field", &at, "must be `{ text }` or `{ tag }`")
+                        .invalid(
+                            "invalid-field",
+                            &at,
+                            "must be `{ text }`, `{ tag }`, `{ freshness }` or `{ state }`",
+                        )
                         .hint(ACCESSORY_HINT),
                 )
             };
@@ -934,17 +996,44 @@ impl<'a> Reader<'a> {
             let [key] = keys.as_slice() else {
                 return Err(shape(self));
             };
-            if key != "text" && key != "tag" {
-                return Err(shape(self));
-            }
-            let Some(text) = self.line(&object, &format!("{at}.{key}"), key, MAX_ACCESSORY_BYTES)? else {
-                return Err(shape(self));
+            let field = format!("{at}.{key}");
+            let accessory = match key.as_str() {
+                "text" | "tag" => {
+                    let Some(text) = self.line(&object, &field, key, MAX_ACCESSORY_BYTES)? else {
+                        return Err(shape(self));
+                    };
+                    if key == "tag" {
+                        Accessory::Tag(text)
+                    } else {
+                        Accessory::Text(text)
+                    }
+                }
+                "freshness" => match self.time(&object, &field, key)? {
+                    Some(time) => Accessory::Freshness(time),
+                    None => return Err(shape(self)),
+                },
+                "state" => {
+                    let name: Value = object.get(key.as_str())?;
+                    let state = name
+                        .as_string()
+                        .map(|name| name.to_string())
+                        .transpose()?
+                        .and_then(|name| RowState::named(&name));
+                    let Some(state) = state else {
+                        return Err(self
+                            .invalid(
+                                "invalid-field",
+                                &field,
+                                format!("must be \"offline\" or \"stale\", not {}", describe(&name)),
+                            )
+                            .hint(ACCESSORY_HINT)
+                            .into());
+                    };
+                    Accessory::State(state)
+                }
+                _ => return Err(shape(self)),
             };
-            accessories.push(if key == "tag" {
-                Accessory::Tag(text)
-            } else {
-                Accessory::Text(text)
-            });
+            accessories.push(accessory);
         }
         Ok(accessories)
     }
@@ -1072,8 +1161,8 @@ impl<'a> Reader<'a> {
     }
 
     /// Milliseconds since the epoch, as `Date.now()` gives them.
-    fn time(&self, item: &Object<'_>, field: &str) -> Result<Option<u64>, Failure> {
-        let value: Value = item.get("time")?;
+    fn time(&self, object: &Object<'_>, field: &str, key: &str) -> Result<Option<u64>, Failure> {
+        let value: Value = object.get(key)?;
         if value.is_undefined() || value.is_null() {
             return Ok(None);
         }

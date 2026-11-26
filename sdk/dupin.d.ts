@@ -1,4 +1,4 @@
-// Types for Dupin extensions, apiVersion 4. Dupin never reads this file; it is for editors and
+// Types for Dupin extensions, apiVersion 5. Dupin never reads this file; it is for editors and
 // `tsc --noEmit`. `dupin ext new` copies it into each package.
 //
 // Dupin runs a TypeScript `dupin.main` as written by erasing its types, without type-checking.
@@ -9,7 +9,7 @@
 
 declare module 'dupin' {
 	/** The guest API this file describes. The host's `dupin` module exports the same value. */
-	export const apiVersion: 4;
+	export const apiVersion: 5;
 
 	type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -49,7 +49,10 @@ declare module 'dupin' {
 		detail?: DetailPane;
 		/** Up to eight, counting the ones `url` and `text` add. */
 		actions?: Action[];
-		/** Up to three, shown at the row's end: `{ text }` as it is, `{ tag }` as a label. */
+		/**
+		 * Up to three, shown at the row's end: `{ text }` as it is, `{ tag }` as a label,
+		 * `{ freshness }` as how long ago it was and `{ state }` as a label in the state's colour.
+		 */
 		accessories?: Accessory[];
 		/**
 		 * From `search` or a view: the row shows its title and this, one or two lines of up to
@@ -58,8 +61,17 @@ declare module 'dupin' {
 		answer?: string;
 	}
 
-	/** One line of up to 64 bytes. */
-	export type Accessory = { text: string } | { tag: string };
+	/**
+	 * `text` and `tag` are one line of up to 64 bytes. `freshness` is when the row's data was
+	 * read, in milliseconds since the epoch as `Date.now()` gives them, which Dupin writes as
+	 * `12 s ago`, `5 min ago` and so on each time it draws the row. `state` says the row's
+	 * source can't be reached (`Offline`) or what it shows is out of date (`Stale`).
+	 */
+	export type Accessory =
+		| { text: string }
+		| { tag: string }
+		| { freshness: number }
+		| { state: 'offline' | 'stale' };
 
 	/** Runs `actions[run](data, ctx)` when the user chooses it. */
 	export interface ItemAction {
@@ -346,7 +358,9 @@ declare module 'dupin' {
 	 * front (which needs Accessibility; without it, Dupin says how to allow it); open a view on
 	 * a page above the one the action was chosen on, titled `title` or the extension's title;
 	 * close that page; ask its view (or the search) again; give it new state, which asks its view
-	 * again; or, from a form's submit, show what is wrong with its fields. The ones that move or
+	 * again; from a form's submit, show what is wrong with its fields; or enter another command,
+	 * named as an alias names it (a built-in's name, such as `calendar`, or an extension's
+	 * package name), with `query` typed after its keyword. The ones that move or
 	 * change a page take a `toast` too, which Dupin shows once it has. An effect lands only while
 	 * the page it was chosen on is still the one on screen. Toasts are one line of up to 512
 	 * bytes, state at most 16 KiB of JSON and each field error one line of up to 256 bytes.
@@ -359,7 +373,8 @@ declare module 'dupin' {
 		| { type: 'pop'; toast?: string }
 		| { type: 'refresh'; toast?: string }
 		| { type: 'replaceState'; state: Json; toast?: string }
-		| { type: 'fieldErrors'; errors: Record<string, string> };
+		| { type: 'fieldErrors'; errors: Record<string, string> }
+		| { type: 'enter'; command: string; query?: string };
 
 	/**
 	 * What an action receives beside its data. On one of the package's pages, `query` and

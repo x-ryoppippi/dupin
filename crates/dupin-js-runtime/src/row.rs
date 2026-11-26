@@ -94,18 +94,43 @@ pub struct Row {
     pub answer: Option<String>,
 }
 
-/// One line at a row's end: plain text, or a tag Dupin draws as a label.
+/// One line at a row's end: plain text, a tag Dupin draws as a label, when the row's data was
+/// read, which Dupin writes as how long ago, or the state of what the row stands for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Accessory {
     Text(String),
     Tag(String),
+    /// Milliseconds since the epoch.
+    Freshness(u64),
+    State(RowState),
+}
+
+/// What Dupin says of a row whose source it couldn't read as it is now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RowState {
+    /// Its source can't be reached.
+    Offline,
+    /// It is older than its source says it should be.
+    Stale,
+}
+
+impl RowState {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "offline" => Some(Self::Offline),
+            "stale" => Some(Self::Stale),
+            _ => None,
+        }
+    }
 }
 
 impl Accessory {
     fn text(&self) -> &str {
         match self {
             Accessory::Text(text) | Accessory::Tag(text) => text,
+            Accessory::Freshness(_) | Accessory::State(_) => "",
         }
     }
 }
@@ -375,7 +400,15 @@ impl Row {
             return Err("too many `accessories`".into());
         }
         for accessory in &self.accessories {
-            line("accessories", accessory.text(), MAX_ACCESSORY_BYTES)?;
+            match accessory {
+                Accessory::Text(text) | Accessory::Tag(text) => {
+                    line("accessories", text, MAX_ACCESSORY_BYTES)?;
+                }
+                Accessory::Freshness(time) if *time > MAX_TIME_MS => {
+                    return Err("an accessory's `freshness` is out of range".into());
+                }
+                Accessory::Freshness(_) | Accessory::State(_) => {}
+            }
         }
         if let Some(answer) = &self.answer {
             if source == Source::Items {
