@@ -39,10 +39,12 @@ impl PathWatcher {
     }
 
     /// Watches shallow directory entries and recursive trees in one stream. The callback
-    /// receives `true` when a watched root changes identity.
+    /// receives `true` when a watched root changes identity. `files` names the files within the
+    /// trees whose in-place writes count, which reconciling checks when FSEvents is silent.
     pub fn start_scoped(
         shallow: Vec<PathBuf>,
         recursive: Vec<PathBuf>,
+        files: impl Fn() -> Vec<PathBuf> + Send + 'static,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
         let roots = shallow
@@ -50,7 +52,7 @@ impl PathWatcher {
             .map(|path| (path, Scope::Directory))
             .chain(recursive.into_iter().map(|path| (path, Scope::Tree)))
             .collect();
-        Self::start_with_scope(roots, |_| Vec::new(), changed)
+        Self::start_with_scope(roots, move |_| files(), changed)
     }
 
     /// Watches direct entries, including in-place edits to their files.
