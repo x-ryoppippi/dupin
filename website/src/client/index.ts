@@ -1,4 +1,5 @@
 import '../styles/site.css';
+import '../styles/docs.css';
 import { hydrate, mount } from 'svelte';
 import DocsSearch from '../components/DocsSearch.svelte';
 import { pages, type PageName } from '../pages/index.ts';

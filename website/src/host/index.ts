@@ -36,7 +36,7 @@ type PageContext = Pick<OxContentCustomHostRenderContext, 'mode' | 'assets'>;
 function assetHead(context: PageContext): string {
 	return context.mode === 'serve'
 		? context.assets.document({
-				sharedStyles: ['/src/styles/site.css'],
+				sharedStyles: ['/src/styles/site.css', '/src/styles/docs.css'],
 				clientEntries: ['/src/client/index.ts'],
 				selfHostedAssets: context.assets.selfHosted,
 			}).headHtml
