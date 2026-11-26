@@ -19,6 +19,20 @@ for Automation access once you confirm a command. If you deny access, review
 Dupin under **System Settings → Privacy & Security → Automation**. Failures appear
 in the launcher.
 
+## Dupin's own commands
+
+Search for **Restart Dupin** to relaunch Dupin, as **Relaunch** in Dupin Settings under
+**General** does: a downloaded update is installed first, and running scripts are
+cancelled. It shows a circular arrow.
+
+Search for **Update Dupin** to restart into a downloaded update. When none is
+downloaded, Dupin checks for one now and says what it found in the launcher: that it is
+up to date, that an update is downloading or ready, that this copy can't replace itself
+and where to download the update, or why the check failed. It shows a downward arrow in
+a circle. Neither command needs System Command Automation. **Update Dupin** appears
+only in release builds that update themselves, and not when `DUPIN_DISABLE_UPDATES=1`
+is set or in Nix and cargo builds. See [Updates](updates.md).
+
 ## Configuration
 
 ```toml

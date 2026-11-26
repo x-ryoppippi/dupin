@@ -38,6 +38,8 @@ pub enum Action {
     /// Zip beside the original under a name that is not taken.
     Compress(PathBuf),
     System(SystemCommand),
+    /// Something only Dupin itself can do to itself.
+    App(AppCommand),
     /// Show in the file manager, selected.
     Reveal(PathBuf),
     /// Open a URL with its registered handler.
@@ -118,6 +120,15 @@ pub enum ExtensionRequest {
 pub enum Transfer {
     Move,
     Copy,
+}
+
+/// What the main search offers to do with Dupin itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppCommand {
+    /// Settings' Relaunch, which installs a staged update first.
+    Relaunch,
+    /// Restart into a downloaded update, or check for one and say what came of it.
+    Update,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
