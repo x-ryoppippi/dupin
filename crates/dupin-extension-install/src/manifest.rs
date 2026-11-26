@@ -1,6 +1,6 @@
 //! A minimal reader for the `dupin` key of package.json: what an installer needs before the
 //! launcher's own loader sees the package. `capabilities` is checked by the capability broker,
-//! so the scopes recorded in extensions.lock are the ones it grants.
+//! so the scopes recorded in the installed extensions list are the ones it grants.
 
 use std::io::Read;
 use std::path::Path;
@@ -158,7 +158,7 @@ fn scopes(capabilities: &Value) -> Result<Vec<String>, Error> {
     Ok(scopes)
 }
 
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name

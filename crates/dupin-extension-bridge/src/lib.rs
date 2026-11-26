@@ -4,12 +4,13 @@
 //! installed package, at its revision and generation and under the trigger the app saw, may
 //! perform it, runs the service and checks the permit again before releasing the result.
 //!
-//! The bridge owns the one grant store: the read-only declarative base, which Home Manager and
-//! the installer write, and the user's local grants, which it saves after every decision. Both
-//! are files other processes change too, such as `dupin ext remove` or a Home Manager switch,
-//! so the bridge reads either again whenever it changed before deciding or saving. It
-//! never prompts. A request that needs consent fails with `needs-consent` and is kept as a
-//! [`ConsentRequest`] for the panel and Settings to show; granting it runs nothing again.
+//! The bridge owns the one grant store: the read-only declarative base, a file Home Manager
+//! writes, which it reads again whenever it changed before deciding, and the user's local
+//! grants, a [`LocalStore`] it alone writes while it runs, saving after every decision. Another
+//! process that must forget a package's grants asks the app to. Until the local grants are read
+//! nothing is granted. It never prompts. A request that needs consent fails with
+//! `needs-consent` and is kept as a [`ConsentRequest`] for the panel and Settings to show;
+//! granting it runs nothing again.
 
 mod call;
 pub mod services;
@@ -18,14 +19,15 @@ mod watch;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime};
 
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
-    Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Permit, Reconciliation,
-    Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger, WindowsAccess,
+    Generation, GrantSource, Local, LocalStore, MemoryLocal, OsAccess, OsConsumer, OsPermission, PackageId,
+    Permit, Reconciliation, Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger,
+    WindowsAccess,
 };
 use dupin_extension_host::Services as HostServices;
 use dupin_host_services::files;
@@ -181,8 +183,11 @@ struct Inner {
     services: Services,
     /// The declarative base, if the bridge reads one from a file.
     base: Option<PathBuf>,
-    /// The local grant file decisions are saved to, if there is one.
-    local: Option<PathBuf>,
+    /// Where decisions are saved, if anywhere. Locked before the state whenever both are.
+    local: Mutex<Option<Box<dyn LocalStore>>>,
+    /// Whether the broker holds what the store holds. Until then it holds unreadable grants,
+    /// and only [`Bridge::open_grants`] holds the store's lock for longer than a write.
+    read: AtomicBool,
     files: Mutex<HashMap<PackageId, FilesTable>>,
     watches: watch::Watches,
     /// The image of each package's latest clipboard change, which its handler may store
@@ -201,19 +206,16 @@ struct State {
     asked_while_off: HashSet<PackageId>,
     /// What the host last reported for each OS permission.
     os: HashMap<OsPermission, OsAccess>,
-    /// Problems reading or saving grant files, for Settings.
+    /// Problems reading or saving grants, for Settings.
     problems: Vec<String>,
-    /// Each grant file as the bridge last read or wrote it.
-    seen: Seen,
+    /// The base file as the bridge last read it.
+    seen: Option<Stamp>,
     /// Where each installed package came from, which picks its storage namespace.
     origins: HashMap<PackageId, Origin>,
 }
 
-#[derive(Default)]
-struct Seen {
-    base: Option<Stamp>,
-    local: Option<Stamp>,
-}
+/// How Settings names the local grants in a problem.
+const LOCAL: &str = "your extension grants";
 
 /// What a file looked like, so a change another process made, even an atomic replace of the
 /// same size, is noticed without reading the file each time.
@@ -234,26 +236,20 @@ fn stamp(path: &Path) -> Option<Stamp> {
     })
 }
 
-/// A missing file holds no decisions; one that can't be read stands for unknown decisions.
-fn read_local(path: &Path) -> Result<Local, String> {
-    match std::fs::read_to_string(path) {
-        Ok(source) => Local::parse(&source).map_err(|error| error.to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Local::default()),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
 impl Bridge {
     /// A bridge over `broker`, which already holds what `local` contains, if anything.
-    pub fn new(broker: Broker, local: Option<PathBuf>, services: Services) -> Self {
-        Self::over(broker, None, local, services)
+    pub fn new(broker: Broker, local: Option<Box<dyn LocalStore>>, services: Services) -> Self {
+        Self::over(broker, None, local, true, services)
     }
 
-    fn over(broker: Broker, base: Option<PathBuf>, local: Option<PathBuf>, services: Services) -> Self {
-        let seen = Seen {
-            base: base.as_deref().and_then(stamp),
-            local: local.as_deref().and_then(stamp),
-        };
+    fn over(
+        broker: Broker,
+        base: Option<PathBuf>,
+        local: Option<Box<dyn LocalStore>>,
+        read: bool,
+        services: Services,
+    ) -> Self {
+        let seen = base.as_deref().and_then(stamp);
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(State {
@@ -267,7 +263,8 @@ impl Bridge {
                 }),
                 services,
                 base,
-                local,
+                local: Mutex::new(local),
+                read: AtomicBool::new(read),
                 files: Mutex::default(),
                 watches: watch::Watches::default(),
                 clips: Mutex::default(),
@@ -276,30 +273,25 @@ impl Bridge {
         }
     }
 
-    /// Reads the declarative base at `base` and the local grants at `local`. A missing file is
-    /// empty. An unreadable local file grants nothing and is never overwritten; an unusable
-    /// base is reported, and while it stands only local grants apply; a base entry that can't
-    /// be read is reported and keeps its package off.
-    pub fn open(base: &Path, local: &Path, services: Services) -> Self {
+    /// Reads the declarative base at `base`, a missing file being empty, and takes `local` for
+    /// the user's grants, which [`Bridge::open_grants`] reads. Until they are read nothing is
+    /// granted and no decision can be made. Grants that can't be read grant nothing and are
+    /// never overwritten; an unusable base is reported, and while it stands only local grants
+    /// apply; a base entry that can't be read is reported and keeps its package off.
+    pub fn open(base: &Path, local: Box<dyn LocalStore>, services: Services) -> Self {
         // Stamped before reading, so a change made during the read is read again later.
-        let seen = Seen {
-            base: stamp(base),
-            local: stamp(local),
-        };
+        let seen = stamp(base);
         let base_grants = Base::read(base);
-        let mut problems: Vec<_> = base_grants
+        let problems: Vec<_> = base_grants
             .problems()
             .into_iter()
             .map(|problem| format!("{}: {problem}", base.display()))
             .collect();
-        let local_grants = read_local(local).unwrap_or_else(|error| {
-            problems.push(format!("{}: {error}", local.display()));
-            Local::unreadable()
-        });
         let bridge = Self::over(
-            Broker::new(base_grants, local_grants),
+            Broker::new(base_grants, Local::unreadable()),
             Some(base.to_owned()),
-            Some(local.to_owned()),
+            Some(local),
+            false,
             services,
         );
         let mut state = bridge.inner.lock();
@@ -309,9 +301,21 @@ impl Bridge {
         bridge
     }
 
-    /// Reads either grant file again if another process changed it since the bridge last read
-    /// or wrote it. Every call and request does this itself; the app also does it when it
-    /// shows what extensions may do.
+    /// Reads the user's grants if they haven't been read yet, and tells the app what that
+    /// changed. It blocks on the store, which may read the Keychain, so the app calls it on a
+    /// thread of its own, at startup and again while they couldn't be read.
+    pub fn open_grants(&self) {
+        let changed = self.inner.read_grants();
+        self.inner.announce(changed);
+    }
+
+    /// Whether the user's grants have been read, so decisions can be made and saved.
+    pub fn grants_read(&self) -> bool {
+        self.inner.read.load(Ordering::Acquire)
+    }
+
+    /// Reads the base file again if it changed since the bridge last read it. Every call and
+    /// request does this itself; the app also does it when it shows what extensions may do.
     pub fn reload(&self) {
         self.inner.sync();
     }
@@ -358,19 +362,28 @@ impl Bridge {
         capabilities: Capabilities,
         origin: Origin,
     ) -> Reconciliation {
+        // Until the grants are read there is nothing to save, and the store's lock is the
+        // reader's, which may be waiting on the Keychain.
+        let mut grants = self.grants_read().then(|| self.inner.grants());
         let mut state = self.inner.lock();
         let synced = self.inner.sync_locked(&mut state);
         state.origins.insert(id.clone(), origin);
         let before = state.broker.generation(id);
+        let decisions = state.broker.decisions();
         let report = state.broker.install(id.clone(), revision, capabilities);
         let changed = before != state.broker.generation(id);
         if changed {
             state.pending.retain(|request| request.package != *id);
         }
         if !report.dropped.is_empty() || !report.changed.is_empty() || !report.kept.is_empty() {
-            self.inner.save(&mut state);
+            save(
+                grants.as_mut().and_then(|grants| grants.as_deref_mut()),
+                &mut state,
+                &decisions,
+            );
         }
         drop(state);
+        drop(grants);
         if changed {
             self.inner.forget_files(id);
             self.inner.notify(Notice::Changed(id.clone()));
@@ -496,6 +509,16 @@ impl Bridge {
         Ok(())
     }
 
+    /// Forgets every decision about `id`, as removing or reinstalling the package does. A
+    /// package that later takes the name starts afresh.
+    pub fn forget_grants(&self, id: &PackageId) -> Result<(), SaveError> {
+        self.change(id, |broker| broker.forget(id))?;
+        let mut state = self.inner.lock();
+        state.asked_while_off.remove(id);
+        state.pending.retain(|request| request.package != *id);
+        Ok(())
+    }
+
     /// Where `id` was installed from, as [`Bridge::delete_data`] takes it.
     pub fn origin(&self, id: &PackageId) -> Origin {
         self.inner.lock().origins.get(id).copied().unwrap_or_default()
@@ -587,7 +610,7 @@ impl Bridge {
         self.inner.lock().broker.os_consumers()
     }
 
-    /// Problems reading or saving the grant files.
+    /// Problems reading or saving grants.
     pub fn problems(&self) -> Vec<String> {
         self.inner.lock().problems.clone()
     }
@@ -615,25 +638,24 @@ impl Bridge {
     }
 
     /// Makes `change` and saves it, or leaves the decisions as they were if either fails, so
-    /// the broker never enforces a choice the local grant file doesn't hold.
+    /// the broker never enforces a choice the local grants don't hold.
     fn change(
         &self,
         id: &PackageId,
         change: impl FnOnce(&mut Broker) -> Result<(), BrokerError>,
     ) -> Result<(), SaveError> {
+        if !self.grants_read() {
+            return Err(SaveError::Refused(BrokerError::GrantsUnreadable));
+        }
+        let mut grants = self.inner.grants();
         let mut state = self.inner.lock();
         let synced = self.inner.sync_locked(&mut state);
         let before = state.broker.generation(id);
-        let changed = match &self.inner.local {
-            Some(path) => {
-                let changed = state.broker.change_saved(path, change);
-                if changed.is_ok() {
-                    state.seen.local = stamp(path);
-                }
-                changed
-            }
+        let changed = match grants.as_deref_mut() {
+            Some(store) => state.broker.change_saved(store, change),
             None => change(&mut state.broker).map_err(SaveError::Refused),
         };
+        drop(grants);
         if let Err(error) = changed {
             drop(state);
             self.inner.announce(synced);
@@ -654,6 +676,10 @@ impl Bridge {
 impl Inner {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn grants(&self) -> MutexGuard<'_, Option<Box<dyn LocalStore>>> {
+        self.local.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Host services for one call of `id` under `trigger`, or none when `id` isn't installed.
@@ -686,20 +712,37 @@ impl Inner {
         }
     }
 
-    fn save(&self, state: &mut State) {
-        let Some(path) = &self.local else { return };
-        match state.broker.save(path) {
-            Ok(()) => state.seen.local = stamp(path),
-            Err(error) => {
-                let problem = format!("{}: {error}", path.display());
-                if !state.problems.contains(&problem) {
-                    state.problems.push(problem);
-                }
-            }
+    /// Reads the user's grants into the broker unless it holds them already, and returns the
+    /// packages whose decisions that changed, for [`Inner::announce`]. What reconciling them
+    /// with the installed declarations changes is saved at once.
+    fn read_grants(&self) -> Vec<PackageId> {
+        if self.read.load(Ordering::Acquire) {
+            return Vec::new();
         }
+        let mut grants = self.grants();
+        let Some(store) = grants
+            .as_deref_mut()
+            .filter(|_| !self.read.load(Ordering::Acquire))
+        else {
+            return Vec::new();
+        };
+        let loaded = Local::load(store);
+        let mut state = self.lock();
+        let problem = loaded.as_ref().err().map(ToString::to_string);
+        note_problem(&mut state, LOCAL, &problem);
+        let Ok(loaded) = loaded else {
+            return Vec::new();
+        };
+        let changed = state.broker.replace_local(loaded.clone());
+        save(Some(store), &mut state, &loaded);
+        self.read.store(true, Ordering::Release);
+        state
+            .pending
+            .retain(|request| !changed.contains(&request.package));
+        changed
     }
 
-    /// Reads the grant files again if they changed, then tells the app what that changed.
+    /// Reads the base file again if it changed, then tells the app what that changed.
     fn sync(self: &Arc<Self>) {
         let changed = {
             let mut state = self.lock();
@@ -708,30 +751,17 @@ impl Inner {
         self.announce(changed);
     }
 
-    /// Reads again each grant file whose stamp moved and returns the packages that changed,
+    /// Reads the base file again if its stamp moved and returns the packages that changed,
     /// which the caller passes to [`Inner::announce`] once it lets go of the state.
     fn sync_locked(&self, state: &mut State) -> Vec<PackageId> {
         let mut changed = Vec::new();
         if let Some(path) = &self.base {
             let now = stamp(path);
-            if now != state.seen.base {
-                state.seen.base = now;
+            if now != state.seen {
+                state.seen = now;
                 let base = Base::read(path);
-                note_problem(state, path, &base.problems());
+                note_problem(state, &path.display().to_string(), &base.problems());
                 changed.extend(state.broker.replace_base(base));
-            }
-        }
-        if let Some(path) = &self.local {
-            let now = stamp(path);
-            if now != state.seen.local {
-                state.seen.local = now;
-                let local = read_local(path);
-                note_problem(state, path, local.as_ref().err());
-                changed.extend(
-                    state
-                        .broker
-                        .replace_local(local.unwrap_or_else(|_| Local::unreadable())),
-                );
             }
         }
         changed.sort();
@@ -815,9 +845,24 @@ impl Inner {
     }
 }
 
-/// Replaces what Settings shows about reading `path` with `problems`.
-fn note_problem<'a>(state: &mut State, path: &Path, problems: impl IntoIterator<Item = &'a String>) {
-    let prefix = format!("{}: ", path.display());
+/// Saves what changed in the broker's decisions since `before`, or tells Settings why it
+/// couldn't.
+fn save(store: Option<&mut (dyn LocalStore + 'static)>, state: &mut State, before: &Local) {
+    let Some(store) = store else {
+        return;
+    };
+    if let Err(error) = state.broker.save(store, before) {
+        let problem = format!("{LOCAL}: {error}");
+        if !state.problems.contains(&problem) {
+            state.problems.push(problem);
+        }
+    }
+}
+
+/// Replaces what Settings shows about reading `source` with `problems`.
+fn note_problem<'a>(state: &mut State, source: &str, problems: impl IntoIterator<Item = &'a String>) {
+    let prefix = format!("{source}: ");
+
     state.problems.retain(|known| !known.starts_with(&prefix));
     for problem in problems {
         state.problems.push(format!("{prefix}{problem}"));

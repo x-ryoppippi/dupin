@@ -144,7 +144,7 @@ impl Repo<'_> {
 impl GitHub {
     /// The commit `rev` names: a tag, branch or full commit SHA, or, with none, the newest version
     /// tag, or the default branch when there is no version tag. It answers as Git would. `on` is
-    /// the branch or tag a pinned commit was installed from, as extensions.lock records it.
+    /// the branch or tag a pinned commit was installed from, as the installed extensions list records it.
     pub(crate) fn resolve(
         &self,
         repo: &Repo<'_>,

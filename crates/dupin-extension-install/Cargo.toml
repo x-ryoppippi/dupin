@@ -1,6 +1,6 @@
 [package]
 name = "dupin-extension-install"
-description = "Installs Dupin extension packages from GitHub, Git or a folder and pins them in extensions.lock."
+description = "Installs Dupin extension packages from GitHub, Git or a folder and pins them in the installed extensions list."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,7 +19,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # Checks each file of a GitHub tarball against the blob id in the commit's tree.
 sha1_smol = "1.0"
-toml = { workspace = true, features = ["display"] }
 
 [dev-dependencies]
 tempfile = "3"

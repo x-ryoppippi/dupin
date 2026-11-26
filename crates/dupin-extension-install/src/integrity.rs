@@ -1,21 +1,19 @@
-//! Checking installed folders against extensions.lock as the launcher loads them.
+//! Checking installed folders against the installed extensions list as the launcher loads them.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::hash::{self, content_hash};
-use crate::lock::Lock;
+use crate::lock::LockStore;
 
 /// Remembers each folder's file list and verdict, so a rescan rehashes only folders whose files
 /// or locked hash changed.
 pub struct Integrity {
-    lock_path: PathBuf,
+    lock: Box<dyn LockStore>,
     /// The names of the packages bundled with the launcher, as [`crate::Installer`] reserves
     /// them.
     bundled: BTreeSet<String>,
-    lock_stamp: Option<(u64, SystemTime)>,
-    lock: Result<Lock, String>,
     verdicts: HashMap<PathBuf, Verdict>,
 }
 
@@ -26,12 +24,11 @@ struct Verdict {
 }
 
 impl Integrity {
-    pub fn new(lock_path: PathBuf, bundled: BTreeSet<String>) -> Self {
+    /// Checks folders against the list in `lock`, read again for each check.
+    pub fn new(lock: Box<dyn LockStore>, bundled: BTreeSet<String>) -> Self {
         Self {
-            lock_path,
+            lock,
             bundled,
-            lock_stamp: None,
-            lock: Ok(Lock::new()),
             verdicts: HashMap::new(),
         }
     }
@@ -42,10 +39,13 @@ impl Integrity {
     /// off too: `install` refuses such a name, but one installed before a later Dupin bundled
     /// it would otherwise replace the built-in after the upgrade.
     pub fn check(&mut self, folder: &Path) -> Option<String> {
-        self.refresh_lock();
-        let lock = match &self.lock {
+        let lock = match self.lock.read() {
             Ok(lock) => lock,
-            Err(problem) => return Some(problem.clone()),
+            Err(error) => {
+                return Some(format!(
+                    "disabled: the installed extensions list couldn't be read ({error}). Dupin tries again when the extensions folder changes."
+                ));
+            }
         };
         let name = folder.file_name()?.to_str()?;
         let entry = lock.packages.get(name)?;
@@ -84,26 +84,10 @@ impl Integrity {
         );
         problem
     }
-
-    fn refresh_lock(&mut self) {
-        let stamp = std::fs::metadata(&self.lock_path)
-            .ok()
-            .and_then(|metadata| Some((metadata.len(), metadata.modified().ok()?)));
-        if stamp.is_some() && stamp == self.lock_stamp {
-            return;
-        }
-        self.lock_stamp = stamp;
-        self.lock = Lock::read(&self.lock_path).map_err(|error| {
-            format!(
-                "disabled: {} ({error}). Fix or delete it, then reinstall with `dupin ext install`.",
-                self.lock_path.display()
-            )
-        });
-    }
 }
 
 fn tampered(reason: &str) -> String {
     format!(
-        "disabled: {reason}, so it doesn't match extensions.lock. Run `dupin ext sync` to restore it, or `dupin ext remove` and install it again."
+        "disabled: {reason}, so it doesn't match what `dupin ext install` placed. Run `dupin ext sync` to restore it, or `dupin ext remove` and install it again."
     )
 }
