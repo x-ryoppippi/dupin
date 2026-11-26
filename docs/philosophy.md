@@ -79,8 +79,8 @@ When you know what you want, a few letters beat describing it to a model and wai
 
 A launcher for the age of AI isn't a launcher with AI built in; it's a launcher for people that AI can extend.
 
-## Your data stays yours
+## Where your data lives
 
-There is no account. What Dupin keeps, such as usage history, clipboard history, snippets and extensions' storage, is [encrypted on disk](./features/storage.md) under a key kept in your Keychain. [Sync](./features/sync.md) between Macs goes through a folder you already sync, such as iCloud Drive, end-to-end encrypted, with no Dupin server; today it carries usage history, and settings, snippets and the rest are to follow.
+There is no account. What Dupin keeps stays on your Mac, [encrypted](./features/storage.md), and if you turn on [sync](./features/sync.md) it travels between your Macs through a folder you already sync.
 
 Dupin is for macOS on Apple silicon.
