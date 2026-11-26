@@ -1,22 +1,23 @@
 import type { Item } from 'dupin';
 
 const repository = 'https://github.com/x-ryoppippi/dupin';
+const docs = 'https://dupin.app/docs';
 
 const rows: Item[] = [
 	{
 		title: 'Using Dupin',
 		subtitle: 'Search, keywords, actions and the panel',
-		url: `${repository}/blob/main/docs/usage.md`,
+		url: `${docs}/`,
 	},
 	{
 		title: 'Settings and config.toml',
 		subtitle: 'Every setting and its default',
-		url: `${repository}/blob/main/docs/configuration.md`,
+		url: `${docs}/configuration/`,
 	},
 	{
 		title: 'Extensions',
 		subtitle: 'Write, install and eject extensions',
-		url: `${repository}/blob/main/docs/features/extensions.md`,
+		url: `${docs}/features/extensions/`,
 	},
 	{
 		title: 'Report a problem',

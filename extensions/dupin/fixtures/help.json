@@ -27,7 +27,7 @@
 						"actions": [
 							{
 								"title": "Open URL",
-								"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/usage.md"
+								"url": "https://dupin.app/docs/"
 							}
 						],
 						"id": "#0",
@@ -42,7 +42,7 @@
 			"activate": "Open URL",
 			"expect": {
 				"effect": {
-					"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/usage.md"
+					"url": "https://dupin.app/docs/"
 				}
 			}
 		},
@@ -54,7 +54,7 @@
 						"actions": [
 							{
 								"title": "Open URL",
-								"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extensions.md"
+								"url": "https://dupin.app/docs/features/extensions/"
 							}
 						],
 						"id": "#0",
@@ -69,7 +69,7 @@
 			"activate": "Open URL",
 			"expect": {
 				"effect": {
-					"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extensions.md"
+					"url": "https://dupin.app/docs/features/extensions/"
 				}
 			}
 		}
