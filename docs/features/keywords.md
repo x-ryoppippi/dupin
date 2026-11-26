@@ -20,7 +20,7 @@ The row never pushes the best match down for a short query:
 
 A command with a [shortcut](#shortcuts) shows it as a tag after its keywords, such as **Clipboard** `clip ␣` `⇧⌘V`.
 
-Type `?` alone to list every command, web search and the files search with their keywords; choose one to enter it. A row shows the command's icon, which its chip shows too once it is entered: a bundled extension's or a package's own [`dupin.icon`](./extensions.md#a-javascript-extension). An empty query shows what it always did. Snippets, with no snippet at all, is neither suggested nor listed, though `snip` still enters it to add the first one ([Snippets](./snippets.md#adding-and-editing)).
+Type `?` alone to list every command, web search and the files search with their keywords; choose one to enter it. A row shows the command's icon, which its chip shows too once it is entered: a bundled extension's or a package's own [`dupin.icon`](./extension-manifest.md#icons). An empty query shows what it always did. Snippets, with no snippet at all, is neither suggested nor listed, though `snip` still enters it to add the first one ([Snippets](./snippets.md#adding-and-editing)).
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/keywords/list-dark.png" />

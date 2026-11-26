@@ -5,7 +5,7 @@
 // Import these types with `import type { Item } from 'dupin'`: a type imported as a value stays
 // in the module and fails to link. `enum`, namespaces with values, parameter properties,
 // decorators and JSX need a build (`dupin ext build`), as do npm dependencies.
-// Docs: https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extensions.md
+// Docs: https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extension-api.md
 
 declare module 'dupin' {
 	/** The guest API this file describes. The host's `dupin` module exports the same value. */

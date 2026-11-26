@@ -43,7 +43,7 @@ revoking either there stops it.
 
 The commands are TypeScript in [`extensions/window-management`](../../extensions/window-management),
 which computes each frame from the displays and asks Dupin to move the window
-through the [`windows` capability](./extensions.md#windows). To change what a
+through the [`windows` capability](./extension-permissions.md#windows). To change what a
 command does or add one, eject it and edit the copy:
 
 ```sh
