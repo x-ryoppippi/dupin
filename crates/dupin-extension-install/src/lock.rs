@@ -119,7 +119,6 @@ impl<T: LockStore + ?Sized> LockStore for Arc<T> {
 struct Memory {
     lock: Lock,
     unreadable: Option<Error>,
-    unwritable: Option<Error>,
 }
 
 /// A list kept in memory, for tests and fixtures. Clones share it.
@@ -131,7 +130,6 @@ impl Default for MemoryLock {
         Self(Arc::new(Mutex::new(Memory {
             lock: Lock::new(),
             unreadable: None,
-            unwritable: None,
         })))
     }
 }
@@ -144,11 +142,6 @@ impl MemoryLock {
     /// Makes every read fail with `error` while it is set.
     pub fn set_unreadable(&self, error: Option<Error>) {
         self.memory().unreadable = error;
-    }
-
-    /// Makes every write fail with `error` while it is set.
-    pub fn set_unwritable(&self, error: Option<Error>) {
-        self.memory().unwritable = error;
     }
 }
 
@@ -163,11 +156,7 @@ impl LockStore for MemoryLock {
 
     fn write(&self, lock: &Lock) -> Result<(), Error> {
         lock.validate()?;
-        let mut memory = self.memory();
-        if let Some(error) = &memory.unwritable {
-            return Err(error.clone());
-        }
-        memory.lock = lock.clone();
+        self.memory().lock = lock.clone();
         Ok(())
     }
 }
