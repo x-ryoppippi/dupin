@@ -107,7 +107,8 @@ function item(snippet: Snippet, paste: boolean, full: boolean): CatalogueItem {
 function weight(row: CatalogueItem): number {
 	const fields = [row.id, row.title, row.subtitle ?? '', ...(row.aliases ?? [])];
 	for (const accessory of row.accessories ?? []) {
-		fields.push('tag' in accessory ? accessory.tag : accessory.text);
+		if ('tag' in accessory) fields.push(accessory.tag);
+		else if ('text' in accessory) fields.push(accessory.text);
 	}
 	for (const action of row.actions ?? []) {
 		fields.push(action.title);
