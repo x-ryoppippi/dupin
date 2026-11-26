@@ -29,8 +29,8 @@ impl Step {
     }
 }
 
-/// Whether this launch should welcome its user, recording that it has. Someone with a history
-/// has used Dupin before the welcome existed, and a headless run has no one to welcome.
+/// Whether this launch should welcome its user, recording that it has. Someone with a usage
+/// history has used Dupin before the welcome existed, and a headless run has no one to welcome.
 pub fn first_run() -> bool {
     if rune::tooling::is_headless() {
         return false;
@@ -38,7 +38,8 @@ pub fn first_run() -> bool {
     let Some(dir) = crate::store::support_dir() else {
         return false;
     };
-    if !due(&dir) {
+    let used = crate::store::usage_dir().is_some_and(|usage| usage.exists());
+    if used || !due(&dir) {
         return false;
     }
     if let Err(e) = mark(&dir) {
@@ -48,7 +49,7 @@ pub fn first_run() -> bool {
 }
 
 fn due(dir: &Path) -> bool {
-    !dir.join(MARKER).exists() && !dir.join(crate::store::FILE).exists()
+    !dir.join(MARKER).exists() && !dir.join(crate::store::LEGACY_HISTORY).exists()
 }
 
 fn mark(dir: &Path) -> std::io::Result<()> {
@@ -226,7 +227,7 @@ mod tests {
         mark(&dir).unwrap();
         assert!(!due(&dir), "the marker keeps it to one appearance");
         std::fs::remove_file(dir.join(MARKER)).unwrap();
-        std::fs::write(dir.join(crate::store::FILE), "{}").unwrap();
+        std::fs::write(dir.join(crate::store::LEGACY_HISTORY), "{}").unwrap();
         assert!(!due(&dir), "a history means Dupin was used before");
         std::fs::remove_dir_all(&dir).unwrap();
     }

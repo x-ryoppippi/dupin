@@ -36,6 +36,26 @@ copyright = ["Copyright (c) 2026 an0sunshy"]
 text = "packaging/licences/MIT.txt"
 files = ["examples/shaders/snow.wgsl"]
 
+[[material]]
+name = "EFF long word list"
+use = "The words of the passphrases Dupin generates for sync"
+source = "https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt (dice numbers removed)"
+licence = "CC-BY-3.0-US"
+copyright = [
+	"Electronic Frontier Foundation, https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases",
+]
+text = "packaging/licences/CC-BY-3.0-US.txt"
+files = ["crates/dupin-sync/data/eff_large_wordlist.txt"]
+
+[[material]]
+name = "100k-most-used-passwords-NCSC.txt from danielmiessler/SecLists"
+use = "The common passwords sync refuses as a passphrase: the entries of 12 characters or more, lowercased"
+source = "https://github.com/danielmiessler/SecLists"
+licence = "MIT"
+copyright = ["Copyright (c) 2018 Daniel Miessler"]
+text = "packaging/licences/MIT.txt"
+files = ["crates/dupin-sync/data/common_passwords.txt"]
+
 # Crates whose package carries no licence text cargo-about can identify, so it falls back to the
 # licence's template, without the copyright line the licence asks to be kept. Each names the
 # holders the crate's repository's licence file names; `[]` where that file names none.

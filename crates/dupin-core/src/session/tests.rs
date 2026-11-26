@@ -1441,6 +1441,36 @@ fn opening_a_result_teaches_the_history_and_asks_to_save_it() {
 }
 
 #[test]
+fn other_macs_rank_without_being_saved_as_this_ones() {
+    let mut s = session_with_clock(History::default(), || 1_800_000_000);
+    let mut elsewhere = History::default();
+    elsewhere.record("/x/Shareful", "s", 1_800_000_000);
+    s.set_others(elsewhere.clone());
+    let g = searched(&s.set_query("s")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: vec![ranked("Safari", 120), ranked("Shareful", 80)],
+    });
+    assert_eq!(s.selected_item().unwrap().display_title(), "Shareful");
+    assert!(
+        s.own_history().is_empty(),
+        "another Mac's picks aren't this one's to save"
+    );
+
+    s.intent(Intent::Open).unwrap();
+    assert_eq!(
+        s.own_history().boost("/x/Shareful", "s", 1_800_000_000),
+        elsewhere.boost("/x/Shareful", "s", 1_800_000_000)
+    );
+    s.absorb(&elsewhere);
+    assert_eq!(
+        s.own_history(),
+        &History::merged([&elsewhere, &elsewhere], 1_800_000_000),
+        "a folded Mac's log becomes this one's"
+    );
+}
+
+#[test]
 fn a_new_query_selects_its_first_row_though_the_last_selection_is_still_a_result() {
     let mut history = History::default();
     history.record("/x/Ardia", "a", 1_800_000_000);

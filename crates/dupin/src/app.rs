@@ -5,8 +5,7 @@ use std::sync::Arc;
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
 
 use crate::{
-    backdrop, control, hotkey, latency, log, prefs, scripts, settings, snapshots, store, trace, ui, update,
-    view,
+    backdrop, control, hotkey, latency, log, prefs, scripts, settings, snapshots, trace, ui, update, view,
 };
 
 /// The panel with nothing below the field: the window's first size, before it fits its content.
@@ -26,7 +25,6 @@ pub(crate) fn run() {
     }
     let paths = settings::Paths::discover();
     let (config, locked_keys, config_problem) = settings::load(&paths);
-    let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
     let fonts: &'static [&'static [u8]] = match dupin_mac::font::system_ui_font() {
         Some(font) => Box::leak(Box::new([font])),
@@ -201,7 +199,7 @@ pub(crate) fn run() {
                     },
                     updater,
                     configuration,
-                    history,
+                    dupin_core::History::default(),
                     calendar_access,
                     quick_look,
                     running,

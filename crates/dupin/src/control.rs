@@ -44,6 +44,10 @@ pub enum Command {
     ExtensionDataDelete {
         package: String,
     },
+    /// Turns sync on or off, joins a vault, or reports its status.
+    Sync {
+        action: SyncAction,
+    },
     /// What Settings saved over a read-only config.toml, as TOML, which the running launcher
     /// holds open.
     ConfigOverlay {},
@@ -61,6 +65,26 @@ pub enum Command {
     /// The scopes the running launcher grants each package, for `dupin ext list`.
     ExtensionGrantsList {
         packages: Vec<String>,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SyncAction {
+    Status {},
+    /// Runs a full pass now.
+    Now {},
+    /// Creates a vault in the folder. Without a passphrase one is generated and returned once.
+    On {
+        folder: Option<String>,
+        passphrase: Option<String>,
+    },
+    Join {
+        folder: Option<String>,
+        passphrase: Option<String>,
+    },
+    Off {},
+    RemoveDevice {
+        device: String,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -101,6 +125,7 @@ impl Call {
             Command::SnapshotsOpen { .. } => "snapshots open",
             Command::SnapshotsClose {} => "snapshots close",
             Command::ExtensionDataDelete { .. } => "extension data delete",
+            Command::Sync { .. } => "sync",
             Command::ConfigOverlay {} => "config overlay",
             Command::ExtensionLockGet {} => "extension lock get",
             Command::ExtensionLockSet { .. } => "extension lock set",
@@ -175,6 +200,18 @@ pub fn validate(request: &Request) -> io::Result<()> {
         Command::ExtensionLockSet { lock } => lock
             .validate()
             .map_err(|error| io::Error::other(error.to_string())),
+        Command::Sync {
+            action: SyncAction::On { folder, passphrase } | SyncAction::Join { folder, passphrase },
+        } if folder
+            .as_ref()
+            .is_some_and(|folder| folder.is_empty() || folder.len() > 4096)
+            || passphrase.as_ref().is_some_and(|text| text.len() > 1024) =>
+        {
+            Err(io::Error::other("invalid sync folder or passphrase"))
+        }
+        Command::Sync {
+            action: SyncAction::RemoveDevice { device },
+        } if device.len() != 32 => Err(io::Error::other("invalid device ID")),
         _ => Ok(()),
     }
 }

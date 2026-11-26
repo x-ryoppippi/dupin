@@ -113,6 +113,10 @@ impl Ui {
                     call.finish(result.map(|()| serde_json::Value::Null));
                 });
             }
+            Command::Sync { action } => {
+                let action = action.clone();
+                self.sync.control(action, call);
+            }
             Command::ConfigOverlay {} => {
                 std::thread::spawn(move || {
                     let source = match crate::settings::overlay::shared() {

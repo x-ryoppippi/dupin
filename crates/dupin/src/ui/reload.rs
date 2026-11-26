@@ -38,6 +38,7 @@ impl Ui {
         }
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
+        self.sync.apply(&config.sync);
         if self.backdrop_pick != config.backdrop {
             self.backdrop = backdrop_source(&config.backdrop);
             self.backdrop_pick = config.backdrop.clone();

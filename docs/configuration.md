@@ -62,6 +62,7 @@ With `settings` set, `config.toml` links into the Nix store. Settings marks thos
 - [Script commands](./features/scripts.md#configuration)
 - [Search selected text](./features/selected-text.md#configuration)
 - [Snippets](./features/snippets.md#configuration)
+- [Sync](./features/sync.md#configuration): `[sync]`, the folder this Mac syncs through
 - [System commands](./features/system-commands.md#configuration)
 - [Updates](./features/updates.md#configuration)
 - [Web searches](./features/web-searches.md#configuration)

@@ -130,7 +130,12 @@ pub struct Session {
     commands: CommandRegistry,
     search: SearchState,
     last_generation: u64,
+    /// What ranking uses: this Mac's own log merged with the other Macs' that sync.
     history: Arc<RwLock<History>>,
+    /// What this Mac recorded, which it saves and syncs as its own.
+    own: History,
+    /// The other Macs' logs, as sync last delivered them.
+    others: History,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
     queries: VecDeque<(CommandId, String)>,
@@ -252,7 +257,9 @@ impl Session {
             commands,
             search: SearchState::new(command, false),
             last_generation: 0,
-            history: Arc::new(RwLock::new(history)),
+            history: Arc::new(RwLock::new(history.clone())),
+            own: history,
+            others: History::default(),
             clock: unix_now,
             queries: VecDeque::new(),
             renaming: None,
@@ -298,8 +305,47 @@ impl Session {
         })
     }
 
+    /// The history ranking uses.
     pub fn history(&self) -> RwLockReadGuard<'_, History> {
         self.history.read().unwrap()
+    }
+
+    /// What this Mac recorded, to save.
+    pub fn own_history(&self) -> &History {
+        &self.own
+    }
+
+    /// The saved log arrived after picks were already recorded this run; they add to it.
+    pub fn load_own(&mut self, saved: &History) {
+        self.own = History::merged([saved, &self.own], (self.clock)());
+        self.rerank();
+    }
+
+    /// Takes another Mac's log into this one's, as the Mac that folds a removed Mac's ranking
+    /// into its own does.
+    pub fn absorb(&mut self, other: &History) {
+        self.load_own(other);
+    }
+
+    /// This Mac took a new device ID: its own log starts again, since the old one stays in
+    /// the other Macs' under the old ID.
+    pub fn restart_own(&mut self) {
+        self.own = History::default();
+        self.rerank();
+    }
+
+    /// The other Macs' logs changed.
+    pub fn set_others(&mut self, others: History) {
+        self.others = others;
+        self.rerank();
+    }
+
+    fn rerank(&mut self) {
+        let ranking = match self.others.is_empty() {
+            true => self.own.clone(),
+            false => History::merged([&self.own, &self.others], (self.clock)()),
+        };
+        *self.history.write().unwrap() = ranking;
     }
 
     pub fn recent_history(&self) -> RecentHistory {

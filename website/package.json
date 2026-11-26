@@ -7,7 +7,7 @@
 		"build": "cf build",
 		"preview": "cf build && vite preview",
 		"deploy": "cf deploy",
-		"test": "node --test src/worker.test.ts",
+		"test": "node --test src/worker.test.ts src/docs/links.test.ts",
 		"lint": "oxlint"
 	},
 	"devDependencies": {

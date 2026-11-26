@@ -63,9 +63,10 @@ let
   fixture = ./hm-extension;
   notes = ./hm-extension-notes;
   plain = evaluate { settings.hotkey = "alt+space"; };
-  # `[advanced]` is part of `settings`, with arrays of tables for a kind's actions, and so is
-  # `[aliases]`.
+  # `[advanced]` is part of `settings`, with arrays of tables for a kind's actions, and so are
+  # `[aliases]` and the device-local `[sync]`.
   advanced = evaluate {
+    settings.sync.folder = "~/Library/Mobile Documents/com~apple~CloudDocs/Dupin";
     settings.aliases = {
       c = "calendar";
       ff = "app:org.mozilla.firefox";
@@ -233,6 +234,7 @@ pkgs.runCommand "dupin-home-manager-module"
       kinds: { file: { actions: [{ title: "Open in Zed", script: "open-in-zed" }] } }
     }'
     toml2json "$advanced" | jq -e '.aliases == { c: "calendar", ff: "app:org.mozilla.firefox", goo: "web:g" }'
+    toml2json "$advanced" | jq -e '.sync == { folder: "~/Library/Mobile Documents/com~apple~CloudDocs/Dupin" }'
     toml2json "$bundledGrants" | jq --sort-keys . > bundled-actual.json
     printf '%s' "$bundledExpected" | jq --sort-keys . > bundled-expected.json
     diff bundled-expected.json bundled-actual.json

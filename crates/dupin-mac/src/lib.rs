@@ -17,6 +17,7 @@ pub mod input_source;
 pub mod keychain;
 pub mod kinds;
 pub mod login_item;
+pub mod machine;
 pub mod paste;
 pub mod pick;
 pub mod privacy;

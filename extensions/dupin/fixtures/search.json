@@ -40,7 +40,7 @@
 						"actions": [
 							{
 								"title": "Open URL",
-								"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md"
+								"url": "https://dupin.app/docs/configuration/"
 							}
 						],
 						"id": "#0",

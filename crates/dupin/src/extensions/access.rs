@@ -31,36 +31,31 @@ pub fn storage_path() -> Option<PathBuf> {
     crate::store::data_dir().map(|dir| dir.join("storage"))
 }
 
-/// Encrypted storage under the data key in the user's Keychain, which is read only when a
-/// namespace is first opened.
-pub fn storage() -> Option<dupin_storage::Storage> {
-    let root = storage_path()?;
-    // Tests run the `dupin` executable, which must never reach the user's Keychain; a release
-    // build ignores the variable.
-    if cfg!(debug_assertions)
-        && let Some(path) = std::env::var_os(DEBUG_KEY_FILE_ENV)
-    {
-        return Some(dupin_storage::Storage::new(
-            root,
-            dupin_storage::FileKey::new(path),
-        ));
-    }
-    Some(dupin_storage::Storage::new(
-        root,
-        dupin_mac::keychain::KeychainKey,
-    ))
+/// The launcher's one encrypted storage, under the data key in the user's Keychain, which is
+/// read only when a namespace is first opened. Extensions' namespaces and the built-ins' own,
+/// such as stored snippets and usage history, and sync share it, so the device's clock, ID and
+/// key have one owner, as a second root over the same folder would not.
+pub fn shared_storage() -> Option<Arc<dupin_storage::Storage>> {
+    static STORAGE: OnceLock<Option<Arc<dupin_storage::Storage>>> = OnceLock::new();
+    STORAGE
+        .get_or_init(|| {
+            let root = storage_path()?;
+            // Tests run the `dupin` executable, which must never reach the user's Keychain; a
+            // release build ignores the variable.
+            let storage = match std::env::var_os(DEBUG_KEY_FILE_ENV).filter(|_| cfg!(debug_assertions)) {
+                Some(path) => dupin_storage::Storage::new(root, dupin_storage::FileKey::new(path)),
+                None => dupin_storage::Storage::new(root, dupin_mac::keychain::KeychainKey),
+            };
+            Some(Arc::new(match dupin_mac::machine::platform_uuid() {
+                Some(uuid) => storage.with_hardware_id(uuid.as_bytes()),
+                None => storage,
+            }))
+        })
+        .clone()
 }
 
 /// Names a key file a debug build uses instead of the Keychain.
 pub const DEBUG_KEY_FILE_ENV: &str = "DUPIN_DEBUG_STORAGE_KEY_FILE";
-
-/// The launcher's one [`storage`]: extensions' namespaces and the built-ins' own, such as
-/// stored snippets, share the device's clock and key, as a second root over the same folder
-/// would not.
-pub fn shared_storage() -> Option<Arc<dupin_storage::Storage>> {
-    static SHARED: OnceLock<Option<Arc<dupin_storage::Storage>>> = OnceLock::new();
-    SHARED.get_or_init(|| storage().map(Arc::new)).clone()
-}
 
 /// What the platform services need from the launcher.
 pub struct Platform {

@@ -43,7 +43,7 @@ impl Ui {
                     path,
                     folder,
                 } => self.transfer_file(transfer, path, folder),
-                Effect::SaveHistory => self.saver.save(&self.session.history()),
+                Effect::SaveHistory => self.sync.save_usage(self.session.own_history()),
                 Effect::Run(action) => match action {
                     Action::RunScript(command) => self.start_script(command, tx),
                     Action::ConfiguredScript { script, argument } => {

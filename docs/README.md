@@ -8,6 +8,7 @@
 - [Extensions](./features/extensions.md): writing and installing JavaScript extensions, and their limits
 - [Extension capabilities](./extension-capabilities.md): the host side of the `files` and `exec` capabilities
 - [The `http` capability](./extension-http.md): the host service that will fetch for extensions, its scope checks and limits
+- [Sync](./features/sync.md): keeping your Macs in step through a synced folder, end-to-end encrypted
 - [Sync design](./design/sync.md): syncing Dupin between Macs through an end-to-end encrypted synced folder
 - [Architecture](./architecture.md): crates, providers, the session and the panel
 - [Encrypted storage](./features/storage.md): how Dupin keeps data on disk, its key and its threat model
