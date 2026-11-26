@@ -14,6 +14,8 @@ input_source = "ascii" # "ascii", "keep", or an input source identifier
 | `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top                                              |
 | `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source) |
 
+The result list fills the room the display leaves on its side of the field, so a taller display shows more rows before the list scrolls: at least as many as fit in 416 points (eight rows at the default `row_height`), at most as many as fit in 832. A smaller `row_height` fits more rows into the same room.
+
 Each feature's keys are on its own page; see [Feature configuration](#feature-configuration).
 
 > [!TIP]

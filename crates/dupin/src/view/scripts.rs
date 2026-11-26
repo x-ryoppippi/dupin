@@ -9,7 +9,6 @@ use crate::scripts::{
 use crate::ui::Ui;
 
 use super::header::HEADER_H;
-use super::results::LIST_HEIGHT_BUDGET;
 use super::theme::{ResolvedTheme, divider};
 
 pub(super) fn script_arguments(s: &Ui, entry: &Entry, t: &ResolvedTheme) -> [El; 3] {
@@ -111,7 +110,7 @@ pub(super) fn script_arguments(s: &Ui, entry: &Entry, t: &ResolvedTheme) -> [El;
             col()
                 .w_full()
                 .shrink()
-                .max_h(LIST_HEIGHT_BUDGET - 60.0)
+                .max_h(s.list_budget - 60.0)
                 .scroll(ScrollSpec { stick_bottom: false })
                 .child(bindings),
         ),

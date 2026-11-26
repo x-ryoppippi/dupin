@@ -5,7 +5,7 @@ use rune::{Color, El, ScrollSpec, col, row, text};
 use crate::ui::{ActionStage, ApplicationState, SEND_TO, Ui};
 
 use super::header::HEADER_H;
-use super::results::{LIST_HEIGHT_BUDGET, LIST_PAD, item_icon, visible_rows};
+use super::results::{LIST_PAD, item_icon, visible_rows};
 use super::theme::ResolvedTheme;
 
 pub(super) fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
@@ -101,7 +101,7 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                     list = list.child(
                         col()
                             .w_full()
-                            .max_h(LIST_HEIGHT_BUDGET)
+                            .max_h(s.list_budget)
                             .scroll(ScrollSpec { stick_bottom: false })
                             .children(apps.iter().enumerate().map(|(index, app)| {
                                 let on = index == *selected;
@@ -156,12 +156,12 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
             return list;
         }
         ActionStage::Receivers { actions, selected } => {
-            return action_options("receivers", row_height).children(actions.iter().enumerate().map(
-                |(index, action)| {
+            return action_options("receivers", s.list_budget, row_height).children(
+                actions.iter().enumerate().map(|(index, action)| {
                     action_row(&action.title, index, *selected, row_height, false, t, accent)
                         .on_press_tx(move |s: &mut Ui, tx| s.pick_receiver(index, tx))
-                },
-            ));
+                }),
+            );
         }
         ActionStage::Confirm {
             action_id, selected, ..
@@ -225,7 +225,7 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         }
         ActionStage::List => {}
     }
-    action_options("actions", row_height)
+    action_options("actions", s.list_budget, row_height)
         .children(screen.item.actions.iter().enumerate().map(|(index, action)| {
             let key = screen.key.clone();
             let id = action.id.clone();
@@ -254,12 +254,12 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         }))
 }
 
-fn action_options(key: &str, row_height: f32) -> El {
+fn action_options(key: &str, budget: f32, row_height: f32) -> El {
     col()
         .key(key)
         .w_full()
         .py(LIST_PAD)
-        .max_h(row_height * visible_rows(row_height) as f32 + 2.0 * LIST_PAD)
+        .max_h(row_height * visible_rows(budget, row_height) as f32 + 2.0 * LIST_PAD)
         .scroll(ScrollSpec { stick_bottom: false })
 }
 

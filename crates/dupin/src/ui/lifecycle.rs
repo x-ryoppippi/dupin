@@ -109,23 +109,25 @@ impl Ui {
             && let Some(screen) = dupin_mac::window::display_geometry(self.display)
         {
             self.display_notice = screen.notice;
-            let (inset, margin) = panel_offsets(
+            let place = panel_offsets(
                 screen.frame,
                 screen.visible_frame,
                 self.theme.panel_width,
                 self.position,
             );
+            self.list_budget = crate::view::list_budget(place.list_room);
             (
                 DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
                 Align::Start,
-                inset,
-                margin,
+                place.inset,
+                place.margin,
             )
         } else {
             let display = match self.display {
                 DisplaySelection::Mouse => DisplayTarget::UnderPointer,
                 DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
             };
+            self.list_budget = crate::view::DEFAULT_LIST_BUDGET;
             (display, Align::Center, 0.0, TOP_MARGIN)
         };
         self.me.place(
@@ -402,7 +404,18 @@ impl Ui {
     }
 }
 
-fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
+/// Where the panel goes on a display, in points from the display's frame.
+#[derive(Debug, PartialEq)]
+struct PanelOffsets {
+    /// From the display's left edge to the panel's.
+    inset: f32,
+    /// From the display's top edge to the query field's.
+    margin: f32,
+    /// The height the visible area leaves on the result list's side of the field.
+    list_room: f32,
+}
+
+fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> PanelOffsets {
     let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
     let top = frame.max().y - visible.max().y;
     // Use the query field's height so results can grow below it.
@@ -411,7 +424,11 @@ fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position)
         Position::Center => room / 2.0,
         Position::Top => f64::from(TOP_MARGIN).min(room),
     };
-    (inset as f32, (top + offset) as f32)
+    PanelOffsets {
+        inset: inset as f32,
+        margin: (top + offset) as f32,
+        list_room: (room - offset) as f32,
+    }
 }
 
 #[cfg(test)]
@@ -423,18 +440,29 @@ mod tests {
         NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
     }
 
+    fn offsets(inset: f32, margin: f32, list_room: f32) -> PanelOffsets {
+        PanelOffsets {
+            inset,
+            margin,
+            list_room,
+        }
+    }
+
     #[test]
     fn places_the_query_inside_the_selected_screens_visible_frame() {
         let frame = rect(100.0, -900.0, 1440.0, 900.0);
         let visible = rect(160.0, -850.0, 1380.0, 820.0);
         assert_eq!(
             panel_offsets(frame, visible, 680, Position::Center),
-            (410.0, 408.0)
+            offsets(410.0, 408.0, 378.0)
         );
-        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (410.0, 210.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Top),
+            offsets(410.0, 210.0, 576.0)
+        );
         assert_eq!(
             panel_offsets(frame, visible, 400, Position::Center),
-            (550.0, 408.0)
+            offsets(550.0, 408.0, 378.0)
         );
     }
 
@@ -442,6 +470,20 @@ mod tests {
     fn top_spacing_cannot_push_the_query_below_the_visible_area() {
         let frame = rect(-800.0, 200.0, 800.0, 150.0);
         let visible = rect(-800.0, 200.0, 800.0, 120.0);
-        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (60.0, 86.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Top),
+            offsets(60.0, 86.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_taller_display_leaves_the_list_more_room() {
+        let short = rect(0.0, 0.0, 1440.0, 900.0);
+        let tall = rect(0.0, 0.0, 2560.0, 1440.0);
+        for position in [Position::Center, Position::Top] {
+            let short = panel_offsets(short, short, 680, position).list_room;
+            let tall = panel_offsets(tall, tall, 680, position).list_room;
+            assert!(tall > short, "{position:?}: {tall} <= {short}");
+        }
     }
 }

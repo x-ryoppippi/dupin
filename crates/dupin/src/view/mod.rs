@@ -19,7 +19,7 @@ use crate::ui::Ui;
 use theme::divider;
 
 pub use header::HEADER_H;
-pub use results::{row_key, wanted_rows};
+pub use results::{DEFAULT_LIST_BUDGET, list_budget, row_key, wanted_rows};
 pub use theme::{ResolvedTheme, theme_preview};
 
 /// How much of the theme's card color covers the glass.
@@ -82,7 +82,9 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
     panel = notices::search_notices(panel, s, t);
     let items = s.session.items();
     if let Some(draft) = s.form_draft() {
-        panel = panel.child(divider(t)).child(form::form(draft, t, accent));
+        panel = panel
+            .child(divider(t))
+            .child(form::form(draft, s.list_budget, t, accent));
     } else if let Some(renaming) = s.session.renaming() {
         panel = panel
             .child(divider(t))

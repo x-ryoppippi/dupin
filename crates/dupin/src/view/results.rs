@@ -8,22 +8,31 @@ use crate::ui::{ICON_SIZE, Ui};
 
 use super::theme::ResolvedTheme;
 
-/// Rows shown before the list scrolls.
-const VISIBLE_ROWS: usize = 8;
-pub(super) const LIST_HEIGHT_BUDGET: f32 = 416.0;
-
-pub(super) fn visible_rows(row_height: f32) -> usize {
-    VISIBLE_ROWS
-        .min((LIST_HEIGHT_BUDGET / row_height).floor() as usize)
-        .max(1)
-}
+/// The result list's height before it scrolls when the panel knows no display, as in a
+/// headless run: eight rows of the default height. A display never leaves it less.
+pub const DEFAULT_LIST_BUDGET: f32 = 416.0;
+/// However tall the display, the list stops at sixteen default rows.
+const MAX_LIST_BUDGET: f32 = 2.0 * DEFAULT_LIST_BUDGET;
 pub(super) const LIST_PAD: f32 = 6.0;
+/// Between the list's end and the display's edge: the list's padding, its divider and a gap.
+const LIST_MARGIN: f32 = 2.0 * LIST_PAD + 1.0 + 24.0;
+
+/// The height the result list takes before it scrolls, from the `room` the display leaves on
+/// its side of the query field.
+pub fn list_budget(room: f32) -> f32 {
+    (room - LIST_MARGIN).clamp(DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET)
+}
+
+/// Rows shown before the list scrolls.
+pub(super) fn visible_rows(budget: f32, row_height: f32) -> usize {
+    ((budget / row_height).floor() as usize).max(1)
+}
 
 /// The height of a section's heading row.
 pub(super) const SECTION_H: f32 = 30.0;
 
-/// The height of a long list whose selected row shows its detail, as tall as a list of cards.
-const CARDS_MAX_H: f32 = 440.0;
+/// How much taller than the list of rows a list of cards grows.
+const CARDS_EXTRA_H: f32 = 24.0;
 
 /// How the result list lays out its rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +52,7 @@ fn layout(s: &Ui, items: &[Item]) -> Layout {
     let text_only = items.iter().all(|item| matches!(item.view, View::Text { .. }));
     let cards = !text_only || (0..items.len()).any(|index| s.session.detail(index).is_some());
     let headings = (0..items.len()).any(|index| s.session.section_start(index).is_some());
-    let long = items.len() > 2 * visible_rows(s.theme.row_height as f32);
+    let long = items.len() > 2 * visible_rows(s.list_budget, s.theme.row_height as f32);
     match (cards, headings) {
         (false, false) => Layout::Windowed,
         (false, true) => Layout::Sectioned,
@@ -67,7 +76,7 @@ pub fn wanted_rows(s: &Ui, in_view: std::ops::Range<usize>) -> Vec<usize> {
     if !matches!(layout(s, items), Layout::Windowed | Layout::WindowedCard) {
         return (0..items.len()).collect();
     }
-    let screen = visible_rows(s.theme.row_height as f32);
+    let screen = visible_rows(s.list_budget, s.theme.row_height as f32);
     let around = |range: std::ops::Range<usize>| {
         range.start.saturating_sub(screen)..range.end.saturating_add(screen).min(items.len())
     };
@@ -109,7 +118,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             col()
                 .key("scroll")
                 .w_full()
-                .h(CARDS_MAX_H)
+                .h(s.list_budget + CARDS_EXTRA_H)
                 .scroll(ScrollSpec { stick_bottom: false })
                 .on_scroll_offset(report_offset(s))
                 .instant_changes()
@@ -141,7 +150,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
                 .key("content-scroll")
                 .w_full()
                 .shrink()
-                .max_h(440.0)
+                .max_h(s.list_budget + CARDS_EXTRA_H)
                 .scroll(ScrollSpec { stick_bottom: false })
                 .on_scroll_offset(report_offset(s))
                 .child(content),
@@ -168,14 +177,17 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
         .growth(GrowthSpec::default())
         .no_scroll_anchor();
     let (height, list) = if layout == Layout::Windowed {
-        let shown = items.len().min(visible_rows(row_height)) as f32;
+        let shown = items.len().min(visible_rows(s.list_budget, row_height)) as f32;
         (
             shown * row_height,
             list.virtualize(row_height).on_visible_rows(Ui::rows_in_view),
         )
     } else {
         let full = items.len() as f32 * row_height + headings as f32 * SECTION_H;
-        (full.min(visible_rows(row_height) as f32 * row_height), list)
+        (
+            full.min(visible_rows(s.list_budget, row_height) as f32 * row_height),
+            list,
+        )
     };
     col().key("results").w_full().py(LIST_PAD).child(
         col()
@@ -543,14 +555,27 @@ pub fn row_key(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{LIST_HEIGHT_BUDGET, visible_rows};
+    use super::{DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET, list_budget, visible_rows};
 
     #[test]
     fn themed_lists_keep_the_original_height_budget() {
-        assert_eq!(visible_rows(52.0), 8);
-        assert_eq!(visible_rows(44.0), 8);
-        for height in [52.0, 64.0, 72.0, 92.0, 100.0] {
-            assert!(visible_rows(height) as f32 * height <= LIST_HEIGHT_BUDGET);
+        assert_eq!(visible_rows(DEFAULT_LIST_BUDGET, 52.0), 8);
+        for height in [44.0, 52.0, 64.0, 72.0, 92.0, 100.0] {
+            let rows = visible_rows(DEFAULT_LIST_BUDGET, height);
+            assert!(rows as f32 * height <= DEFAULT_LIST_BUDGET);
+            assert!((rows + 1) as f32 * height > DEFAULT_LIST_BUDGET);
         }
+        assert_eq!(visible_rows(DEFAULT_LIST_BUDGET, 1000.0), 1);
+    }
+
+    #[test]
+    fn more_room_shows_more_rows_up_to_a_limit() {
+        assert_eq!(list_budget(0.0), DEFAULT_LIST_BUDGET);
+        assert_eq!(list_budget(300.0), DEFAULT_LIST_BUDGET);
+        let roomy = list_budget(700.0);
+        assert!(roomy > DEFAULT_LIST_BUDGET && roomy < 700.0);
+        assert!(visible_rows(roomy, 52.0) > visible_rows(DEFAULT_LIST_BUDGET, 52.0));
+        assert_eq!(list_budget(5000.0), MAX_LIST_BUDGET);
+        assert_eq!(visible_rows(MAX_LIST_BUDGET, 52.0), 16);
     }
 }

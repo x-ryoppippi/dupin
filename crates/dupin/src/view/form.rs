@@ -4,7 +4,7 @@ use rune::{Color, El, ScrollSpec, TextStyle, auto_grow, col, edit_access, el, ro
 
 use crate::ui::{Draft, Entry, Ui, field_key};
 
-use super::results::{LIST_HEIGHT_BUDGET, LIST_PAD};
+use super::results::LIST_PAD;
 use super::theme::ResolvedTheme;
 
 const LABEL_W: f32 = 144.0;
@@ -12,7 +12,7 @@ const CONTROL_H: f32 = 34.0;
 
 /// An extension's form: each field beside its title, with what is wrong with it beneath, and
 /// the keys that submit and cancel it.
-pub(super) fn form(draft: &Draft, t: &ResolvedTheme, accent: Color) -> El {
+pub(super) fn form(draft: &Draft, budget: f32, t: &ResolvedTheme, accent: Color) -> El {
     let fields = draft
         .form
         .fields
@@ -70,7 +70,7 @@ pub(super) fn form(draft: &Draft, t: &ResolvedTheme, accent: Color) -> El {
                 .key("form-scroll")
                 .w_full()
                 .shrink()
-                .max_h(LIST_HEIGHT_BUDGET - 48.0)
+                .max_h(budget - 48.0)
                 .scroll(ScrollSpec { stick_bottom: false })
                 .child(col().w_full().py(LIST_PAD).gap(14.0).children(fields)),
         )
