@@ -307,7 +307,7 @@ impl Ui {
             let id = id.clone();
             me.lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .update(move |ui, tx| ui.search_again_if_listed(&id, tx));
+                .update(move |ui, tx| ui.search_again_if_listed(&id, false, tx));
         });
         let bridge = self.extensions.bridge.clone();
         let config = self.configuration.values.borrow().clone();
@@ -338,7 +338,7 @@ impl Ui {
                     // its package's `search` on this package's events.
                     Ok(handled) if handled.invalidated => {
                         let id = id_for_watch.clone();
-                        me.update(move |ui, tx| ui.search_again_if_listed(&id, tx));
+                        me.update(move |ui, tx| ui.search_again_if_listed(&id, true, tx));
                     }
                     Ok(_) | Err(RunError::Cancelled) => {}
                     Err(RunError::Failed(diagnostic)) => {
@@ -351,10 +351,17 @@ impl Ui {
 
     /// Searches again when the panel shows the package's catalogue, after something other than
     /// typing changed it. Only a search that lists the catalogue runs again: any other would run
-    /// its package's `search` for this package's change.
-    fn search_again_if_listed(&mut self, id: &PackageId, tx: &mut Tx) {
+    /// its package's `search` for this package's change. With `over_typing` false, as for a
+    /// refresh nobody asked for, a search already running is left alone: it reads the catalogue
+    /// itself, and replacing it with the same query would only delay what was typed.
+    fn search_again_if_listed(&mut self, id: &PackageId, over_typing: bool, tx: &mut Tx) {
         let current = self.session.command_id().clone();
-        if self.on_screen() && self.extensions.lists_catalogue_of(&current, id) {
+        let searching = matches!(
+            self.session.results(),
+            dupin_core::session::Results::Searching { .. }
+        );
+        if self.on_screen() && (over_typing || !searching) && self.extensions.lists_catalogue_of(&current, id)
+        {
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }
