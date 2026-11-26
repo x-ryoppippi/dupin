@@ -145,7 +145,7 @@ export function items() {
 <details>
 <summary>How the catalogue is listed and ranked</summary>
 
-`items` returns an array of items, or a list with `items` or `sections` as for `search`. It runs on first use, and again only after its `ttl` or when one of its actions or event handlers invalidates it. Once only its `ttl` has passed, Dupin keeps matching the rows it holds while it asks again in the background, and takes the answer unless something invalidated the catalogue meanwhile, so typing never waits for it.
+`items` returns an array of items, or a list with `items` or `sections` as for `search`. It runs on first use, and again only after its `ttl` or when one of its actions or event handlers invalidates it. Once only its `ttl` has passed, Dupin keeps matching the rows it holds while it asks again in the background, in a host of its own so a slow program never holds up other packages' searches, and takes the answer unless something invalidated the catalogue meanwhile, so typing never waits for it. While the panel lists the catalogue, Dupin asks again each time the `ttl` passes, without a keystroke, and searches the current query again with what came back; once the panel hides or moves on, it waits for the next search that lists it. A catalogue with a short `ttl`, such as running processes every 2 seconds, keeps itself current while you look at it and costs nothing once you don't.
 
 Typing the keyword and Space (such as `bm`) lists the catalogue in its own order, under its sections. Typing more ranks every item by how well its title or keywords match, as apps are ranked, and puts the items you pick most often for that query first; the headings then give way to one ranked list.
 
@@ -156,11 +156,11 @@ Every catalogue item needs an `id` that stays with it as the list changes: Dupin
 <details>
 <summary>List fields and ctx</summary>
 
-| List field | Value                                                                                                                                      |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ttl`      | Seconds, 1 to 86,400. Dupin asks again on the first use after they pass. Without it, the catalogue stays until it is invalidated.          |
-| `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                           |
-| `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together. |
+| List field | Value                                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttl`      | Seconds, 1 to 86,400. Dupin asks again in the background once they pass, as above. Without it, the catalogue stays until it is invalidated. |
+| `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                            |
+| `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together.  |
 
 `ctx` is frozen:
 

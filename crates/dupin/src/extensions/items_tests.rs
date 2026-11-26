@@ -796,7 +796,13 @@ fn every_part_is_asked_for_with_the_settings_it_is_handed() {
     let (first, second) = (settings(1), settings(2));
     let services = no_services();
     let never = || false;
-    let mut fetch = extension.fetch(super::host(), Instant::now() + QUERY_DEADLINE, &never, &services);
+    let mut fetch = extension.fetch(
+        super::host(),
+        super::Fetching::Resident,
+        Instant::now() + QUERY_DEADLINE,
+        &never,
+        &services,
+    );
     let mut cursor = |settings| {
         fetch(None, dupin_js_runtime::Reason::Load, settings)
             .unwrap()

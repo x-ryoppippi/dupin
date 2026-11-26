@@ -41,7 +41,7 @@ use catalogue::Asking;
 
 pub use fixtures::{Rendered, render, test};
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
-pub(crate) use provider::{hand_over_kinds, is_answered_consent_row, stands_in};
+pub(crate) use provider::{hand_over_kinds, is_answered_consent_row, on_catalogue_refreshed, stands_in};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -69,6 +69,8 @@ pub struct Extension {
     exports: OnceLock<Exports>,
     catalogue: catalogue::Cached,
     web_searches_noted: AtomicBool,
+    /// A thread waits to search again once the catalogue outlives its `ttl`.
+    waking: AtomicBool,
     /// What the broker knows the package by: its `name`, or `bundled:<name>` for one that
     /// ships with Dupin.
     pub package: PackageId,
@@ -80,6 +82,15 @@ pub struct Extension {
     pub provides: manifest::Provides,
     /// The bytecode the extension host compiled, which only the host ever loads.
     compiled: Compiled,
+}
+
+/// Which helper asks a package for its catalogue: the resident one a search waits for, or one
+/// of its own for a refresh nobody waits for, which may run a program for as long as it takes
+/// without holding up the searches of every package that shares the resident one.
+#[derive(Clone, Copy)]
+enum Fetching {
+    Resident,
+    Alone,
 }
 
 /// Where an extension was found. A user extension with a bundled one's `name` replaces it.
@@ -250,15 +261,45 @@ impl Extension {
             refresher.refresh_in_background(settings.clone(), call);
         }
         let never = || false;
-        self.catalogue
+        let rows = self
+            .catalogue
             .search(
                 query,
                 limit,
                 asking,
-                &mut self.fetch(host(), deadline, &never, &call.services),
+                &mut self.fetch(host(), Fetching::Resident, deadline, &never, &call.services),
                 self,
             )
-            .map_err(|error| self.located(error))
+            .map_err(|error| self.located(error))?;
+        if let Some(refresher) = refresher {
+            refresher.wake_when_stale();
+        }
+        Ok(rows)
+    }
+
+    /// Searches again, through [`on_catalogue_refreshed`], once the rows just listed outlive
+    /// their `ttl`, so a catalogue the panel goes on listing is asked for again without a
+    /// keystroke. That search finds it stale and refreshes it in the background, and the
+    /// refresh searches again once it lands; when the panel no longer lists the catalogue, the
+    /// launcher doesn't search, and nothing wakes it until it is next listed.
+    fn wake_when_stale(self: &Arc<Self>) {
+        let Some(expires) = self.catalogue.expires() else {
+            return;
+        };
+        if self.waking.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let extension = Arc::clone(self);
+        let spawned = std::thread::Builder::new()
+            .name(format!("catalogue-wake-{}", self.id))
+            .spawn(move || {
+                std::thread::sleep(expires.saturating_duration_since(Instant::now()));
+                extension.waking.store(false, Ordering::Release);
+                provider::catalogue_refreshed(&extension.package);
+            });
+        if spawned.is_err() {
+            self.waking.store(false, Ordering::Release);
+        }
     }
 
     /// Asks the package again for its stale catalogue on a thread of its own, through `call`'s
@@ -272,12 +313,15 @@ impl Extension {
             .spawn(move || {
                 let never = || false;
                 let deadline = Instant::now() + QUERY_DEADLINE;
-                extension.catalogue.refresh_stale(
+                let refreshed = extension.catalogue.refresh_stale(
                     &settings,
                     generation,
-                    &mut extension.fetch(host(), deadline, &never, &services),
+                    &mut extension.fetch(host(), Fetching::Alone, deadline, &never, &services),
                     &*extension,
                 );
+                if refreshed {
+                    provider::catalogue_refreshed(&extension.package);
+                }
             });
         if let Err(error) = spawned {
             crate::log::warn(&format!(
@@ -294,6 +338,7 @@ impl Extension {
     fn fetch<'a>(
         &'a self,
         host: &'a Host,
+        fetching: Fetching,
         deadline: Instant,
         cancelled: &'a dyn Fn() -> bool,
         services: &'a Arc<dyn Services>,
@@ -308,7 +353,12 @@ impl Extension {
                     dupin_extension_host::Preferences::encode(&preferences),
                 )
             }));
-            host.items(
+            let items = match fetching {
+                Fetching::Resident => Host::items,
+                Fetching::Alone => Host::items_alone,
+            };
+            items(
+                host,
                 &self.compiled,
                 cursor,
                 reason,
@@ -338,7 +388,7 @@ impl Extension {
         self.catalogue
             .web_searches(
                 asking,
-                &mut self.fetch(host(), deadline, &never, &call.services),
+                &mut self.fetch(host(), Fetching::Resident, deadline, &never, &call.services),
                 self,
             )
             .map_err(|error| self.located(error))
@@ -421,10 +471,19 @@ pub(crate) fn headless_ready() {
 }
 
 /// The one extension host every JavaScript extension shares, which starts a trust domain's
-/// helper on that domain's first query.
+/// helper on that domain's first query. Every bundled package's calls queue for one helper, and
+/// the wait counts against each call's deadline.
 fn host() -> &'static Host {
-    static HOST: OnceLock<Host> = OnceLock::new();
-    HOST.get_or_init(|| Host::fixed(Box::new(helper_command), headless_environment()))
+    launcher_wide!(
+        Host,
+        Host::fixed(Box::new(helper_command), headless_environment())
+    )
+}
+
+/// The process ID and processor time of the helper that runs `extension`'s searches.
+#[cfg(test)]
+pub(crate) fn helper_processor_time(extension: &Extension) -> Option<(u32, std::time::Duration)> {
+    host().helper_processor_time(&extension.compiled)
 }
 
 /// Where the launcher reads the time it measures guests' timestamps against, such as how long
@@ -785,6 +844,7 @@ fn load_with(
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::new(manifest.matching),
             web_searches_noted: AtomicBool::new(false),
+            waking: AtomicBool::new(false),
             package,
             revision,
             capabilities: manifest.capabilities,
@@ -1057,6 +1117,7 @@ pub(crate) mod tests {
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
             web_searches_noted: AtomicBool::new(false),
+            waking: AtomicBool::new(false),
             revision: Revision::new("blake3:fixture").unwrap(),
             capabilities: Capabilities::default(),
             provides: Default::default(),

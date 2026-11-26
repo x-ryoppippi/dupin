@@ -113,6 +113,7 @@ With `settings` set, `config.toml` links into the Nix store. To change a locked 
 - [Keywords and aliases](./features/keywords.md#aliases)
 - [Launch at login](./features/settings.md#launch-at-login)
 - [Recent items](./features/recent-items.md#configuration)
+- [Repositories](./features/repo.md#configuration)
 - [Script commands](./features/scripts.md#configuration)
 - [Search selected text](./features/selected-text.md#configuration)
 - [Snippets](./features/snippets.md#configuration)

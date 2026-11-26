@@ -1299,6 +1299,12 @@ query = "window"
 tags = ["keyword"]
 
 [[cases]]
+id = "keyword.repo"
+intent = "command:extension.repo"
+query = "repo"
+tags = ["keyword"]
+
+[[cases]]
 id = "keyword.help"
 intent = "command:extension.dupin"
 query = "help"

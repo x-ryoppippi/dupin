@@ -31,5 +31,8 @@ docs-images *args: build-debug
 docs-clips *args: build-debug
     nu scripts/docs-images.nu --kind clips {{ args }}
 
+docs-glass *args: build
+    nu scripts/docs-glass.nu {{ args }}
+
 footprint: build-debug
     nu scripts/footprint.nu

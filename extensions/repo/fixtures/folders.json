@@ -1,0 +1,258 @@
+{
+	"fixture": 1,
+	"description": "Without ghq or Git allowed, the repositories in the folders are listed by name alone, nothing inside a repository or past the depth is looked at, and a folder the Mac doesn't have is skipped without asking; the actions that need no program still work.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"developer": {
+				"linked/.git": "gitdir: /Users/dupin/src/team/app/.git/worktrees/linked\n"
+			},
+			"ghq": {
+				"github.com/x-ryoppippi/dupin/.git/HEAD": "ref: refs/heads/main\n",
+				"github.com/x-ryoppippi/dupin/extensions/inner/.git/HEAD": "ref: refs/heads/main\n"
+			},
+			"src": {
+				".hidden/secret/.git/HEAD": "ref: refs/heads/main\n",
+				"a/b/c/d/too-deep/.git/HEAD": "ref: refs/heads/main\n",
+				"team/app/.git/HEAD": "ref: refs/heads/main\n"
+			}
+		},
+		"consent": {
+			"exec:ghq-list": "pending",
+			"exec:git-last-commit": "deny",
+			"exec:git-remote": "deny",
+			"exec:git-status": "deny",
+			"files:projects": "pending"
+		}
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/src/team/app"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/src/team/app"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/src/team/app",
+								"title": "Reveal in Finder"
+							},
+							{
+								"copy": "/Users/dupin/src/team/app",
+								"title": "Copy Path"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/src/team/app"
+								},
+								{
+									"label": "Status",
+									"text": "Git hasn’t been read for it yet"
+								}
+							]
+						},
+						"id": "rf071728a98109588",
+						"keywords": ["team/app", "team"],
+						"subtitle": "team",
+						"title": "app"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+								"title": "Reveal in Finder"
+							},
+							{
+								"copy": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+								"title": "Copy Path"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin"
+								},
+								{
+									"label": "Status",
+									"text": "Git hasn’t been read for it yet"
+								}
+							]
+						},
+						"id": "r07b423fc5da800b6",
+						"keywords": ["x-ryoppippi/dupin", "x-ryoppippi", "github.com"],
+						"subtitle": "x-ryoppippi · github.com",
+						"title": "dupin"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/Developer/linked"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/Developer/linked"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/Developer/linked",
+								"title": "Reveal in Finder"
+							},
+							{
+								"copy": "/Users/dupin/Developer/linked",
+								"title": "Copy Path"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/Developer/linked"
+								},
+								{
+									"label": "Status",
+									"text": "Git hasn’t been read for it yet"
+								}
+							]
+						},
+						"id": "red454a62f43e9e74",
+						"keywords": ["Developer/linked", "Developer"],
+						"subtitle": "Developer",
+						"title": "linked"
+					}
+				],
+				"selected": 0,
+				"storage": [
+					{
+						"repos": [
+							"/Users/dupin/src/team/app",
+							"/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+							"/Users/dupin/Developer/linked"
+						],
+						"status": {}
+					}
+				]
+			}
+		},
+		{
+			"query": "team/app",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/src/team/app"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/src/team/app"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/src/team/app",
+								"title": "Reveal in Finder"
+							},
+							{
+								"copy": "/Users/dupin/src/team/app",
+								"title": "Copy Path"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/src/team/app"
+								},
+								{
+									"label": "Status",
+									"text": "Git hasn’t been read for it yet"
+								}
+							]
+						},
+						"id": "rf071728a98109588",
+						"keywords": ["team/app", "team"],
+						"subtitle": "team",
+						"title": "app"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy Path",
+			"expect": {
+				"effect": {
+					"copy": "/Users/dupin/src/team/app"
+				}
+			}
+		}
+	]
+}

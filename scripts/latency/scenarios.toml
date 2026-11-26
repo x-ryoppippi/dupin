@@ -108,6 +108,45 @@ provider = "extension.emoji"
 package = "bundled:emoji"
 budget_ms = 5.0
 
+# The bundled Processes, Ports and Coding Agents catalogues under their keywords, which ship off.
+# Each `extensions` folder holds only `.headless-fixture.json`, the fixture whose `exec` replies
+# stand in for ps and lsof and whose consent turns the package on. Loading the catalogue is the
+# warm-up's work and its 2-second refresh runs in a helper of its own, so a measured keypress
+# only matches the rows Dupin holds. Nothing native ever answered them.
+[features.proc.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.proc"
+package = "bundled:proc"
+extensions = "scripts/latency/proc.extensions"
+budget_ms = 5.0
+
+[features.port.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.port"
+package = "bundled:port"
+extensions = "scripts/latency/port.extensions"
+budget_ms = 5.0
+
+[features.agent.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.agent"
+package = "bundled:agent"
+extensions = "scripts/latency/agent.extensions"
+budget_ms = 5.0
+
+# The bundled Repositories catalogue under its keyword, held to the keystroke budget, since
+# nothing native ever answered it. A latency run allows no ghq, Git or folders, so a copy in the
+# extensions folder, which replaces the bundled package by its name, hands Dupin 600 rows shaped
+# as the bundled one lists them; a measured keypress only matches the rows Dupin holds and runs
+# neither the package nor Git.
+[features.repo.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension.repo"
+package = "repo"
+extensions = "scripts/latency/repo.extensions"
+budget_ms = 5.0
+
 [[scenarios]]
 id = "search.saf"
 feature = "search"
@@ -192,3 +231,27 @@ id = "emoji.ja"
 feature = "emoji"
 prefix = "emoji "
 typed = "にっこり"
+
+[[scenarios]]
+id = "proc.node"
+feature = "proc"
+prefix = "proc "
+typed = "node"
+
+[[scenarios]]
+id = "port.5173"
+feature = "port"
+prefix = "port "
+typed = "5173"
+
+[[scenarios]]
+id = "agent.claude"
+feature = "agent"
+prefix = "agent "
+typed = "claude"
+
+[[scenarios]]
+id = "repo.ccu"
+feature = "repo"
+prefix = "repo "
+typed = "ccu"

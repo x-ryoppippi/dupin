@@ -1178,6 +1178,7 @@ fn timed_profile(
         args,
         output,
         ssh_agent,
+        output_bytes,
         ..
     } = scope
     else {
@@ -1212,6 +1213,7 @@ fn timed_profile(
             return_output: *output,
             ssh_agent: *ssh_agent,
             timeout,
+            output_bytes: output_bytes.map_or(exec::DEFAULT_OUTPUT_BYTES, |bytes| bytes as usize),
             ..exec::Options::default()
         },
     )

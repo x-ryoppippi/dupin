@@ -215,6 +215,11 @@ title = "Window Management"
 keywords = ["window"]
 
 [[commands]]
+id = "extension.repo"
+title = "Repositories"
+keywords = ["repo"]
+
+[[commands]]
 id = "extension.dupin"
 title = "Dupin Help"
 keywords = ["help"]

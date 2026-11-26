@@ -44,10 +44,14 @@ Shipped with Dupin as extensions, each one yours to eject and change.
 - [Clipboard history](./features/clipboard.md)
 - [Dictionary](./features/dictionary.md)
 - [Emoji & Symbols](./features/emoji.md)
+- [Repositories](./features/repo.md)
 - [Snippets](./features/snippets.md)
 - [Web searches](./features/web-searches.md)
 - [Maps](./features/maps.md)
 - [Window management](./features/window-management.md)
+- [Processes](./features/processes.md)
+- [Ports](./features/ports.md)
+- [Coding agents](./features/coding-agents.md)
 
 ## Your own extensions
 

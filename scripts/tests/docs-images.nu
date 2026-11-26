@@ -1,6 +1,7 @@
 use std/assert
 use ../docs-images.nu [
     clip-timeline
+    glass-problems
     embedded
     image-paths
     key-caption
@@ -207,4 +208,13 @@ def main [] {
     assert equal (
         problems {images: [], clips: [$hero]} $hero_files [$page] {|path| $path in $hero_files }
     ) []
+
+    let glass = {
+        clips: [
+            ($hero | insert glass true)
+            ($clip | update name other)
+        ]
+    }
+    assert equal (glass-problems $glass {"home/hero": {macos: "26.3"}}) []
+    assert equal (glass-problems $glass {"extensions/other": {macos: "26.3"}}) ["glass.json lists extensions/other, which is not a `glass = true` clip"]
 }
