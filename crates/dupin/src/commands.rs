@@ -117,6 +117,7 @@ pub(crate) fn configured_with(
     for feature in MANIFEST {
         (feature.prepare)(config, &mut commands);
     }
+    crate::hotkey::mark_shortcuts(config, &mut commands.registry);
     Ok(ConfiguredCommands {
         registry: commands.registry,
         notice: (!commands.notices.is_empty()).then(|| commands.notices.join("\n")),

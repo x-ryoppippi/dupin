@@ -27,5 +27,8 @@ snap: build-debug
 docs-images *args: build-debug
     nu scripts/docs-images.nu {{ args }}
 
+docs-clips *args: build-debug
+    nu scripts/docs-images.nu --kind clips {{ args }}
+
 footprint: build-debug
     nu scripts/footprint.nu

@@ -480,7 +480,27 @@ impl Session {
         self.reset_to_default(None)
     }
 
+    /// Enters `command`'s search with `query` typed, from whatever the panel showed, as a
+    /// shortcut bound to the command does. None when no command has that ID.
+    pub fn enter_command(&mut self, command: &CommandId, query: &str) -> Option<Vec<Effect>> {
+        self.commands.command(command)?;
+        let mut effects = vec![Effect::ReplaceQuery(query.to_owned())];
+        effects.extend(self.start_over(None, Some(command.clone()), query));
+        Some(effects)
+    }
+
     fn reset_to_default(&mut self, commands: Option<CommandRegistry>) -> Vec<Effect> {
+        self.start_over(commands, None, "")
+    }
+
+    /// Leaves any page, rename or destination for a fresh search of `command`, or of the
+    /// default command without one.
+    fn start_over(
+        &mut self,
+        commands: Option<CommandRegistry>,
+        command: Option<CommandId>,
+        query: &str,
+    ) -> Vec<Effect> {
         let was_searching = matches!(self.search.results, Results::Searching { .. });
         if let Some(destination) = self.destination.take() {
             self.search = destination.original;
@@ -492,7 +512,10 @@ impl Session {
             self.commands = commands;
         }
         self.renaming = None;
-        self.search = SearchState::new(self.commands.default().clone(), false);
+        let explicit = command.is_some();
+        let command = command.unwrap_or_else(|| self.commands.default().clone());
+        self.search = SearchState::new(command, explicit);
+        self.search.query = query.to_owned();
         let effects = self.search();
         if effects.is_empty() && was_searching {
             vec![Effect::CancelSearch]

@@ -11,8 +11,9 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::time::{Duration, Instant};
 
 use dupin_ext_sdk::fixture::{self, Consent, FilesReply, Replies};
 use dupin_extension_bridge::services::{self, Services, Subscription};
@@ -79,7 +80,13 @@ struct State {
     windows: Option<windows::Service<windows::Fixture>>,
     /// The snippets the fixture hands the package, which its `snippets` calls change.
     snippets: Mutex<Snippets>,
+    /// What watches the clipboard, by subscription, which a headless launcher hands the
+    /// fixture's copies.
+    watchers: Mutex<Vec<(u64, Watcher)>>,
+    subscriptions: AtomicU64,
 }
+
+type Watcher = Arc<dyn Fn(Value) + Send + Sync>;
 
 impl Fixture {
     /// `name` is the fixture's path in the package, for diagnostics.
@@ -113,10 +120,7 @@ impl Fixture {
     /// The `snippets` and `paste` preferences, when a `snippets` call changed the snippets
     /// since the last call, as Dupin hands them to the bundled package after a change.
     pub fn take_snippets(&self) -> Option<serde_json::Map<String, Value>> {
-        let mut snippets = lock(&self.replier.state.snippets);
-        std::mem::take(&mut snippets.changed).then(|| {
-            dupin_core::snippets::preferences(&snippets.declared, &snippets.stored, snippets.paste).0
-        })
+        self.replier.take_snippets()
     }
 }
 
@@ -192,6 +196,8 @@ impl Replier {
             effects: Mutex::default(),
             windows,
             snippets: Mutex::new(Snippets::seeded(preferences)),
+            watchers: Mutex::default(),
+            subscriptions: AtomicU64::default(),
         });
         Ok(Self { state, scratch })
     }
@@ -299,6 +305,13 @@ impl Replier {
         Ok(())
     }
 
+    fn take_snippets(&self) -> Option<serde_json::Map<String, Value>> {
+        let mut snippets = lock(&self.state.snippets);
+        std::mem::take(&mut snippets.changed).then(|| {
+            dupin_core::snippets::preferences(&snippets.declared, &snippets.stored, snippets.paste).0
+        })
+    }
+
     fn take_effects(&self) -> Effects {
         let mut effects = std::mem::take(&mut *lock(&self.state.effects));
         if let Some(windows) = &self.state.windows {
@@ -321,22 +334,35 @@ impl Replier {
 }
 
 /// Hands the headless launcher `dupin ext snap` starts the fixture it renders, as JSON:
-/// `{ "fixture": <path>, "package": <package ID> }`.
+/// `{ "fixture": <path>, "name": <package name>, "revision": <revision> }`.
 pub(in crate::extensions) const HEADLESS_FIXTURE: &str = "DUPIN_HEADLESS_EXTENSION_FIXTURE";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(in crate::extensions) struct HeadlessFixture {
     pub fixture: PathBuf,
-    pub package: String,
+    /// The `name` in the package's package.json.
+    pub name: String,
+    pub revision: String,
+    /// Each clipboard `event` step, by its index among the steps, and the seconds into the
+    /// script it comes at.
+    pub events: Vec<(usize, f64)>,
 }
 
 /// The fixture a headless launcher renders: its replies answer every host request, and its
-/// consent is the replayed package's once the launcher installs it.
+/// consent and preferences are the replayed package's once the launcher installs it.
 pub(in crate::extensions) struct Headless {
-    package: PackageId,
+    name: String,
+    revision: Revision,
     replier: Replier,
-    /// The revision consent was last given for.
-    granted: Mutex<Option<Revision>>,
+    /// Whether the fixture's consent was given.
+    granted: Mutex<bool>,
+    /// The fixture's preferences, with the snippets its `snippets` calls changed: the same
+    /// value until they change again.
+    preferences: Mutex<Arc<dupin_js_runtime::Preferences>>,
+    /// The copies the clipboard `event` steps make, and the seconds into the script each
+    /// comes at.
+    events: Vec<(f64, Value)>,
+    played: AtomicBool,
 }
 
 /// The fixture `dupin ext snap` handed this headless launcher, if it handed one. A launcher
@@ -362,12 +388,23 @@ impl Headless {
         let name = handed.fixture.display().to_string();
         let parsed = fixture::read(&name, &handed.fixture)?;
         let now = fixture::parse_time(&parsed.environment.now).expect("validated by `fixture::parse`");
-        let package = PackageId::new(handed.package)
-            .map_err(|error| Diagnostic::new("invalid-package", error.to_string()))?;
+        let revision =
+            Revision::new(handed.revision).map_err(|error| Diagnostic::new("invalid-package", error))?;
         Ok(Self {
-            package,
+            name: handed.name,
+            revision,
             replier: Replier::new(&parsed.replies, &parsed.preferences, now)?,
             granted: Mutex::default(),
+            preferences: Mutex::new(Arc::new(parsed.preferences.clone())),
+            events: handed
+                .events
+                .iter()
+                .filter_map(|(index, at)| match parsed.steps.get(*index)?.action() {
+                    fixture::Action::Event(CLIPBOARD_EVENT, data) => Some((*at, data.clone())),
+                    _ => None,
+                })
+                .collect(),
+            played: AtomicBool::new(false),
         })
     }
 
@@ -375,26 +412,71 @@ impl Headless {
         self.replier.services()
     }
 
-    /// Gives `extension` the fixture's consent the first time `bridge` holds the replayed
-    /// package at its revision.
+    /// Whether `extension` is the replayed package: its name at its revision. A copy byte for
+    /// byte the shipped package is the bundled package, so it is that one.
+    pub fn renders(&self, extension: &Extension) -> bool {
+        extension.id == self.name && extension.revision == self.revision
+    }
+
+    /// Gives the replayed package the fixture's consent, and nothing more, the first time
+    /// `bridge` holds it.
     pub fn grant(&self, bridge: &Bridge, extension: &Extension) {
-        if extension.package != self.package {
+        if !self.renders(extension) {
             return;
         }
         let mut granted = lock(&self.granted);
-        if granted.as_ref() == Some(&extension.revision) {
+        if *granted {
             return;
         }
-        let name = self.package.to_string();
         match self
             .replier
-            .grant(bridge, &extension.package, &extension.revision, &name)
+            .grant(bridge, &extension.package, &extension.revision, &self.name)
         {
-            Ok(()) => *granted = Some(extension.revision.clone()),
-            Err(diagnostic) => crate::log::warn(&format!("fixture for {name}: {diagnostic}")),
+            Ok(()) => *granted = true,
+            Err(diagnostic) => crate::log::warn(&format!("fixture for {}: {diagnostic}", self.name)),
         }
     }
+
+    /// What the replayed package is handed as `ctx.preferences` beside its declared ones, in
+    /// place of its feature's settings, as `dupin ext test` hands it the fixture's.
+    pub fn preferences(&self, extension: &Extension) -> Option<Arc<dupin_js_runtime::Preferences>> {
+        if !self.renders(extension) {
+            return None;
+        }
+        let mut held = lock(&self.preferences);
+        if let Some(snippets) = self.replier.take_snippets() {
+            let mut preferences = (**held).clone();
+            preferences.extend(snippets);
+            *held = Arc::new(preferences);
+        }
+        Some(held.clone())
+    }
+
+    /// Hands what watches the clipboard each copy the fixture's clipboard `event` steps make,
+    /// at its time in the script, counted from now: the first frame, where the script starts.
+    pub fn play_events(&'static self) {
+        if self.events.is_empty() || self.played.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let start = Instant::now();
+        std::thread::spawn(move || {
+            for (at, copy) in &self.events {
+                let due = start + Duration::from_secs_f64(*at);
+                std::thread::sleep(due.saturating_duration_since(Instant::now()));
+                let watchers: Vec<Watcher> = lock(&self.replier.state.watchers)
+                    .iter()
+                    .map(|(_, watcher)| watcher.clone())
+                    .collect();
+                for watcher in watchers {
+                    watcher(copy.clone());
+                }
+            }
+        });
+    }
 }
+
+/// The event a fixture names for a copy the package watches the clipboard for.
+pub(in crate::extensions) const CLIPBOARD_EVENT: &str = "clipboard";
 
 /// The windows service a fixture's `replies.windows` describes, read as the service's own shapes.
 fn window_fixture(reply: &fixture::WindowsReply) -> Result<windows::Service<windows::Fixture>, Diagnostic> {
@@ -598,9 +680,29 @@ impl services::Clipboard for Shared {
         Ok(())
     }
 
-    /// Watched copies arrive as the fixture's `event` steps instead.
-    fn watch(&self, _changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure> {
-        Ok(Box::new(()))
+    /// The fixture's `event` steps are the copies watched: a replay hands them to the package
+    /// itself, and a headless launcher to what watches here.
+    fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure> {
+        let id = self.0.subscriptions.fetch_add(1, Ordering::Relaxed);
+        lock(&self.0.watchers).push((id, Arc::from(changed)));
+        Ok(Box::new(Watching {
+            state: Arc::downgrade(&self.0),
+            id,
+        }))
+    }
+}
+
+/// Keeps a clipboard watch while held.
+struct Watching {
+    state: Weak<State>,
+    id: u64,
+}
+
+impl Drop for Watching {
+    fn drop(&mut self) {
+        if let Some(state) = self.state.upgrade() {
+            lock(&state.watchers).retain(|(id, _)| *id != self.id);
+        }
     }
 }
 

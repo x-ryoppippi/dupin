@@ -212,7 +212,10 @@ pub(crate) fn run() {
                     },
                     updater,
                     configuration,
-                    dupin_core::History::default(),
+                    match rune::tooling::is_headless() {
+                        true => crate::store::headless_history(),
+                        false => dupin_core::History::default(),
+                    },
                     calendar_access,
                     quick_look,
                     running,
@@ -222,6 +225,7 @@ pub(crate) fn run() {
             }
         })
         .on_ready(move |window| {
+            crate::extensions::headless_ready();
             let panel = window.clone();
             handle.update(move |ui, _| ui.set_panel_window(panel));
             install_quick_look(window, &handle, &quick_look);

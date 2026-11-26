@@ -1,2 +1,9 @@
 [calendar]
 enabled = true
+
+[clipboard]
+enabled = true
+
+[bindings."cmd+shift+v"]
+target = "dupin"
+command = "clipboard"

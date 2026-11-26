@@ -96,6 +96,9 @@ pub struct CommandSpec {
     pub(crate) query_eligibility: QueryEligibility,
     /// Whether rows that name commands while the main search is typed, and `?`, name it.
     hinted: bool,
+    /// The global shortcut that opens it, as macOS writes it (⇧⌘V), which the rows naming it
+    /// show beside its keywords.
+    shortcut: Option<String>,
 }
 
 impl CommandSpec {
@@ -103,6 +106,7 @@ impl CommandSpec {
         Self {
             id,
             title: None,
+            shortcut: None,
             icon: None,
             result_limit,
             candidate_limit: None,
@@ -256,6 +260,8 @@ pub struct KeywordEntry {
     /// Finder icon of the app, file or folder.
     pub(crate) icon: Option<crate::Icon>,
     pub keywords: Vec<String>,
+    /// The global shortcut that opens the command, as macOS writes it.
+    pub(crate) shortcut: Option<String>,
 }
 
 /// A web search's alias, or a shorthand for one.
@@ -415,6 +421,17 @@ impl CommandRegistry {
         Ok(())
     }
 
+    /// Gives a registered command the global shortcut that opens it, written as macOS writes
+    /// it, for the rows naming it to show.
+    pub fn set_shortcut(&mut self, command: &CommandId, keys: impl Into<String>) -> Result<(), CommandError> {
+        let spec = self
+            .commands
+            .get_mut(command)
+            .ok_or_else(|| CommandError::UnknownCommand(command.clone()))?;
+        spec.shortcut = Some(keys.into());
+        Ok(())
+    }
+
     pub fn add_keyword(
         &mut self,
         command: &CommandId,
@@ -545,6 +562,7 @@ impl CommandRegistry {
                     subtitle: spec.presentation.placeholder.clone(),
                     icon: spec.icon.clone(),
                     keywords,
+                    shortcut: spec.shortcut.clone(),
                 })
             })
             .collect();
@@ -558,6 +576,7 @@ impl CommandRegistry {
                     subtitle: "Web search".into(),
                     icon: crate::Icon::symbol(WEB_SEARCH_SYMBOL),
                     keywords: Vec::new(),
+                    shortcut: None,
                 })
                 .keywords
                 .push(alias.clone());
@@ -583,6 +602,7 @@ impl CommandRegistry {
                     subtitle: crate::item::tilde(&path.to_string_lossy()),
                     icon: Some(crate::Icon::File(path.clone())),
                     keywords: Vec::new(),
+                    shortcut: None,
                 })
                 .keywords
                 .push(alias.clone());

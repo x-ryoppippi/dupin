@@ -31,6 +31,7 @@ pub(super) const FEATURE: Feature = Feature {
         main_search: false,
         paste_notice: None,
         enabled: |config| config.clipboard.enabled,
+        turn_on: |config| config.clipboard.enabled = true,
     }),
     ..Feature::EMPTY
 };

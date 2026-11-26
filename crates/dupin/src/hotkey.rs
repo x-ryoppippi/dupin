@@ -206,8 +206,9 @@ impl Binding {
         config: &Config,
         previous: &Config,
         scripts: Option<&Catalog>,
+        commands: Commands,
     ) -> Result<Option<String>, String> {
-        self.configure(config, previous, scripts, false)
+        self.configure(config, previous, (scripts, commands), false)
     }
 
     pub fn reserve_for_save(
@@ -215,8 +216,10 @@ impl Binding {
         config: &Config,
         previous: &Config,
         scripts: Option<&Catalog>,
+        commands: Commands,
     ) -> Result<(), String> {
-        self.configure(config, previous, scripts, true).map(|_| ())
+        self.configure(config, previous, (scripts, commands), true)
+            .map(|_| ())
     }
 
     pub fn discard_reservations(&self) {
@@ -231,11 +234,11 @@ impl Binding {
         &self,
         config: &Config,
         previous: &Config,
-        scripts: Option<&Catalog>,
+        (scripts, commands): (Option<&Catalog>, Commands),
         reserve: bool,
     ) -> Result<Option<String>, String> {
         let mut targets = configured_targets(config)?;
-        let mut problems = filter_script_bindings(&mut targets, scripts);
+        let mut problems = filter_unavailable(&mut targets, scripts, commands);
         let previous_bindings = binding_targets(previous);
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut keep_unavailable = [false; 2];
@@ -373,6 +376,18 @@ impl Binding {
             .map(|owner| format!("{} is used by {owner}.", shortcut.keycaps().join("")))
     }
 
+    /// Why another app, or macOS, keeps `shortcut` from a binding recorded in Settings; none
+    /// for a chord Dupin holds itself, which config.toml then says who has.
+    pub fn used_elsewhere(&self, shortcut: &Shortcut) -> Option<String> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.ids.contains_key(shortcut) {
+            return None;
+        }
+        drop(state);
+        self.owner(shortcut)
+            .map(|owner| format!("{} is used by {owner}.", shortcut.keycaps().join("")))
+    }
+
     fn why(&self, shortcut: &Shortcut, error: &ShortcutError) -> String {
         match (error, self.panel.shortcut_owner(shortcut)) {
             (ShortcutError::Conflict, Some(owner)) => format!("{owner} already uses it"),
@@ -438,6 +453,45 @@ pub fn binding_targets(config: &Config) -> HashMap<Shortcut, &HotkeyTarget> {
         .collect()
 }
 
+/// Gives each command in `registry` that a `target = "dupin"` binding without a query opens
+/// that binding's shortcut, for the rows naming the command to show.
+pub fn mark_shortcuts(config: &Config, registry: &mut dupin_core::CommandRegistry) {
+    let registered = registry.ids();
+    for (accelerator, target) in &config.bindings {
+        let HotkeyTarget::Dupin { command, query: None } = target else {
+            continue;
+        };
+        let (Ok(shortcut), Ok(command)) = (
+            accelerator.parse::<Shortcut>(),
+            crate::features::aliases::command(command, &registered),
+        ) else {
+            continue;
+        };
+        _ = registry.set_shortcut(&command, shortcut.keycaps().join(""));
+    }
+}
+
+/// What in `config` already uses `shortcut`, in words, leaving out the binding written
+/// `except`.
+pub fn holder(config: &Config, shortcut: &Shortcut, except: Option<&str>) -> Option<String> {
+    if let Some(kind) = LauncherShortcut::ALL
+        .into_iter()
+        .find(|kind| parse(kind.accelerator(config)).ok().flatten().as_ref() == Some(shortcut))
+    {
+        return Some(format!("the {} shortcut", kind.name()));
+    }
+    let (_, target) = config.bindings.iter().find(|(accelerator, _)| {
+        Some(accelerator.as_str()) != except
+            && accelerator.parse::<Shortcut>().ok().as_ref() == Some(shortcut)
+    })?;
+    Some(match target {
+        HotkeyTarget::App { bundle_id, .. } => format!("the binding for {bundle_id}"),
+        HotkeyTarget::Command { .. } => "a command binding".to_owned(),
+        HotkeyTarget::Script { script, .. } => format!("the binding for {script}"),
+        HotkeyTarget::Dupin { command, .. } => format!("the binding for {command}"),
+    })
+}
+
 fn unchanged_binding(
     shortcut: &Shortcut,
     targets: &HashMap<Shortcut, Target>,
@@ -467,7 +521,10 @@ fn configured_targets(config: &Config) -> Result<HashMap<Shortcut, Target>, Stri
                 Some("an app bundle identifier")
             }
             HotkeyTarget::Command { command } if command.trim().is_empty() => Some("a shell command"),
-            HotkeyTarget::App { .. } | HotkeyTarget::Command { .. } | HotkeyTarget::Script { .. } => None,
+            HotkeyTarget::App { .. }
+            | HotkeyTarget::Command { .. }
+            | HotkeyTarget::Script { .. }
+            | HotkeyTarget::Dupin { .. } => None,
         };
         if let Some(required) = problem {
             return Err(format!("{} needs {required}.", shortcut.keycaps().join("")));
@@ -494,25 +551,44 @@ fn insert_target(
     }
 }
 
-fn filter_script_bindings(targets: &mut HashMap<Shortcut, Target>, scripts: Option<&Catalog>) -> Vec<String> {
+/// Whether the command a `target = "dupin"` binding names opens now; `Err(None)` while the
+/// extensions that may answer it are still loading.
+pub type Commands<'a> = &'a dyn Fn(&str) -> Result<(), Option<String>>;
+
+/// What the bindings whose script or command is missing need, which leaves them out until it
+/// appears. Without a catalogue, or while a command may still load, they are left out quietly.
+fn filter_unavailable(
+    targets: &mut HashMap<Shortcut, Target>,
+    scripts: Option<&Catalog>,
+    commands: Commands,
+) -> Vec<String> {
     let mut problems = Vec::new();
     targets.retain(|shortcut, target| {
-        let Target::Configured(HotkeyTarget::Script { script, args }) = target else {
-            return true;
-        };
-        let Some(scripts) = scripts else {
-            return false;
-        };
-        match scripts.bound_script(script, args) {
-            Ok(_) => true,
-            Err(problem) => {
-                problems.push(format!(
-                    "Couldn't register the {} binding for {script:?}. {problem}.",
-                    shortcut.keycaps().join("")
-                ));
-                false
+        let problem = match target {
+            Target::Configured(HotkeyTarget::Script { script, args }) => {
+                let Some(scripts) = scripts else {
+                    return false;
+                };
+                match scripts.bound_script(script, args) {
+                    Ok(_) => return true,
+                    Err(problem) => format!(
+                        "Couldn't register the {} binding for {script:?}. {problem}.",
+                        shortcut.keycaps().join("")
+                    ),
+                }
             }
-        }
+            Target::Configured(HotkeyTarget::Dupin { command, .. }) => match commands(command) {
+                Ok(()) => return true,
+                Err(None) => return false,
+                Err(Some(problem)) => format!(
+                    "Couldn't register the {} binding: it {problem}.",
+                    shortcut.keycaps().join("")
+                ),
+            },
+            _ => return true,
+        };
+        problems.push(problem);
+        false
     });
     problems
 }
@@ -700,12 +776,12 @@ mod tests {
         let configured = configured_targets(&config).unwrap();
         let mut targets = configured.clone();
 
-        assert!(filter_script_bindings(&mut targets, None).is_empty());
+        assert!(filter_unavailable(&mut targets, None, &|_| Ok(())).is_empty());
         assert!(!targets.contains_key(&shortcut));
 
         let mut catalog = Catalog::default();
         let mut targets = configured.clone();
-        let problems = filter_script_bindings(&mut targets, Some(&catalog));
+        let problems = filter_unavailable(&mut targets, Some(&catalog), &|_| Ok(()));
         assert_eq!(problems.len(), 1);
         assert!(problems[0].contains("⌥⌘T") && problems[0].contains("fixture.sh"));
         assert!(!targets.contains_key(&shortcut));
@@ -717,9 +793,66 @@ mod tests {
             .scripts
             .insert(path.clone(), crate::scripts::catalog::Script { path, header });
         let mut targets = configured;
-        assert!(filter_script_bindings(&mut targets, Some(&catalog)).is_empty());
+        assert!(filter_unavailable(&mut targets, Some(&catalog), &|_| Ok(())).is_empty());
         assert!(targets.contains_key(&shortcut));
         assert_eq!(targets.len(), 3);
+    }
+
+    #[test]
+    fn a_dupin_binding_waits_for_its_command_and_names_one_that_is_missing() {
+        let mut config = Config::default();
+        config.bindings.insert("ctrl+alt+c".into(), app());
+        for (chord, command) in [("cmd+shift+v", "clipboard"), ("alt+cmd+w", "word-count")] {
+            config.bindings.insert(
+                chord.into(),
+                HotkeyTarget::Dupin {
+                    command: command.into(),
+                    query: None,
+                },
+            );
+        }
+        let configured = configured_targets(&config).unwrap();
+        let clipboard: Shortcut = "cmd+shift+v".parse().unwrap();
+        let words: Shortcut = "alt+cmd+w".parse().unwrap();
+
+        let mut targets = configured.clone();
+        let loading = |name: &str| if name == "clipboard" { Ok(()) } else { Err(None) };
+        assert!(filter_unavailable(&mut targets, None, &loading).is_empty());
+        assert!(targets.contains_key(&clipboard) && !targets.contains_key(&words));
+
+        let mut targets = configured;
+        let off = |name: &str| Err(Some(format!("names `{name}`, which is off")));
+        let problems = filter_unavailable(&mut targets, None, &off);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem
+                    == "Couldn't register the ⇧⌘V binding: it names `clipboard`, which is off."),
+            "{problems:?}"
+        );
+        assert_eq!(targets.len(), 2, "the panel and the app binding stay");
+    }
+
+    #[test]
+    fn a_dupin_binding_clashes_like_any_other() {
+        let mut config = Config::default();
+        config.bindings.insert(
+            "Command+Space".into(),
+            HotkeyTarget::Dupin {
+                command: "clipboard".into(),
+                query: None,
+            },
+        );
+        assert_eq!(
+            configured_targets(&config).err().unwrap(),
+            "⌘Space is assigned more than once."
+        );
+        let shortcut: Shortcut = "cmd+space".parse().unwrap();
+        assert_eq!(
+            holder(&config, &shortcut, None).as_deref(),
+            Some("the panel shortcut")
+        );
     }
 
     #[test]

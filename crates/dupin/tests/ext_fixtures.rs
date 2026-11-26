@@ -114,6 +114,65 @@ fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
     assert_eq!(json(&missing)["diagnostic"]["code"], "invalid-step");
 }
 
+/// Each bundled package renders from its fixtures what `dupin ext test` replays: after a
+/// fixture's last step the panel shows the first row the fixture expects there, as the built-in
+/// the package ships as shows it, and never the row Dupin shows while that package isn't
+/// available.
+#[test]
+fn snap_renders_every_bundled_fixture_as_test_replays_it() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
+    let root = tempfile::tempdir().unwrap();
+    let mut fixtures: Vec<_> = std::fs::read_dir(&bundled)
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join("fixtures"))
+        .filter(|folder| folder.is_dir())
+        .flat_map(|folder| {
+            std::fs::read_dir(folder)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+        })
+        .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+        .collect();
+    fixtures.sort();
+    assert!(fixtures.len() > 9, "every bundled package has fixtures");
+    let mut wrong = Vec::new();
+    for fixture in &fixtures {
+        let package = fixture.parent().unwrap().parent().unwrap();
+        let png = root.path().join("panel.png");
+        let output = dupin(&[
+            "ext".as_ref(),
+            "snap".as_ref(),
+            package.as_os_str(),
+            fixture.as_os_str(),
+            png.as_os_str(),
+            "--json".as_ref(),
+        ]);
+        let name = fixture.strip_prefix(&bundled).unwrap().display().to_string();
+        if !output.status.success() {
+            wrong.push(format!("{name}: {}", String::from_utf8_lossy(&output.stdout)));
+            continue;
+        }
+        let shown: Vec<String> = serde_json::from_value(json(&output)["shown"].clone()).unwrap();
+        let stated: Value = serde_json::from_slice(&std::fs::read(fixture).unwrap()).unwrap();
+        // What the last step that lists rows expects; an activation leaves the panel as it was.
+        let expected = stated["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|step| step["expect"]["rows"].as_array())
+            .and_then(|rows| rows.first())
+            .and_then(|row| row["title"].as_str());
+        let unavailable = shown.iter().any(|text| text.ends_with("isn't available"));
+        let missing = expected.is_some_and(|title| !shown.iter().any(|text| text.contains(title)));
+        if unavailable || missing {
+            wrong.push(format!("{name}: expected {expected:?}, shows {shown:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 #[test]
 fn snap_opens_views_and_fills_forms_as_the_fixture_does() {
     dupin_extension_host::skip_inside_a_sandbox!();

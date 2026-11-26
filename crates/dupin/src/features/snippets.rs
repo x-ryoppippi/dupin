@@ -36,6 +36,7 @@ pub(super) const FEATURE: Feature = Feature {
         main_search: false,
         paste_notice: Some(PASTE_NOTICE),
         enabled: |_| true,
+        turn_on: |_| {},
     }),
     sources: &[],
 };

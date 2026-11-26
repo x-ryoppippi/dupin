@@ -228,7 +228,7 @@ impl Extension {
         call: &Call,
         role: Role,
     ) -> Result<Vec<Batch>, RunError> {
-        let settings = preferences::of(&self.package);
+        let settings = self.settings();
         let asking = Asking {
             preferences: &settings,
             generation: call.generation,
@@ -286,7 +286,7 @@ impl Extension {
         call: &Call,
         role: Role,
     ) -> Result<Vec<(Item, WebSearch)>, RunError> {
-        let settings = preferences::of(&self.package);
+        let settings = self.settings();
         let asking = Asking {
             preferences: &settings,
             generation: call.generation,
@@ -308,7 +308,7 @@ impl Extension {
         if !self.exports.get()?.items {
             return Some(Vec::new());
         }
-        self.catalogue.held_web_searches(&preferences::of(&self.package))
+        self.catalogue.held_web_searches(&self.settings())
     }
 
     /// Whether the row `id` is one of this package's. A built-in's port keeps the built-in's
@@ -338,7 +338,15 @@ impl Extension {
 
     /// What `ctx.preferences` holds for the package's calls.
     pub fn preferences(&self) -> serde_json::Value {
-        self.preferences_with(&preferences::of(&self.package))
+        self.preferences_with(&self.settings())
+    }
+
+    /// The config.toml settings the package is handed, or in a render of one of its fixtures,
+    /// the fixture's preferences.
+    fn settings(&self) -> Arc<Preferences> {
+        fixtures::headless()
+            .and_then(|fixture| fixture.preferences(self))
+            .unwrap_or_else(|| preferences::of(&self.package))
     }
 
     /// The package's declared preferences with `settings`, a built-in's config.toml settings
@@ -359,6 +367,14 @@ impl Extension {
             }
             error => error,
         }
+    }
+}
+
+/// Starts the copies of the fixture `dupin ext snap` renders, once the headless launcher's
+/// first frame starts its script.
+pub(crate) fn headless_ready() {
+    if let Some(fixture) = fixtures::headless() {
+        fixture.play_events();
     }
 }
 
@@ -815,15 +831,21 @@ pub fn watch(
             Some(Box::new(move |folder: &Path| seals.check(folder)))
         }
     };
-    watch_with(
-        directory,
-        Scanner {
-            integrity,
-            bundled: origin == Origin::Bundled,
-            ..Scanner::default()
-        },
-        deliver,
-    )
+    let mut scanner = Scanner {
+        integrity,
+        bundled: origin == Origin::Bundled,
+        ..Scanner::default()
+    };
+    // `dupin ext snap` starts typing a fixed moment after the launcher starts, which a first
+    // scan compiling every package on a worker can outlast; scanned here, before the first
+    // frame, the packages are registered by then, and the worker's first scan finds them
+    // unchanged.
+    if fixtures::headless().is_some()
+        && let Some(catalog) = scanner.update(&directory, None)
+    {
+        deliver(catalog);
+    }
+    watch_with(directory, scanner, deliver)
 }
 
 fn watch_with(

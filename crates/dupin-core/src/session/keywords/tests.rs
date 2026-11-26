@@ -298,3 +298,35 @@ fn an_app_alias_leads_with_its_app_shown_once() {
     assert_eq!(titles(&rows), ["Grapher", "Search Google"]);
     assert_eq!(rows[1].1, ["goo ␣", "g ␣"]);
 }
+
+#[test]
+fn a_commands_shortcut_shows_beside_its_keywords() {
+    let mut registry = registry();
+    registry.set_shortcut(&id("clipboard.history"), "⇧⌘V").unwrap();
+    assert!(registry.set_shortcut(&id("nothing.here"), "⌘X").is_err());
+    let mut s = Session::new(History::default(), registry).unwrap();
+    let rows = shown(&mut s, "?", &[]);
+    let clipboard = rows.iter().find(|(title, _)| title == "Clipboard").unwrap();
+    assert_eq!(clipboard.1, ["clip ␣", "⇧⌘V"]);
+    let rows = shown(&mut s, "clip", &[]);
+    assert_eq!(rows[0].1, ["clip ␣", "⇧⌘V"]);
+}
+
+#[test]
+fn entering_a_command_leaves_whatever_showed_with_its_query_typed() {
+    let mut s = session();
+    s.set_query("d ");
+    assert_eq!(s.command_id().as_str(), "dictionary.lookup");
+    let effects = s.enter_command(&id("clipboard.history"), "draft").unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("draft".into()));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Search { command, query, .. } if command.as_str() == "clipboard.history" && query == "draft"
+    )));
+    assert_eq!(s.command_id().as_str(), "clipboard.history");
+    assert_eq!(s.query(), "draft");
+    assert!(s.enter_command(&id("nothing.here"), "").is_none());
+    assert_eq!(s.command_id().as_str(), "clipboard.history");
+    s.reset();
+    assert_eq!(s.command_id().as_str(), "apps.search");
+}

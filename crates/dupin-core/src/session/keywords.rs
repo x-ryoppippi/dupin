@@ -155,6 +155,7 @@ fn row(suggestion: Suggestion) -> (Item, Vec<Accessory>) {
         .iter()
         .take(MAX_TAGS)
         .map(|keyword| Accessory::Tag(keyword_tag(keyword)))
+        .chain(entry.shortcut.map(Accessory::Tag))
         .collect();
     let item = Item {
         id: entry.target.to_string(),

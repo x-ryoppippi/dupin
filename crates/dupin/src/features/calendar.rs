@@ -29,6 +29,7 @@ pub(super) const FEATURE: Feature = Feature {
         main_search: false,
         paste_notice: None,
         enabled: |config| config.calendar.enabled,
+        turn_on: |config| config.calendar.enabled = true,
     }),
     ..Feature::EMPTY
 };

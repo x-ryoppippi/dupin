@@ -55,6 +55,22 @@ pub fn check_alias(alias: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `name` can name a command, as an alias or a `target = "dupin"` binding does: a
+/// built-in's name or an extension's package name.
+pub fn check_command_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(format!(
+            "a command is named in lowercase letters, digits and hyphens, such as `calendar` or an extension's package name, not {name:?}"
+        ));
+    }
+    Ok(())
+}
+
 /// What an alias reaches, written as a string in config.toml.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AliasTarget {
@@ -110,16 +126,7 @@ impl AliasTarget {
                 ));
             }
             None => {
-                if target.is_empty()
-                    || target.len() > 64
-                    || !target
-                        .bytes()
-                        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-                {
-                    return Err(format!(
-                        "a command is named in lowercase letters, digits and hyphens, such as `calendar` or an extension's package name, not {target:?}"
-                    ));
-                }
+                check_command_name(target)?;
                 Self::Command(target.into())
             }
         };
