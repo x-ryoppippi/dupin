@@ -1,0 +1,971 @@
+{
+	"ekuma": "v0.1.0",
+	"go": "go version go1.27.3 darwin/arm64",
+	"host": {
+		"machine": "Apple M4 Pro (Virtual)",
+		"macos": "26.3",
+		"load_average": "{ 2.26 3.87 2.76 }"
+	},
+	"revision": "146a77540b2eecda10ae179e626c1133a37606a9",
+	"sizes": {
+		"helper": [
+			{
+				"label": "base",
+				"tags": "",
+				"stripped_bytes": 7807954,
+				"signed_bytes": 7780704,
+				"zip_bytes": 3003588
+			},
+			{
+				"label": "tzdata",
+				"tags": "timetzdata",
+				"stripped_bytes": 8220770,
+				"signed_bytes": 8191120,
+				"zip_bytes": 3104176
+			},
+			{
+				"label": "intl",
+				"tags": "intl,timetzdata",
+				"stripped_bytes": 16664034,
+				"signed_bytes": 16585328,
+				"zip_bytes": 10224975
+			}
+		],
+		"carchive": [
+			{
+				"label": "base",
+				"archive_bytes": 18217456,
+				"bare_host_bytes": 33464,
+				"linked_host_bytes": 6589208,
+				"increase_bytes": 6555744,
+				"output": "2,4,6"
+			},
+			{
+				"label": "intl",
+				"archive_bytes": 29520584,
+				"bare_host_bytes": 33464,
+				"linked_host_bytes": 15689576,
+				"increase_bytes": 15656112,
+				"output": "2,4,6"
+			}
+		],
+		"reproducible": {
+			"sha256_first": "05246ec61a207ab6653c64848feb625bc4ec1a9f8374277c1e200dcafad9bcd4",
+			"sha256_second": "05246ec61a207ab6653c64848feb625bc4ec1a9f8374277c1e200dcafad9bcd4",
+			"identical": true
+		},
+		"cross": [
+			{
+				"goos": "darwin",
+				"goarch": "amd64",
+				"stripped_bytes": 17202336
+			},
+			{
+				"goos": "linux",
+				"goarch": "arm64",
+				"stripped_bytes": 16384160
+			},
+			{
+				"goos": "linux",
+				"goarch": "amd64",
+				"stripped_bytes": 16937120
+			}
+		]
+	},
+	"bench": {
+		"default_gc": {
+			"cold_first_result": {
+				"count": 100,
+				"max_ms": 13.583708,
+				"mean_ms": 11.390627510000002,
+				"min_ms": 10.590417,
+				"p50_ms": 11.347292,
+				"p95_ms": 12.022708,
+				"p99_ms": 13.42725
+			},
+			"cold_spawn_to_hello": {
+				"count": 100,
+				"max_ms": 10.367791,
+				"mean_ms": 8.475054980000003,
+				"min_ms": 7.679792,
+				"p50_ms": 8.474583,
+				"p95_ms": 8.976459,
+				"p99_ms": 9.531542
+			},
+			"compile_in_own_helper": {
+				"count": 100,
+				"max_ms": 14.106541,
+				"mean_ms": 10.264947899999997,
+				"min_ms": 9.497208,
+				"p50_ms": 10.178459,
+				"p95_ms": 10.9485,
+				"p99_ms": 11.386666
+			},
+			"containment": [
+				{
+					"case": "busy-loop",
+					"detail": "deadline",
+					"elapsed_ms": 100.675375,
+					"heap_held": true,
+					"heap_peak_bytes": 324992,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 1720384,
+					"process_wall_ms": 100.999583,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "busy-module-body",
+					"detail": "deadline",
+					"elapsed_ms": 100.882917,
+					"heap_held": true,
+					"heap_peak_bytes": 903096,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 1851456,
+					"process_wall_ms": 101.181792,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "busy-async-job",
+					"detail": "deadline",
+					"elapsed_ms": 100.38175,
+					"heap_held": true,
+					"heap_peak_bytes": 899632,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 1949696,
+					"process_wall_ms": 100.757125,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-object-spike",
+					"detail": "heap limit",
+					"elapsed_ms": 14.554875,
+					"heap_held": true,
+					"heap_peak_bytes": 17843576,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 20267072,
+					"process_wall_ms": 14.866416,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-string-repeat",
+					"detail": "heap limit",
+					"elapsed_ms": 1.438416,
+					"heap_held": true,
+					"heap_peak_bytes": 536870128,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 3260416,
+					"process_wall_ms": 1.867333,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-string-doubling",
+					"detail": "heap limit",
+					"elapsed_ms": 5.501292,
+					"heap_held": true,
+					"heap_peak_bytes": 18678416,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 21905536,
+					"process_wall_ms": 5.8185,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-array-fill",
+					"detail": "heap limit",
+					"elapsed_ms": 18.911792,
+					"heap_held": true,
+					"heap_peak_bytes": 19431776,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 24363072,
+					"process_wall_ms": 19.283958,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-typed-array",
+					"detail": "heap limit",
+					"elapsed_ms": 1.401292,
+					"heap_held": true,
+					"heap_peak_bytes": 1073769896,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 3784768,
+					"process_wall_ms": 1.851791,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "stack-recursion",
+					"detail": "RangeError: maximum call stack size exceeded\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n   ",
+					"elapsed_ms": 3.00975,
+					"heap_held": true,
+					"heap_peak_bytes": 4943240,
+					"helper_survived": true,
+					"outcome": "thrown",
+					"pass": true,
+					"peak_over_idle_bytes": 7372928,
+					"process_wall_ms": 3.270334,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "stack-json-parse",
+					"detail": "SyntaxError: unexpected end of JSON input\n    at JSON.parse (<anonymous>)\n    at search (main.js:2:14)",
+					"elapsed_ms": 23.407541,
+					"heap_held": false,
+					"heap_peak_bytes": 82831104,
+					"helper_survived": true,
+					"outcome": "thrown",
+					"pass": false,
+					"peak_over_idle_bytes": 99860672,
+					"process_wall_ms": 23.698417,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "stack-json-stringify",
+					"detail": "heap limit",
+					"elapsed_ms": 8.979667,
+					"heap_held": true,
+					"heap_peak_bytes": 17289544,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 22134848,
+					"process_wall_ms": 9.244167,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "promise-chain-storm",
+					"detail": "heap limit",
+					"elapsed_ms": 12.930167,
+					"heap_held": true,
+					"heap_peak_bytes": 19180416,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 21807168,
+					"process_wall_ms": 13.27825,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "promise-fanout-storm",
+					"detail": "heap limit",
+					"elapsed_ms": 19.11025,
+					"heap_held": true,
+					"heap_peak_bytes": 20350872,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 24232064,
+					"process_wall_ms": 19.398125,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "regexp-backtracking",
+					"detail": "deadline",
+					"elapsed_ms": 100.546208,
+					"heap_held": true,
+					"heap_peak_bytes": 138208,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 2015232,
+					"process_wall_ms": 100.856667,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "native-string-search",
+					"detail": "-1",
+					"elapsed_ms": 13.496458,
+					"heap_held": true,
+					"heap_peak_bytes": 15999912,
+					"helper_survived": true,
+					"outcome": "returned",
+					"pass": true,
+					"peak_over_idle_bytes": 18399232,
+					"process_wall_ms": 13.720208,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "native-array-sort",
+					"detail": "heap limit",
+					"elapsed_ms": 34.224292,
+					"heap_held": true,
+					"heap_peak_bytes": 17051984,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 20185216,
+					"process_wall_ms": 34.499,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				}
+			],
+			"footprint": {
+				"after_first_search": {
+					"lifetime_max_bytes": 12518976,
+					"now_bytes": 12518976
+				},
+				"after_more_create_drop": {
+					"lifetime_max_bytes": 20973120,
+					"now_bytes": 19547712
+				},
+				"after_warm": {
+					"lifetime_max_bytes": 20694592,
+					"now_bytes": 20039232
+				},
+				"create_drop_calls": 3051,
+				"idle": {
+					"lifetime_max_bytes": 8537664,
+					"now_bytes": 8537664
+				}
+			},
+			"gates": {
+				"cold_p95": {
+					"limit_ms": 20,
+					"measured_ms": 12.022708
+				},
+				"containment": {
+					"failed_cases": ["stack-json-parse"]
+				},
+				"ping_p95": {
+					"limit_ms": 1,
+					"measured_ms": 0.055166
+				},
+				"warm_p95": {
+					"limit_ms": 5,
+					"measured_ms": 2.556709
+				},
+				"warm_p99": {
+					"limit_ms": 10,
+					"measured_ms": 2.720542
+				}
+			},
+			"gogc": "",
+			"hello": {
+				"engine": "ekuma v0.1.0",
+				"go": "go1.27.3",
+				"intl": true,
+				"locale": "en-GB",
+				"sandboxed": true
+			},
+			"host": {
+				"cpus": 6,
+				"goarch": "arm64",
+				"goos": "darwin"
+			},
+			"label": "GOGC=100",
+			"ping_round_trip": {
+				"count": 2000,
+				"max_ms": 0.082292,
+				"mean_ms": 0.035936443500000005,
+				"min_ms": 0.011542,
+				"p50_ms": 0.034334,
+				"p95_ms": 0.055166,
+				"p99_ms": 0.068583
+			},
+			"source": {
+				"search_bytes": 52892
+			},
+			"warm_search_400": {
+				"calls_with_gc": 1741,
+				"helper_call": {
+					"count": 2000,
+					"max_ms": 1.149,
+					"mean_ms": 0.4931232779999993,
+					"min_ms": 0.258,
+					"p50_ms": 0.289959,
+					"p95_ms": 0.872167,
+					"p99_ms": 0.944209
+				},
+				"helper_load": {
+					"count": 2000,
+					"max_ms": 2.001833,
+					"mean_ms": 1.010131660999999,
+					"min_ms": 0.59925,
+					"p50_ms": 1.043708,
+					"p95_ms": 1.428167,
+					"p99_ms": 1.580209
+				},
+				"helper_setup": {
+					"count": 2000,
+					"max_ms": 0.562541,
+					"mean_ms": 0.174789805,
+					"min_ms": 0.110666,
+					"p50_ms": 0.145209,
+					"p95_ms": 0.371167,
+					"p99_ms": 0.433583
+				},
+				"helper_total": {
+					"count": 2000,
+					"max_ms": 3.06125,
+					"mean_ms": 1.8659748659999988,
+					"min_ms": 1.064916,
+					"p50_ms": 1.799833,
+					"p95_ms": 2.472375,
+					"p99_ms": 2.634084
+				},
+				"helper_validate": {
+					"count": 2000,
+					"max_ms": 0.26125,
+					"mean_ms": 0.07964780699999989,
+					"min_ms": 0.047958,
+					"p50_ms": 0.059667,
+					"p95_ms": 0.133125,
+					"p99_ms": 0.164542
+				},
+				"round_trip": {
+					"count": 2000,
+					"max_ms": 3.222709,
+					"mean_ms": 1.9535332169999995,
+					"min_ms": 1.140833,
+					"p50_ms": 1.887916,
+					"p95_ms": 2.556709,
+					"p99_ms": 2.720542
+				},
+				"round_trip_with_gc": {
+					"count": 1741,
+					"max_ms": 3.222709,
+					"mean_ms": 2.0203577989661126,
+					"min_ms": 1.457666,
+					"p50_ms": 1.926875,
+					"p95_ms": 2.570958,
+					"p99_ms": 2.745542
+				},
+				"round_trip_without_gc": {
+					"count": 259,
+					"max_ms": 2.645584,
+					"mean_ms": 1.504337861003862,
+					"min_ms": 1.140833,
+					"p50_ms": 1.357083,
+					"p95_ms": 2.087875,
+					"p99_ms": 2.20525
+				}
+			},
+			"warm_word_count": {
+				"count": 2000,
+				"max_ms": 0.932375,
+				"mean_ms": 0.28044104899999966,
+				"min_ms": 0.144541,
+				"p50_ms": 0.195542,
+				"p95_ms": 0.567833,
+				"p99_ms": 0.644166
+			}
+		},
+		"gogc_400": {
+			"cold_first_result": {
+				"count": 100,
+				"max_ms": 11.70125,
+				"mean_ms": 10.744019150000003,
+				"min_ms": 9.662667,
+				"p50_ms": 10.710417,
+				"p95_ms": 11.452167,
+				"p99_ms": 11.578042
+			},
+			"cold_spawn_to_hello": {
+				"count": 100,
+				"max_ms": 9.668291,
+				"mean_ms": 8.852495410000001,
+				"min_ms": 7.958167,
+				"p50_ms": 8.821625,
+				"p95_ms": 9.447041,
+				"p99_ms": 9.5685
+			},
+			"compile_in_own_helper": {
+				"count": 100,
+				"max_ms": 13.130333,
+				"mean_ms": 10.070198350000005,
+				"min_ms": 8.59475,
+				"p50_ms": 10.086333,
+				"p95_ms": 10.974417,
+				"p99_ms": 12.168458
+			},
+			"containment": [
+				{
+					"case": "busy-loop",
+					"detail": "deadline",
+					"elapsed_ms": 100.509584,
+					"heap_held": true,
+					"heap_peak_bytes": 447344,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 606208,
+					"process_wall_ms": 100.761583,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "busy-module-body",
+					"detail": "deadline",
+					"elapsed_ms": 100.456666,
+					"heap_held": true,
+					"heap_peak_bytes": 439424,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 589824,
+					"process_wall_ms": 100.72225,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "busy-async-job",
+					"detail": "deadline",
+					"elapsed_ms": 100.486959,
+					"heap_held": true,
+					"heap_peak_bytes": 439424,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 622592,
+					"process_wall_ms": 100.7635,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-object-spike",
+					"detail": "heap limit",
+					"elapsed_ms": 10.905917,
+					"heap_held": true,
+					"heap_peak_bytes": 17604168,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 19415168,
+					"process_wall_ms": 11.196791,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-string-repeat",
+					"detail": "heap limit",
+					"elapsed_ms": 1.77425,
+					"heap_held": true,
+					"heap_peak_bytes": 536857944,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 15925248,
+					"process_wall_ms": 1.980959,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-string-doubling",
+					"detail": "heap limit",
+					"elapsed_ms": 4.1075,
+					"heap_held": true,
+					"heap_peak_bytes": 19820656,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 21200960,
+					"process_wall_ms": 4.408209,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-array-fill",
+					"detail": "heap limit",
+					"elapsed_ms": 6.969666,
+					"heap_held": false,
+					"heap_peak_bytes": 26701240,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": false,
+					"peak_over_idle_bytes": 27508864,
+					"process_wall_ms": 7.207083,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "heap-typed-array",
+					"detail": "1073741824",
+					"elapsed_ms": 0.765,
+					"heap_held": true,
+					"heap_peak_bytes": 169968,
+					"helper_survived": true,
+					"outcome": "returned",
+					"pass": true,
+					"peak_over_idle_bytes": 3309696,
+					"process_wall_ms": 1.230208,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "stack-recursion",
+					"detail": "RangeError: maximum call stack size exceeded\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n    at deeper (main.js:2:9)\n   ",
+					"elapsed_ms": 0.760708,
+					"heap_held": true,
+					"heap_peak_bytes": 162032,
+					"helper_survived": true,
+					"outcome": "thrown",
+					"pass": true,
+					"peak_over_idle_bytes": 5308416,
+					"process_wall_ms": 0.971958,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "stack-json-parse",
+					"detail": "SyntaxError: unexpected end of JSON input\n    at JSON.parse (<anonymous>)\n    at search (main.js:2:14)",
+					"elapsed_ms": 20.583916,
+					"heap_held": false,
+					"heap_peak_bytes": 110519008,
+					"helper_survived": true,
+					"outcome": "thrown",
+					"pass": false,
+					"peak_over_idle_bytes": 134725952,
+					"process_wall_ms": 20.878,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "stack-json-stringify",
+					"detail": "heap limit",
+					"elapsed_ms": 8.309958,
+					"heap_held": false,
+					"heap_peak_bytes": 17556920,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": false,
+					"peak_over_idle_bytes": 25690240,
+					"process_wall_ms": 8.568083,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "promise-chain-storm",
+					"detail": "heap limit",
+					"elapsed_ms": 8.65325,
+					"heap_held": true,
+					"heap_peak_bytes": 19618920,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 21495872,
+					"process_wall_ms": 8.889125,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "promise-fanout-storm",
+					"detail": "heap limit",
+					"elapsed_ms": 8.795208,
+					"heap_held": true,
+					"heap_peak_bytes": 18886720,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 24641600,
+					"process_wall_ms": 9.04675,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "regexp-backtracking",
+					"detail": "deadline",
+					"elapsed_ms": 100.58075,
+					"heap_held": true,
+					"heap_peak_bytes": 463120,
+					"helper_survived": true,
+					"outcome": "deadline",
+					"pass": true,
+					"peak_over_idle_bytes": 720896,
+					"process_wall_ms": 100.863625,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "native-string-search",
+					"detail": "-1",
+					"elapsed_ms": 13.609541,
+					"heap_held": true,
+					"heap_peak_bytes": 16487168,
+					"helper_survived": true,
+					"outcome": "returned",
+					"pass": true,
+					"peak_over_idle_bytes": 17776768,
+					"process_wall_ms": 13.886875,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				},
+				{
+					"case": "native-array-sort",
+					"detail": "heap limit",
+					"elapsed_ms": 21.612,
+					"heap_held": true,
+					"heap_peak_bytes": 19423128,
+					"helper_survived": true,
+					"outcome": "heap-limit",
+					"pass": true,
+					"peak_over_idle_bytes": 20824192,
+					"process_wall_ms": 21.84975,
+					"stopped_within_budget": true,
+					"terminated_within_outer_limit": true
+				}
+			],
+			"footprint": {
+				"after_first_search": {
+					"lifetime_max_bytes": 11617792,
+					"now_bytes": 11617792
+				},
+				"after_more_create_drop": {
+					"lifetime_max_bytes": 40420992,
+					"now_bytes": 34555520
+				},
+				"after_warm": {
+					"lifetime_max_bytes": 40257152,
+					"now_bytes": 38946432
+				},
+				"create_drop_calls": 3051,
+				"idle": {
+					"lifetime_max_bytes": 8390144,
+					"now_bytes": 8390144
+				}
+			},
+			"gates": {
+				"cold_p95": {
+					"limit_ms": 20,
+					"measured_ms": 11.452167
+				},
+				"containment": {
+					"failed_cases": ["heap-array-fill", "stack-json-parse", "stack-json-stringify"]
+				},
+				"ping_p95": {
+					"limit_ms": 1,
+					"measured_ms": 0.069833
+				},
+				"warm_p95": {
+					"limit_ms": 5,
+					"measured_ms": 2.998
+				},
+				"warm_p99": {
+					"limit_ms": 10,
+					"measured_ms": 3.314667
+				}
+			},
+			"gogc": "400",
+			"hello": {
+				"engine": "ekuma v0.1.0",
+				"go": "go1.27.3",
+				"intl": true,
+				"locale": "en-GB",
+				"sandboxed": true
+			},
+			"host": {
+				"cpus": 6,
+				"goarch": "arm64",
+				"goos": "darwin"
+			},
+			"label": "GOGC=400",
+			"ping_round_trip": {
+				"count": 2000,
+				"max_ms": 0.131208,
+				"mean_ms": 0.04283065250000005,
+				"min_ms": 0.009708,
+				"p50_ms": 0.040583,
+				"p95_ms": 0.069833,
+				"p99_ms": 0.089958
+			},
+			"source": {
+				"search_bytes": 52892
+			},
+			"warm_search_400": {
+				"calls_with_gc": 329,
+				"helper_call": {
+					"count": 2000,
+					"max_ms": 1.853959,
+					"mean_ms": 0.35650753400000007,
+					"min_ms": 0.257375,
+					"p50_ms": 0.2825,
+					"p95_ms": 0.837208,
+					"p99_ms": 0.903292
+				},
+				"helper_load": {
+					"count": 2000,
+					"max_ms": 1.974083,
+					"mean_ms": 0.7867691465000012,
+					"min_ms": 0.587917,
+					"p50_ms": 0.703667,
+					"p95_ms": 1.451959,
+					"p99_ms": 1.651916
+				},
+				"helper_setup": {
+					"count": 2000,
+					"max_ms": 0.7645,
+					"mean_ms": 0.17511614749999987,
+					"min_ms": 0.119083,
+					"p50_ms": 0.159334,
+					"p95_ms": 0.262125,
+					"p99_ms": 0.55875
+				},
+				"helper_total": {
+					"count": 2000,
+					"max_ms": 3.740709,
+					"mean_ms": 1.429944011,
+					"min_ms": 1.040542,
+					"p50_ms": 1.229417,
+					"p95_ms": 2.865625,
+					"p99_ms": 3.165292
+				},
+				"helper_validate": {
+					"count": 2000,
+					"max_ms": 0.335375,
+					"mean_ms": 0.06548911300000003,
+					"min_ms": 0.048125,
+					"p50_ms": 0.058958,
+					"p95_ms": 0.105417,
+					"p99_ms": 0.156583
+				},
+				"round_trip": {
+					"count": 2000,
+					"max_ms": 3.877083,
+					"mean_ms": 1.537100215999997,
+					"min_ms": 1.108166,
+					"p50_ms": 1.340333,
+					"p95_ms": 2.998,
+					"p99_ms": 3.314667
+				},
+				"round_trip_with_gc": {
+					"count": 329,
+					"max_ms": 3.877083,
+					"mean_ms": 2.5710511428571428,
+					"min_ms": 1.420833,
+					"p50_ms": 2.758917,
+					"p95_ms": 3.333708,
+					"p99_ms": 3.518542
+				},
+				"round_trip_without_gc": {
+					"count": 1671,
+					"max_ms": 2.755709,
+					"mean_ms": 1.3335275918611589,
+					"min_ms": 1.108166,
+					"p50_ms": 1.301959,
+					"p95_ms": 1.564333,
+					"p99_ms": 2.245292
+				}
+			},
+			"warm_word_count": {
+				"count": 2000,
+				"max_ms": 0.813958,
+				"mean_ms": 0.22411484899999984,
+				"min_ms": 0.155542,
+				"p50_ms": 0.195167,
+				"p95_ms": 0.452834,
+				"p99_ms": 0.655042
+			}
+		},
+		"features": {
+			"hello": {
+				"engine": "ekuma v0.1.0",
+				"go": "go1.27.3",
+				"intl": true,
+				"locale": "en-GB",
+				"sandboxed": true
+			},
+			"reply": {
+				"id": 1,
+				"rows": [
+					{
+						"title": "typeof Intl",
+						"text": "object"
+					},
+					{
+						"title": "typeof Temporal",
+						"text": "object"
+					},
+					{
+						"title": "DateTimeFormat ja-JP, Asia/Tokyo",
+						"text": "2026年11月26日木曜日 18:30"
+					},
+					{
+						"title": "DateTimeFormat en-GB, Europe/London",
+						"text": "Thursday, 26 November 2026 at 09:30"
+					},
+					{
+						"title": "DateTimeFormat default locale and zone",
+						"text": "en-GB UTC"
+					},
+					{
+						"title": "formatRange en-GB",
+						"text": "09:30–10:30"
+					},
+					{
+						"title": "RelativeTimeFormat ja",
+						"text": "明日"
+					},
+					{
+						"title": "Collator ja sort",
+						"text": "あおい,カエデ,さくら"
+					},
+					{
+						"title": "Segmenter ja words",
+						"text": "今日|は|良い|天気|です"
+					},
+					{
+						"title": "NumberFormat en-GB GBP",
+						"text": "£1,234.50"
+					},
+					{
+						"title": "Temporal.Now zone",
+						"text": "UTC"
+					},
+					{
+						"title": "Temporal PlainDate + 1 month",
+						"text": "2026-02-28"
+					},
+					{
+						"title": "Temporal ZonedDateTime Tokyo",
+						"text": "2026-11-26T18:30:00+09:00[Asia/Tokyo]"
+					},
+					{
+						"title": "Temporal japanese calendar",
+						"text": "令和8年"
+					},
+					{
+						"title": "Date toLocaleDateString ja-JP",
+						"text": "2026/11/26"
+					}
+				],
+				"failure": null,
+				"stages": {
+					"setup_ms": 0.505916,
+					"load_ms": 0.338584,
+					"call_ms": 15.025541,
+					"validate_ms": 0.034542,
+					"total_ms": 15.912666
+				},
+				"gc_cycles": 4,
+				"heap_peak_bytes": 8741448
+			}
+		}
+	}
+}
