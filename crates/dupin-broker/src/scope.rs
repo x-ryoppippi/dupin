@@ -429,6 +429,16 @@ impl OsPermission {
     }
 }
 
+/// The most output an executable profile hands back per stream unless it declares more: the
+/// exec service's own default.
+pub const EXEC_OUTPUT_BYTES: u32 = 64 * 1024;
+/// The most output a profile may declare, the exec service's own limit.
+pub const MAX_EXEC_OUTPUT_BYTES: u32 = 1024 * 1024;
+
+fn output_limit(declared: Option<u32>) -> u32 {
+    declared.unwrap_or(EXEC_OUTPUT_BYTES)
+}
+
 /// One grantable unit of a declaration. A [`ScopeKey`] names it; the rest bounds it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
@@ -462,6 +472,9 @@ pub enum Scope {
         /// holds.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         ssh_agent: bool,
+        /// The most output it hands back per stream, when that is more than the default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_bytes: Option<u32>,
     },
     Script {
         name: ScopeName,
@@ -556,6 +569,7 @@ impl Scope {
                     program,
                     background,
                     ssh_agent,
+                    output_bytes,
                 },
                 Self::Exec {
                     name: n,
@@ -564,6 +578,7 @@ impl Scope {
                     program: p,
                     background: b,
                     ssh_agent: s,
+                    output_bytes: m,
                 },
             ) => {
                 name == n
@@ -572,6 +587,7 @@ impl Scope {
                     && program == p
                     && (*background || !b)
                     && (*ssh_agent || !s)
+                    && output_limit(*output_bytes) >= output_limit(*m)
             }
             (Self::Script { name, output }, Self::Script { name: n, output: o }) => {
                 name == n && (*output || !o)
@@ -700,6 +716,7 @@ impl fmt::Display for Scope {
                 program,
                 background,
                 ssh_agent,
+                output_bytes,
             } => {
                 match program {
                     Some(program) => write!(f, "run {program}")?,
@@ -712,8 +729,10 @@ impl fmt::Display for Scope {
                 if *ssh_agent {
                     f.write_str(", using the keys your SSH agent holds,")?;
                 }
-                if *output {
-                    f.write_str(" and read its output")?;
+                match (output, output_bytes) {
+                    (false, _) => {}
+                    (true, None) => f.write_str(" and read its output")?,
+                    (true, Some(bytes)) => write!(f, " and read up to {bytes} bytes of its output")?,
                 }
                 if *background {
                     f.write_str(", even while you type and without an action you chose")?;

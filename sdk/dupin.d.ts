@@ -586,7 +586,8 @@ declare module 'dupin' {
 		 * picks; or `@script:<name>` for one of the user's script commands. `output` asks to
 		 * receive stdout and stderr; `sshAgent` hands a picked program `SSH_AUTH_SOCK`, so `ssh`
 		 * can use the user's agent; `background` lets the profile run while the user types, in
-		 * `items` and in event handlers, rather than only in an action.
+		 * `items` and in event handlers, rather than only in an action; `outputBytes`, with
+		 * `output`, is the most of each stream it receives, 64 KiB unless declared and 1 MiB at most.
 		 */
 		exec?: Record<
 			string,
@@ -596,6 +597,7 @@ declare module 'dupin' {
 				program?: string;
 				background?: boolean;
 				sshAgent?: boolean;
+				outputBytes?: number;
 			}
 		>;
 		/**

@@ -4,8 +4,8 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::scope::{
-    ClipboardAccess, ContextAccess, DeclaredPath, FilesAccess, FilesKind, Method, Origin, RowKind, Scope,
-    ScopeKey, ScopeName, WindowsAccess,
+    ClipboardAccess, ContextAccess, DeclaredPath, FilesAccess, FilesKind, MAX_EXEC_OUTPUT_BYTES, Method,
+    Origin, RowKind, Scope, ScopeKey, ScopeName, WindowsAccess,
 };
 
 const MAX_HTTP: usize = 32;
@@ -479,7 +479,14 @@ impl Parser {
             let Some(object) = self.fields(
                 entry,
                 &field,
-                &["args", "output", "program", "background", "sshAgent"],
+                &[
+                    "args",
+                    "output",
+                    "program",
+                    "background",
+                    "sshAgent",
+                    "outputBytes",
+                ],
                 &["args"],
             ) else {
                 continue;
@@ -493,10 +500,31 @@ impl Parser {
                     .map(Some),
             };
             let ssh_agent = self.boolean(object.get("sshAgent"), &format!("{field}.sshAgent"));
+            let output_bytes = match object.get("outputBytes") {
+                None => Some(None),
+                Some(_) if !output => {
+                    self.report(
+                        "invalid-value",
+                        format!("{field}.outputBytes"),
+                        "only bounds output the profile reads",
+                        Some("Set `output: true` too, or remove `outputBytes`."),
+                    );
+                    None
+                }
+                Some(bytes) => self
+                    .integer(
+                        bytes,
+                        &format!("{field}.outputBytes"),
+                        1..=u64::from(MAX_EXEC_OUTPUT_BYTES),
+                    )
+                    .map(|bytes| Some(bytes as u32)),
+            };
             let args = object
                 .get("args")
                 .and_then(|args| self.args(args, &format!("{field}.args")));
-            if let (Some(name), Some(args), Some(program)) = (name, args, program) {
+            if let (Some(name), Some(args), Some(program), Some(output_bytes)) =
+                (name, args, program, output_bytes)
+            {
                 scopes.push(Scope::Exec {
                     name,
                     args,
@@ -504,6 +532,7 @@ impl Parser {
                     program,
                     background,
                     ssh_agent,
+                    output_bytes,
                 });
             }
         }
