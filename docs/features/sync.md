@@ -53,7 +53,12 @@ Dupin never follows a link inside the folder, so a link someone plants there can
 [sync]
 folder = "~/Library/Mobile Documents/com~apple~CloudDocs/Dupin" # wins over the folder chosen with `dupin sync on`
 allow_nfs = false
+usage = true # usage history
+snippets = true # the snippets you add in Dupin
+settings = true # shared settings stored over a read-only config.toml
 ```
+
+Settings → Sync has the same switches while sync is on. Turning one off makes this Mac leave that kind of data: it keeps what it has, stops sending and receiving it, and its files leave the folder once the other Macs have taken them over. Turning it back on rejoins, dropping what was deleted elsewhere meanwhile.
 
 With Home Manager, set `programs.dupin.settings.sync.folder`. A folder set this way still needs `dupin sync on` once on the first Mac and `dupin sync join` on the others, because the key can't come from Nix.
 
