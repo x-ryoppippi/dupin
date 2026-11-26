@@ -108,19 +108,6 @@ provider = "extension.emoji"
 package = "bundled:emoji"
 budget_ms = 5.0
 
-# The bundled Remote package ships off, and this harness can only turn on what config.toml
-# does: a grants file would change scripts/latency/measure.nu, whose code fingerprints every
-# recorded native baseline. Typing under `remote` calls nothing in the package; Dupin matches
-# the catalogue it holds by words. So that path is measured on a stand-in of Remote's largest
-# catalogue, 4,000 rows of its shape, and held to the keystroke budget.
-[features.remote.extension]
-config = "scripts/headless/config/dupin/config.toml"
-settings = { extensions = true }
-provider = "extension.remote-catalogue"
-package = "remote-catalogue"
-extensions = "scripts/latency/remote.extensions"
-budget_ms = 5.0
-
 [[scenarios]]
 id = "search.saf"
 feature = "search"
@@ -205,9 +192,3 @@ id = "emoji.ja"
 feature = "emoji"
 prefix = "emoji "
 typed = "にっこり"
-
-[[scenarios]]
-id = "remote.nginx"
-feature = "remote"
-prefix = "rcat web2 ps "
-typed = "nginx"

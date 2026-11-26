@@ -62,7 +62,7 @@ macOS grants access to Dupin as a whole, but that never lets an extension use it
 - Turning an extension off or revoking a grant takes effect at once: an extension turned off stops answering its keyword, its results in flight are dropped, its clipboard watch stops and allowing again doesn't bring them back.
 - A grant covers the exact version you approved. An update that asks for more asks you again; anything it no longer needs is dropped.
 - Grants are kept in Dupin's [encrypted storage](./storage.md#built-in-namespaces), never in the clear. Home Manager can declare grants and denials ahead of time in `extension-grants.toml` beside `config.toml`; a choice made in Dupin can take a declared grant away but never widen it. [Extensions](./extensions.md#declaring-them-with-nix) has the format.
-- [Extensions that ship with Dupin](./extensions.md#bundled-extensions) are on by default with their own grants in place, but still need macOS access. Window Management and Remote are the exceptions: each stays off until you turn it on in Settings → Extensions, and then holds its grants as the others do, though Remote's files and programs are still picked there. A copy you change, such as one `dupin ext eject` made, is treated like any other extension and loses those grants.
+- [Extensions that ship with Dupin](./extensions.md#bundled-extensions) are on by default with their own grants in place, but still need macOS access. Window Management is the exception: it stays off until you turn it on in Settings → Extensions, and then holds its grants as the others do. A copy you change, such as one `dupin ext eject` made, is treated like any other extension and loses those grants.
 
 </details>
 

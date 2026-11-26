@@ -23,7 +23,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime};
 
-pub use call::exec_profile;
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
     Generation, GrantSource, Local, LocalStore, MemoryLocal, OsAccess, OsConsumer, OsPermission, PackageId,

@@ -69,15 +69,6 @@ fn case(name: &str) -> Option<Override> {
             None,
             Some(Use::Effect(Request::SnippetsWrite)),
         ),
-        // Storing what it fetched is the one use a copy shares with the shipped package: ssh
-        // profiles and the SSH config are picked in Settings, so nothing pre-grants them.
-        "remote" => Override::extension(
-            "remote",
-            Some(Use::Effect(Request::Storage {
-                op: dupin_broker::StorageOp::Write,
-            })),
-        )
-        .ships_off(),
         "web-search" => Override::extension("web-search", None),
         "window-management" => Override::extension(
             "window-management",
