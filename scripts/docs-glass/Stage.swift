@@ -112,7 +112,7 @@ func hidpi() -> Never {
     let descriptor = make("CGVirtualDisplayDescriptor").init()
     descriptor.setValue("Dupin recording", forKey: "name")
     descriptor.setValue(UInt32(2880), forKey: "maxPixelsWide")
-    descriptor.setValue(UInt32(1800), forKey: "maxPixelsHigh")
+    descriptor.setValue(UInt32(2000), forKey: "maxPixelsHigh")
     descriptor.setValue(NSValue(size: NSSize(width: 286, height: 179)), forKey: "sizeInMillimeters")
     descriptor.setValue(UInt32(0x4455), forKey: "vendorID")
     descriptor.setValue(UInt32(0x0001), forKey: "productID")
@@ -123,7 +123,7 @@ func hidpi() -> Never {
     let initialiser = class_getMethodImplementation(modeClass, NSSelectorFromString("initWithWidth:height:refreshRate:"))
     typealias ModeInit = @convention(c) (AnyObject, Selector, UInt32, UInt32, Double) -> Unmanaged<AnyObject>
     let mode = unsafeBitCast(initialiser, to: ModeInit.self)(
-        allocated(modeClass),NSSelectorFromString("initWithWidth:height:refreshRate:"), 1440, 900, 60
+        allocated(modeClass),NSSelectorFromString("initWithWidth:height:refreshRate:"), 1440, 1000, 60
     ).takeUnretainedValue()
     let settings = make("CGVirtualDisplaySettings").init()
     settings.setValue(UInt32(1), forKey: "hiDPI")

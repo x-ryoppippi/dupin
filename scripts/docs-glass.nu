@@ -316,11 +316,17 @@ def finish-glass [
     # the Dock, which is not wallpaper. H.264 takes only even sides.
     let width = ($FRAME.width * $scale + 2 * $margin) // 2 * 2
     let height = ($width * $FRAME.height / $FRAME.width | math ceil) // 2 * 2 + 2
-    if $y + $height > $panel.bottom {
+    if $height > $panel.bottom {
         error make {
-            msg: $"($id): a ($width)x($height) cut from ($y) ends below the wallpaper, at ($panel.bottom)"
+            msg: $"($id): a ($width)x($height) cut doesn't fit above the Dock, at ($panel.bottom)"
         }
     }
+    # Sliding it up when the panel is too low for the cut to end above the Dock, by the same
+    # amount for every clip as the panel opens in the same place.
+    let y = [
+        $y
+        ($panel.bottom - $height)
+    ] | math min
     let crop = $"crop=($width):($height):($x):($y)"
     # A key shows in the panel some way after System Events presses it, so the clip is lined up
     # on the frame the first key changed, not on when the script started.
