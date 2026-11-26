@@ -6,6 +6,8 @@ Dupin is what Alfred was meant to be, as its author sees it: a launcher built fo
 
 Dupin owes its shape to LaunchBar, Quicksilver, Alfred, Spotlight and Raycast, and to everyone who made them. [The name](./name.md) tells their story and where Dupin's name comes from.
 
+Its model of sources, filters and kinds, which you compose yourself, comes from Shougo Matsushita's [unite.vim](https://github.com/Shougo/unite.vim), [denite.nvim](https://github.com/Shougo/denite.nvim) and [ddu.vim](https://github.com/Shougo/ddu.vim) for Vim and Neovim, and their idea that a finder is a pipeline you can recompose. Thank you.
+
 ## Built for searching
 
 Press the hotkey, type a few letters and press Enter. A short [keyword](./features/keywords.md) and Space reaches anything else, such as `cal` for your calendar or `d` for the dictionary, and `?` lists every one. That is the whole interface, and it stays that way.
