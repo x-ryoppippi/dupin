@@ -22,7 +22,7 @@ use dupin_js_runtime::row::{MAX_PAGE_BYTES, MAX_PAGE_ROWS, PageChange};
 use dupin_js_runtime::web_search::WebSearch;
 use dupin_js_runtime::{CataloguePage, Diagnostic, Preferences, Reason, Row, RunError};
 
-use super::Role;
+use super::{Clock, Role};
 
 /// What one package's catalogue may hold.
 pub const LIMITS: Limits = Limits {
@@ -38,6 +38,7 @@ const MAX_PARTS: usize = LIMITS.rows / MAX_PAGE_ROWS + LIMITS.bytes / MAX_PAGE_B
 
 pub(crate) struct Cached {
     shared: Arc<Shared>,
+    clock: Clock,
 }
 
 /// Asks the package for the next part of its catalogue, after the cursor it gave.
@@ -96,6 +97,11 @@ impl Default for Cached {
 
 impl Cached {
     pub fn new(matching: Matching) -> Self {
+        Self::with_clock(matching, Clock::launcher())
+    }
+
+    /// One whose rows' times are measured against `clock`.
+    pub fn with_clock(matching: Matching, clock: Clock) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 catalogue: Catalogue::new(matching),
@@ -115,7 +121,7 @@ impl Cached {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(Arc::downgrade(&shared));
-        Self { shared }
+        Self { shared, clock }
     }
 
     /// Drops what the catalogue holds when it is next used, which then asks for it from the
@@ -148,7 +154,7 @@ impl Cached {
         convert: &dyn Convert,
     ) -> Result<Vec<Batch>, RunError> {
         self.fresh(asking, fetch, convert, |catalogue| {
-            catalogue.search(query, limit, dupin_core::session::unix_now())
+            catalogue.search(query, limit, self.clock.now_ms() / 1000)
         })
     }
 
@@ -407,7 +413,7 @@ mod tests {
                 detail: None,
                 web_search: row.web_search,
                 match_text: None,
-                time: None,
+                time: row.time.map(|ms| ms / 1000),
                 file: None,
                 file_actions: Vec::new(),
                 accessories: Vec::new(),
@@ -449,6 +455,44 @@ mod tests {
             .flat_map(|batch| &batch.items)
             .map(|item| item.display_title().to_owned())
             .collect()
+    }
+
+    fn subtitles(batches: &[Batch]) -> Vec<String> {
+        batches
+            .iter()
+            .flat_map(|batch| &batch.items)
+            .map(|item| match &item.view {
+                View::Text { subtitle, .. } => subtitle.clone(),
+                _ => String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_fixed_clock_says_how_long_ago_rows_are_whatever_the_wall_clock_says() {
+        const NOW: i64 = 1_795_942_800_000;
+        let shown = |wall: fn() -> u64| {
+            let cached = Cached::with_clock(
+                Matching::default(),
+                Clock {
+                    fixed: Some(NOW),
+                    wall,
+                },
+            );
+            let mut fetch = |_: Option<&str>, _, _: &Arc<Preferences>| {
+                let mut copied = row("a", "Copied");
+                copied.time = Some(NOW as u64 - 7_200_000);
+                Ok(page(PageChange::Reset { rows: vec![copied] }, "1", false))
+            };
+            subtitles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap(),
+            )
+        };
+        let today = shown(|| 1_795_942_800_000);
+        assert_eq!(today, ["2 h ago"]);
+        assert_eq!(shown(|| 1_796_202_000_000), today, "three days later");
     }
 
     #[test]
