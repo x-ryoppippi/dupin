@@ -55,6 +55,14 @@ enabled = true
 
 Dupin still accepts the `window_management` key that Settings once wrote to `config.toml`, ignores it and leaves it out the next time it saves.
 
+A [hotkey](./hotkeys.md#rows) arranges the front window without showing the panel. Name the command as `window-management/` and its ID: `left-half`, `right-half`, `top-half`, `bottom-half`, `left-third`, `centre-third`, `right-third`, `maximise`, `centre` or `next-display`.
+
+```toml
+[bindings."ctrl+alt+l"]
+target = "dupin"
+command = "window-management/left-half"
+```
+
 <details>
 <summary>Extension scopes</summary>
 

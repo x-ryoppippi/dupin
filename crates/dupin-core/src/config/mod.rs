@@ -26,7 +26,7 @@ use aliases::check_command_name;
 pub use aliases::{AliasTarget, Aliases, MAX_ALIASES, check_alias};
 pub use calendar::Calendar;
 pub use clipboard::{Clipboard, Retention};
-pub use hotkeys::HotkeyTarget;
+pub use hotkeys::{Address, HotkeyTarget};
 pub use panel::{DisplaySelection, InputSource, Position};
 pub use snippets::Snippet;
 pub use sync::Sync;

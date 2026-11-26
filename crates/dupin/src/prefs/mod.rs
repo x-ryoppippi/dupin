@@ -746,7 +746,7 @@ mod tests {
                 [(
                     chord.to_string(),
                     HotkeyTarget::Dupin {
-                        command: "dictionary".into(),
+                        command: dupin_core::config::AliasTarget::Command("dictionary".into()).into(),
                         query: None,
                     }
                 )]
@@ -795,6 +795,61 @@ mod tests {
             assert_eq!(s.change_command_shortcut("dictionary", None), Ok(()));
             assert!(dictionary(s).is_empty());
             assert_eq!(s.config.bindings.len(), 1, "the app binding stays");
+        });
+    }
+
+    #[test]
+    fn system_commands_web_searches_and_apps_record_shortcuts_too() {
+        use dupin_core::config::{Address, HotkeyTarget};
+        use rune::accesskit::Role;
+
+        let config =
+            Config::parse("[bindings.\"alt+cmd+s\"]\ntarget = \"dupin\"\ncommand = \"system/sleep\"")
+                .unwrap();
+        let current = Rc::new(RefCell::new(config));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Keywords);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.frame(0.0);
+        let tree = runtime.accessibility_tree();
+        let recorder = |label: &str| {
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+        };
+        assert!(recorder("Run Sleep") && recorder("Run Lock Screen") && recorder("Run Restart Dupin"));
+        assert!(recorder("Open Search Google"));
+        runtime.update(|s, _| {
+            let bound = |s: &Prefs, address: &str| {
+                let address = Address::parse(address).unwrap();
+                s.config
+                    .bindings
+                    .iter()
+                    .find(|(_, target)| matches!(target, HotkeyTarget::Dupin { command, query: None } if *command == address))
+                    .map(|(chord, _)| chord.clone())
+            };
+            assert_eq!(bound(s, "system/sleep").as_deref(), Some("alt+cmd+s"));
+            let taken: Shortcut = "alt+cmd+s".parse().unwrap();
+            assert_eq!(
+                s.change_command_shortcut("system/lock-screen", Some(&taken)),
+                Err(ShortcutError::Conflict)
+            );
+            assert_eq!(
+                s.keywords.shortcut_problems["system/lock-screen"],
+                "⌥⌘S is assigned to the binding for system/sleep."
+            );
+            for (address, chord) in [
+                ("system/lock-screen", "ctrl+alt+cmd+l"),
+                ("web:g", "ctrl+alt+cmd+g"),
+                ("app:org.mozilla.firefox", "ctrl+alt+cmd+f"),
+            ] {
+                let chord: Shortcut = chord.parse().unwrap();
+                assert_eq!(s.change_command_shortcut(address, Some(&chord)), Ok(()));
+                assert_eq!(bound(s, address), Some(chord.to_string()), "{address}");
+            }
+            assert_eq!(s.change_command_shortcut("system/sleep", None), Ok(()));
+            assert_eq!(bound(s, "system/sleep"), None);
         });
     }
 

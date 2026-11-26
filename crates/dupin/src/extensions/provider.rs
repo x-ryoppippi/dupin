@@ -139,6 +139,25 @@ pub fn answer(
     Ok(batches)
 }
 
+/// The row whose ID is `row` in `extension`'s catalogue, as its keyword lists it; none when
+/// the package lists no such row.
+pub fn catalogue_row(
+    extension: &Arc<Extension>,
+    row: &str,
+    deadline: Instant,
+    call: &Call,
+) -> Result<Option<Item>, RunError> {
+    if !extension.check(deadline)?.items {
+        return Ok(None);
+    }
+    let id = extension.entry_id(row);
+    let batches = extension.catalogue("", usize::MAX, deadline, call, Role::Keyword, Some(extension))?;
+    Ok(batches
+        .into_iter()
+        .flat_map(|batch| batch.items)
+        .find(|item| item.id == id))
+}
+
 /// What `search` computes for what is typed in the main search, for the built-in `extension`
 /// answers there.
 fn main_answer(

@@ -40,7 +40,7 @@ use dupin_js_runtime::{
 use catalogue::Asking;
 
 pub use fixtures::{Rendered, render, test};
-pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
+pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer, catalogue_row};
 pub(crate) use provider::{hand_over_kinds, is_answered_consent_row, on_catalogue_refreshed, stands_in};
 
 pub(crate) use crate::catalog_watch::Watch;

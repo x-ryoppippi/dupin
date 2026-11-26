@@ -18,7 +18,8 @@ pub const COMMANDS: [SystemCommand; 8] = [
     SystemCommand::ToggleDarkMode,
 ];
 
-fn labels(command: SystemCommand) -> (&'static str, &'static str, Option<&'static str>) {
+/// Each command's title, subtitle and, for one that asks first, the question its confirmation asks.
+pub fn labels(command: SystemCommand) -> (&'static str, &'static str, Option<&'static str>) {
     use SystemCommand::*;
     match command {
         Sleep => ("Sleep", "Put this Mac to sleep", None),
@@ -59,7 +60,7 @@ fn symbol(command: SystemCommand) -> &'static str {
     }
 }
 
-fn needs_automation(command: SystemCommand) -> bool {
+pub fn needs_automation(command: SystemCommand) -> bool {
     matches!(
         command,
         SystemCommand::Restart | SystemCommand::ShutDown | SystemCommand::LogOut | SystemCommand::EmptyTrash

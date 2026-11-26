@@ -814,3 +814,28 @@ fn every_part_is_asked_for_with_the_settings_it_is_handed() {
     assert_eq!(cursor(&second), r#"{"n":2}"#);
     assert_eq!(cursor(&first), r#"{"n":1}"#);
 }
+
+#[test]
+fn a_binding_finds_one_catalogue_row_by_its_id() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package("", &[("main.js", BOOKMARKS)]);
+    let deadline = || Instant::now() + QUERY_DEADLINE;
+    let rust = super::catalogue_row(&extension, "rust", deadline(), &Call::none())
+        .unwrap()
+        .expect("the row in the second section");
+    assert_eq!(rust.display_title(), "The Rust Book");
+    assert_eq!(rust.id, "extension:marks/rust");
+    assert!(
+        super::catalogue_row(&extension, "nothing", deadline(), &Call::none())
+            .unwrap()
+            .is_none()
+    );
+
+    let (_folder, searching) = package("", &[("main.js", "export function search() { return []; }")]);
+    assert!(
+        super::catalogue_row(&searching, "rust", deadline(), &Call::none())
+            .unwrap()
+            .is_none(),
+        "a package without a catalogue lists no row"
+    );
+}

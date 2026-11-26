@@ -439,7 +439,7 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                     "Dupin command",
                     match query {
                         Some(query) => format!("{command} · {query}"),
-                        None => command.clone(),
+                        None => command.to_string(),
                     },
                 ),
             };

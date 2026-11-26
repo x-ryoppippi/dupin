@@ -439,7 +439,7 @@ impl Ui {
         }
     }
 
-    fn registered_extension(&self, id: &str) -> Option<Arc<Extension>> {
+    pub(super) fn registered_extension(&self, id: &str) -> Option<Arc<Extension>> {
         self.extensions
             .registered
             .values()
@@ -563,6 +563,27 @@ impl Ui {
         action: String,
         data: serde_json::Value,
     ) {
+        self.start_extension_action(extension, action, data, false);
+    }
+
+    /// Runs an action a shortcut chose with the panel hidden, which shows the panel only for
+    /// what the action has to say or opens.
+    pub(super) fn run_bound_extension_action(
+        &mut self,
+        extension: String,
+        action: String,
+        data: serde_json::Value,
+    ) {
+        self.start_extension_action(extension, action, data, true);
+    }
+
+    fn start_extension_action(
+        &mut self,
+        extension: String,
+        action: String,
+        data: serde_json::Value,
+        bound: bool,
+    ) {
         let Some(extension) = self.registered_extension(&extension) else {
             let anchor = self.session.anchor();
             self.form_answered(&anchor);
@@ -596,7 +617,7 @@ impl Ui {
                     let effects = ui.session.refresh();
                     ui.apply(effects, tx);
                 } else {
-                    ui.extension_acted(&extension, &anchor, result, tx);
+                    ui.extension_acted(&extension, &anchor, result, bound, tx);
                 }
             });
             drop(busy);
@@ -610,6 +631,7 @@ impl Ui {
         extension: &Extension,
         anchor: &Anchor,
         result: Result<Acted, RunError>,
+        bound: bool,
         tx: &mut Tx,
     ) {
         let name = &extension.name;
@@ -623,8 +645,18 @@ impl Ui {
             }
         };
         if let Some(text) = effect.as_ref().and_then(ActionEffect::toast) {
-            self.timed_notice(text.to_owned(), tx);
+            if bound && !self.shown {
+                self.show_notice(text.to_owned(), tx);
+            } else {
+                self.timed_notice(text.to_owned(), tx);
+            }
         }
+        // What the action opens needs the panel, which a shortcut's action ran without.
+        let reveals = bound
+            && matches!(
+                effect,
+                Some(ActionEffect::Push { .. } | ActionEffect::Enter { .. })
+            );
         let navigated = match effect {
             None | Some(ActionEffect::Toast { .. }) => {
                 // A refused request may have left a consent row to show.
@@ -675,7 +707,12 @@ impl Ui {
             },
         };
         match navigated {
-            Navigated::Done(effects) => self.apply(effects, tx),
+            Navigated::Done(effects) => {
+                self.apply(effects, tx);
+                if reveals {
+                    self.show(tx);
+                }
+            }
             Navigated::Stale | Navigated::NoPage => {}
             Navigated::TooDeep => self.show_notice(
                 format!("{name} failed: it opened more views than Dupin keeps open; close one first"),

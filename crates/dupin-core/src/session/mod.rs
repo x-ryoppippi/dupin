@@ -362,6 +362,11 @@ impl Session {
         self.commands.ids()
     }
 
+    /// The web search `alias` reaches: its own alias, for a shorthand.
+    pub fn web_search(&self, alias: &str) -> Option<&str> {
+        self.commands.web_search(alias)
+    }
+
     pub fn command(&self) -> &crate::CommandSpec {
         self.commands
             .command(&self.search.command)
@@ -486,6 +491,13 @@ impl Session {
         let mut effects = vec![Effect::ReplaceQuery(query.to_owned())];
         effects.extend(self.start_over(None, Some(command.clone()), query));
         Some(effects)
+    }
+
+    /// Leaves for a fresh main search with `query` typed, as typing it there does.
+    pub fn search_main(&mut self, query: &str) -> Vec<Effect> {
+        let mut effects = vec![Effect::ReplaceQuery(query.to_owned())];
+        effects.extend(self.start_over(None, None, query));
+        effects
     }
 
     fn reset_to_default(&mut self, commands: Option<CommandRegistry>) -> Vec<Effect> {
