@@ -397,3 +397,105 @@ impl services::Exec for Programs {
         exec::run(profile, values, &Lookup(&self.scripts), &self.runner, cancel)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::ExitStatusExt;
+    use std::time::Instant;
+
+    use dupin_js_runtime::{ActionEffect, PageContext};
+    use serde_json::json;
+
+    use super::*;
+    use crate::extensions::{ACTION_DEADLINE, bundled, load_bundled};
+
+    /// The bundled Processes package signals a child this test started, through the broker and
+    /// the runner the launcher uses, and refuses launchd, Dupin and a PID that now runs another
+    /// program before running anything that signals.
+    #[test]
+    fn processes_signal_only_the_process_the_row_showed() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let home = tempfile::tempdir().unwrap();
+        let services = Services {
+            exec: Box::new(Programs {
+                scripts: Arc::new(RwLock::new(Catalog::default())),
+                runner: Runner::new(home.path().to_owned(), Arc::new(|_, _| {})),
+            }),
+            ..Services::none()
+        };
+        let bridge = Bridge::new(Broker::new(Base::default(), Local::default()), None, services);
+        let folder = bundled::find(&bundled::directory().unwrap(), "proc").unwrap();
+        let extension = load_bundled(&folder).unwrap();
+        bridge.set_bundled(&extension.package, extension.revision.clone(), true);
+        let _ = bridge.install(
+            &extension.package,
+            extension.revision.clone(),
+            extension.capabilities.clone(),
+        );
+        bridge.set_enabled(&extension.package, true).unwrap();
+        // Each program is the user's to allow, as the panel asks before it first runs.
+        for entry in bridge.scopes(&extension.package) {
+            bridge
+                .allow(&extension.package, &extension.revision, &entry.scope, None)
+                .unwrap();
+        }
+        let act = |name: &str, data: serde_json::Value| {
+            let call = bridge.call(&extension.package, Trigger::Activation);
+            let acted = extension
+                .act(
+                    name,
+                    &data,
+                    &PageContext::default(),
+                    Instant::now() + ACTION_DEADLINE,
+                    &call.services,
+                )
+                .unwrap();
+            match acted.effect {
+                Some(ActionEffect::Toast { text }) => text,
+                other => panic!("{other:?}"),
+            }
+        };
+
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": pid, "name": "sleep", "path": "/bin/cat" })
+            ),
+            format!("PID {pid} now belongs to another program, so Dupin left it alone")
+        );
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": 1, "name": "launchd", "path": "/sbin/launchd" })
+            ),
+            "Dupin doesn't signal launchd"
+        );
+        let dupin = json!({
+            "pid": std::process::id(),
+            "name": "dupin",
+            "path": "/Applications/Dupin.app/Contents/MacOS/dupin",
+        });
+        assert_eq!(act("forceQuit", dupin), "Dupin doesn't signal dupin");
+        assert!(child.try_wait().unwrap().is_none(), "nothing was stopped yet");
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": pid, "name": "sleep", "path": "/bin/sleep" })
+            ),
+            format!("Asked sleep ({pid}) to quit")
+        );
+        assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGTERM));
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": pid, "name": "sleep", "path": "/bin/sleep" })
+            ),
+            format!("sleep ({pid}) has already ended")
+        );
+    }
+}

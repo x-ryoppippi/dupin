@@ -1,0 +1,48 @@
+{
+	"name": "port",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Ports",
+		"keyword": "port",
+		"icon": "sf:network",
+		"main": "main.ts",
+		"capabilities": {
+			"exec": {
+				"sockets": {
+					"program": "/usr/sbin/lsof",
+					"args": [
+						"-nP",
+						"+c",
+						"0",
+						"-iTCP",
+						"-sTCP:LISTEN",
+						"-iUDP",
+						"-F",
+						"cnPpu"
+					],
+					"output": true,
+					"outputBytes": 1048576,
+					"background": true
+				},
+				"identify": {
+					"program": "/bin/ps",
+					"args": [
+						"-o",
+						"comm=",
+						"-p",
+						"{pid}"
+					],
+					"output": true
+				},
+				"terminate": {
+					"program": "/bin/kill",
+					"args": [
+						"-TERM",
+						"{pid}"
+					]
+				}
+			}
+		}
+	}
+}

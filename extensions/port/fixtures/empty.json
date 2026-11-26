@@ -1,0 +1,34 @@
+{
+	"fixture": 1,
+	"description": "With nothing listening, lsof finds no socket and exits 1, and the keyword lists nothing rather than failing.",
+	"environment": {
+		"now": "2026-11-26T12:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"exec": [
+			{
+				"profile": "sockets",
+				"args": ["-nP", "+c", "0", "-iTCP", "-sTCP:LISTEN", "-iUDP", "-F", "cnPpu"],
+				"status": 1,
+				"stdout": "",
+				"stderr": ""
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": []
+			}
+		}
+	]
+}
