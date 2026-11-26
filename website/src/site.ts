@@ -1,5 +1,5 @@
 export const repo = 'https://github.com/x-ryoppippi/dupin';
-export const docsUrl = `${repo}/tree/main/docs`;
+export const docsUrl = '/docs/';
 export const releasesUrl = `${repo}/releases`;
 export const sponsorUrl = 'https://github.com/sponsors/ryoppippi';
 export const siteUrl = 'https://dupin.app';
@@ -40,5 +40,5 @@ export const setupPrompt = `Install Dupin, a launcher for Apple silicon Macs, on
 3. Install it with Homebrew: \`brew install --cask ${channels.stable.cask}\`, then \`open -a Dupin\`. If that cask is not published yet, use \`brew install --cask ${channels.nightly.cask}\` instead. Without Homebrew, run \`${nixInstall}\` and \`open ~/.nix-profile/Applications/Dupin.app\`, asking me before installing Nix.
 4. Ask me to press ⌘Space. If the panel does not show, read ~/Library/Logs/Dupin/dupin.log and tell me why.
 
-Settings are described at ${repo}/blob/main/docs/configuration.md
+Settings are described at https://dupin.app/docs/configuration/
 `;

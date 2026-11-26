@@ -39,7 +39,7 @@ By hand:
 - [Homepage](${siteUrl}/)
 - [Download](${siteUrl}/download/)
 - [Source on GitHub](${repo})
-- [Documentation](${docsUrl})
+- [Documentation](${siteUrl}${docsUrl})
 - [Releases](${releasesUrl})
 `;
 

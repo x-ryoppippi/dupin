@@ -2,11 +2,18 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import { oxContentCustomHost, type OxContentOptions } from '@ox-content/vite-plugin';
 import { svelte } from '@rsvelte/vite-plugin-svelte';
 import { cloudflareRedirect } from '@ryoppippi/vite-plugin-cloudflare-redirect';
+import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
+import { docsLinks } from './src/docs/links.ts';
 import { repo, siteName, siteUrl } from './src/site.ts';
 
 const oxContentOptions = {
-	search: false,
+	// The documentation is the Markdown in the repository's docs/, rendered as it is on GitHub.
+	srcDir: '../docs',
+	transformers: [docsLinks(path.resolve(import.meta.dirname, '..'))],
+	search: { limit: 40 },
+	// Where `cf build` puts the Worker's static assets, which the search index is one of.
+	outDir: '.cloudflare/output/v1/workers/default/assets',
 	docs: false,
 	icons: { include: ['src/**/*.{css,ts,svelte}'] },
 	siteMaps: { llms: false },

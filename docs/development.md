@@ -171,6 +171,10 @@ nu scripts/snap.nu --only calendar --theme dark # one scenario, in one appearanc
 
 `--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead, and clipboard scenarios the history in `scripts/fixtures/clipboard.json`, or a scenario's own in `<name>.clipboard/history.json`, whose `image` entries name PNG files beside it. A scenario with a `<name>.snapshots/snapshots.json`, a list of snapshots, starts with them saved in scratch storage. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
+## Documentation site
+
+dupin.app/docs is this folder, rendered when the website builds (`just website::build`): `website/src/docs/pages.ts` lists the pages it publishes, by section, and ox-content renders each one and indexes `docs/` for the site's search. A link to another published page goes to its page on the site, and a link to anything else, such as this page, a design document or `extensions/`, goes to GitHub. Add a new user-facing page to `pages.ts`; pages for people working on Dupin stay on GitHub only.
+
 ## Documentation images
 
 The images in `docs/images` are rendered, never taken by hand. `scripts/docs-images/images.toml` lists each one; `just docs-images` (`nu scripts/docs-images.nu` after `cargo build -p dupin`) renders every one in light and dark to `docs/images/<page>/<name>-<theme>.png`, compresses them losslessly with oxipng and deletes the images the list no longer has. `--only <text>` renders just the images whose `<page>/<name>` contains it. Re-run it after a change to anything an image shows, and commit the result.
