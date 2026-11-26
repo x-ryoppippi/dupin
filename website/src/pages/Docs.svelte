@@ -7,7 +7,7 @@
 		html: string;
 		current: string;
 		sourceUrl: string;
-		sections: { title: string; pages: { title: string; href: string }[] }[];
+		sections: { title: string; intro?: string; pages: { title: string; href: string }[] }[];
 	};
 
 	let { title, html, current, sourceUrl, sections }: Props = $props();
@@ -20,6 +20,9 @@
 		<nav>
 			{#each sections as section (section.title)}
 				<p class="docs-section">{section.title}</p>
+				{#if section.intro}
+					<p class="docs-section-intro">{section.intro}</p>
+				{/if}
 				<ul>
 					{#each section.pages as page (page.href)}
 						<li>
