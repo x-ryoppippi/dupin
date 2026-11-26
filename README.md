@@ -21,10 +21,12 @@
 
 ## Why Dupin
 
-- **Keywords first, like Alfred.** A short keyword and Space reaches a command: `cal` for your calendar, `d` for the dictionary. Dupin stays resident with no Dock icon, so the panel is there the moment you press the hotkey.
-- **Extensions are plain TypeScript.** You or your agent can write, test and snapshot one from the command line, and install it from Git. Each runs sandboxed and reaches only what you allow.
-- **Local first.** No account. What Dupin keeps about you is encrypted on disk, and [sync](./docs/features/sync.md) goes through a folder you already sync, end-to-end encrypted.
-- **Native on Apple silicon**, macOS 14 or later.
+Dupin is what Alfred was meant to be: simple and extensible.
+
+- **Built for searching.** Type a keyword, reach anything, at once: apps, files, `cal` for your calendar, `d` for the dictionary. Dupin stays resident, so the panel is there the moment you press the hotkey.
+- **Simple.** The launcher stays a launcher.
+- **Extensible.** Extensions are plain TypeScript that you or your agent can write, test and install from Git, each sandboxed with only the permissions you grant.
+- **Mac-native**, on Apple silicon with macOS 14 or later.
 
 More in [Philosophy](./docs/philosophy.md). Named after C. Auguste Dupin, Poe's detective, who came before Sherlock, Watson and Alfred ([the name](./docs/name.md)).
 
