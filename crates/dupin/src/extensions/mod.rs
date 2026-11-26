@@ -20,6 +20,8 @@ pub mod packages;
 pub(crate) mod parity;
 pub(crate) mod preferences;
 mod provider;
+#[cfg(test)]
+mod remote_ssh;
 
 use std::collections::HashMap;
 use std::io::Read;

@@ -224,7 +224,7 @@ export async function search(query) {
 <details>
 <summary>Profiles, results and an example</summary>
 
-Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr. `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`. A command times out before the call that ran it would, so a slow one ends with `timedOut` and the call carries on.
+Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr, and `sshAgent: true` hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys; the extension never sees the socket or the keys. `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`. A command times out before the call that ran it would, so a slow one ends with `timedOut` and the call carries on.
 
 | Profile field | Meaning                                                                                                                                                                                                                                    |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -232,6 +232,7 @@ Each profile's `{input}` placeholders take one line of text. A script needs no p
 | `output`      | Asks to receive stdout and stderr.                                                                                                                                                                                                         |
 | `program`     | The program's absolute path, such as `/usr/bin/git`. Allowing the profile binds it to that program without a pick, and consent names it.                                                                                                   |
 | `background`  | The profile may run while you type, in `items` and in event handlers, not only in an action you chose. Consent says so: **…, even while you type and without an action you chose**. Declaring it later is a wider scope, which asks again. |
+| `sshAgent`    | Hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys; the extension never sees the socket or the keys.                                                                                                               |
 
 ```js
 import { exec } from 'dupin';

@@ -50,6 +50,7 @@ export const sections = [
 			'features/web-searches.md',
 			'features/maps.md',
 			'features/window-management.md',
+			'features/remote.md',
 		],
 	},
 	{

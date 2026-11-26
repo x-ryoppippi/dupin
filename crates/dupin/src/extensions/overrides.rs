@@ -69,6 +69,15 @@ fn case(name: &str) -> Option<Override> {
             None,
             Some(Use::Effect(Request::SnippetsWrite)),
         ),
+        // Storing what it fetched is the one use a copy shares with the shipped package: ssh
+        // profiles and the SSH config are picked in Settings, so nothing pre-grants them.
+        "remote" => Override::extension(
+            "remote",
+            Some(Use::Effect(Request::Storage {
+                op: dupin_broker::StorageOp::Write,
+            })),
+        )
+        .ships_off(),
         // Its files and exec scopes are bound to paths, so only its storage ships granted.
         "repo" => Override::extension(
             "repo",

@@ -458,6 +458,10 @@ pub enum Scope {
         /// `items()` and in event handlers.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         background: bool,
+        /// The program also receives `SSH_AUTH_SOCK`, so it can use the keys the user's SSH agent
+        /// holds.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ssh_agent: bool,
     },
     Script {
         name: ScopeName,
@@ -551,6 +555,7 @@ impl Scope {
                     output,
                     program,
                     background,
+                    ssh_agent,
                 },
                 Self::Exec {
                     name: n,
@@ -558,8 +563,16 @@ impl Scope {
                     output: o,
                     program: p,
                     background: b,
+                    ssh_agent: s,
                 },
-            ) => name == n && args == a && (*output || !o) && program == p && (*background || !b),
+            ) => {
+                name == n
+                    && args == a
+                    && (*output || !o)
+                    && program == p
+                    && (*background || !b)
+                    && (*ssh_agent || !s)
+            }
             (Self::Script { name, output }, Self::Script { name: n, output: o }) => {
                 name == n && (*output || !o)
             }
@@ -686,6 +699,7 @@ impl fmt::Display for Scope {
                 output,
                 program,
                 background,
+                ssh_agent,
             } => {
                 match program {
                     Some(program) => write!(f, "run {program}")?,
@@ -694,6 +708,9 @@ impl fmt::Display for Scope {
                 for (index, arg) in args.iter().enumerate() {
                     f.write_str(if index == 0 { " with " } else { " " })?;
                     write!(f, "{arg:?}")?;
+                }
+                if *ssh_agent {
+                    f.write_str(", using the keys your SSH agent holds,")?;
                 }
                 if *output {
                     f.write_str(" and read its output")?;

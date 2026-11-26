@@ -479,7 +479,7 @@ impl Parser {
             let Some(object) = self.fields(
                 entry,
                 &field,
-                &["args", "output", "program", "background"],
+                &["args", "output", "program", "background", "sshAgent"],
                 &["args"],
             ) else {
                 continue;
@@ -492,6 +492,7 @@ impl Parser {
                     .declared_path(program, &format!("{field}.program"), false)
                     .map(Some),
             };
+            let ssh_agent = self.boolean(object.get("sshAgent"), &format!("{field}.sshAgent"));
             let args = object
                 .get("args")
                 .and_then(|args| self.args(args, &format!("{field}.args")));
@@ -502,6 +503,7 @@ impl Parser {
                     output,
                     program,
                     background,
+                    ssh_agent,
                 });
             }
         }
