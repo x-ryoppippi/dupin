@@ -34,7 +34,7 @@ fn join(field: &str, key: &str) -> String {
 
 const MAX_TOAST_BYTES: usize = 512;
 /// What an `enter` effect types into the command it enters.
-pub const MAX_ENTER_QUERY_BYTES: usize = 1024;
+pub(crate) const MAX_ENTER_QUERY_BYTES: usize = 1024;
 const MAX_COMMAND_NAME_BYTES: usize = 64;
 
 /// What an action asks Dupin to do once it has run. The effects that move between pages or

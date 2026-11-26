@@ -117,7 +117,7 @@ pub enum RowState {
 }
 
 impl RowState {
-    pub fn named(name: &str) -> Option<Self> {
+    pub(crate) fn named(name: &str) -> Option<Self> {
         match name {
             "offline" => Some(Self::Offline),
             "stale" => Some(Self::Stale),
