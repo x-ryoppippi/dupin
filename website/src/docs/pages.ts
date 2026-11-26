@@ -45,6 +45,7 @@ export const sections = [
 			'features/clipboard.md',
 			'features/dictionary.md',
 			'features/emoji.md',
+			'features/repo.md',
 			'features/snippets.md',
 			'features/web-searches.md',
 			'features/maps.md',

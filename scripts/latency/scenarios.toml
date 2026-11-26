@@ -147,6 +147,19 @@ package = "bundled:agent"
 extensions = "scripts/latency/agent.extensions"
 budget_ms = 5.0
 
+# The bundled Repositories catalogue under its keyword, held to the keystroke budget, since
+# nothing native ever answered it. A latency run allows no ghq, Git or folders, so a copy in the
+# extensions folder, which replaces the bundled package by its name, hands Dupin 600 rows shaped
+# as the bundled one lists them; a measured keypress only matches the rows Dupin holds and runs
+# neither the package nor Git.
+[features.repo.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension.repo"
+package = "repo"
+extensions = "scripts/latency/repo.extensions"
+budget_ms = 5.0
+
 [[scenarios]]
 id = "search.saf"
 feature = "search"
@@ -255,3 +268,9 @@ id = "agent.claude"
 feature = "agent"
 prefix = "agent "
 typed = "claude"
+
+[[scenarios]]
+id = "repo.ccu"
+feature = "repo"
+prefix = "repo "
+typed = "ccu"

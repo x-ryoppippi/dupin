@@ -146,6 +146,20 @@ fixture = "notes.json"
 step = 4
 
 [[images]]
+page = "repo"
+name = "list"
+extension = "extensions/repo"
+fixture = "repos.json"
+step = 1
+
+[[images]]
+page = "repo"
+name = "search"
+extension = "extensions/repo"
+fixture = "repos.json"
+step = 3
+
+[[images]]
 page = "appearance"
 name = "ocean"
 scenario = "scripts/themes/preview.json"

@@ -44,6 +44,7 @@ Shipped with Dupin as extensions, each one yours to eject and change.
 - [Clipboard history](./features/clipboard.md)
 - [Dictionary](./features/dictionary.md)
 - [Emoji & Symbols](./features/emoji.md)
+- [Repositories](./features/repo.md)
 - [Snippets](./features/snippets.md)
 - [Web searches](./features/web-searches.md)
 - [Maps](./features/maps.md)
