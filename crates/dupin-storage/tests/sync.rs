@@ -414,3 +414,27 @@ fn a_reminted_device_stamps_with_its_new_id() {
     assert_eq!(device.storage.previous_device_id().unwrap(), Some(old));
     assert_eq!(store.put(text("x")).unwrap().device(), new);
 }
+
+#[test]
+fn a_namespace_can_sync_under_a_name_other_than_its_directory() {
+    let device = Device::new();
+    let local = device.storage.open("ext-u-local", Limits::default()).unwrap();
+    local.upsert("k", text("kept")).unwrap();
+    drop(local);
+    let synced = device
+        .storage
+        .open_synced_as("ext-u-local", "ext-s-portable", Limits::default(), &vault(1))
+        .unwrap();
+    assert_eq!(synced.namespace_id(), vault(1).namespace_id("ext-s-portable"));
+    assert_eq!(
+        texts(&synced),
+        ["kept"],
+        "the local records move under the synced name's keys"
+    );
+    assert_eq!(
+        synced.get(&synced.key_id("k")).unwrap().unwrap().data,
+        json!("kept")
+    );
+    assert!(device.root.join("ext-u-local").is_dir());
+    assert!(!device.root.join("ext-s-portable").exists());
+}

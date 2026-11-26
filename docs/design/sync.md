@@ -322,6 +322,7 @@ These change the format in #230. Landing them in #230, or right after it and bef
    **Switches done** for usage history, snippets and settings: `[sync] usage|snippets|settings`, on by default and shown in Settings → Sync; one turned off is opened under the data key and left, as [Leaving and rejoining](#leaving-and-rejoining) says.
 8. Add opt-in clipboard sync for text and file references, then images, and update the on-disk promise in `docs/features/clipboard.md`.
 9. Add `storage.sync` for extensions behind its consent.
+   **Done.** The scope is `storage:sync`, declared with `storage.sync: true`. The namespace keeps its local directory (named after the installation) and syncs under `ext-s-<hash of the Git source and package name>`, from which its keys and folder name derive (`Storage::open_synced_as`), so a re-seal moves what the package stored before the grant. The bridge opens it synced only while the grant holds and the package has a Git source; the host's `synced::ExtensionSync` opens it under the vault, registers it, reopens it when sync turns on or off, and leaves it when the grant is revoked.
 
 Running the suite on Linux with Syncthing and Dropbox folders waits for the deferred Linux port, and is not planned now.
 

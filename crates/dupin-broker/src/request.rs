@@ -30,6 +30,8 @@ pub enum Request {
     Storage {
         op: StorageOp,
     },
+    /// Keeping the package's namespace in the sync folder while sync is on.
+    StorageSync,
     Clipboard(ClipboardAccess),
     DictionaryLookup,
     CalculatorEvaluate,
@@ -71,6 +73,7 @@ impl Request {
             Self::Exec { profile } => ScopeKey::Exec(profile.clone()),
             Self::Script { name, .. } => ScopeKey::Script(name.clone()),
             Self::Storage { .. } => ScopeKey::Storage,
+            Self::StorageSync => ScopeKey::StorageSync,
             Self::Clipboard(access) => ScopeKey::Clipboard(*access),
             Self::DictionaryLookup => ScopeKey::Dictionary,
             Self::CalculatorEvaluate => ScopeKey::Calculator,
@@ -91,6 +94,7 @@ impl Request {
             Self::Windows(access) => *access == WindowsAccess::Arrange,
             Self::Files { .. }
             | Self::Storage { .. }
+            | Self::StorageSync
             | Self::DictionaryLookup
             | Self::CalculatorEvaluate
             | Self::CalendarRead { .. }
