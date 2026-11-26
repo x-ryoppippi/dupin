@@ -44,6 +44,8 @@ fn scope_keys_round_trip_through_their_written_form() {
         "calendar",
         "windows:read",
         "windows:arrange",
+        "context:frontmost",
+        "context:document",
     ] {
         assert_eq!(key(written).to_string(), written);
     }
@@ -53,6 +55,9 @@ fn scope_keys_round_trip_through_their_written_form() {
         "files:",
         "clipboard:type",
         "windows:move",
+        "context",
+        "context:selection",
+        "context:Frontmost",
         "windows",
         "network",
         "storage:x",
@@ -183,6 +188,39 @@ fn windows_scopes_need_accessibility_and_describe_themselves() {
     let scope = |access| Scope::Windows { access };
     assert!(scope(WindowsAccess::Read).covers(&scope(WindowsAccess::Read)));
     assert!(!scope(WindowsAccess::Arrange).covers(&scope(WindowsAccess::Read)));
+}
+
+#[test]
+fn context_scopes_need_no_macos_access_or_activation_and_describe_themselves() {
+    let context = caps(json!({ "context": ["frontmost", "document"] }));
+    let described: Vec<_> = context
+        .scopes()
+        .map(|scope| (scope.key().to_string(), scope.to_string(), scope.os_permission()))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            (
+                "context:frontmost".to_string(),
+                "see which app you were using when Dupin opened".to_string(),
+                None
+            ),
+            (
+                "context:document".to_string(),
+                "see which file you were viewing when Dupin opened".to_string(),
+                None
+            ),
+        ]
+    );
+    let scope = |access| Scope::Context { access };
+    assert!(scope(ContextAccess::Frontmost).covers(&scope(ContextAccess::Frontmost)));
+    assert!(
+        !scope(ContextAccess::Frontmost).covers(&scope(ContextAccess::Document)),
+        "seeing the app never lets a package see the file"
+    );
+    for access in [ContextAccess::Frontmost, ContextAccess::Document] {
+        assert!(!Request::Context(access).needs_activation());
+    }
 }
 
 #[test]

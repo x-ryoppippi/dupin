@@ -378,7 +378,7 @@ fn glyph(scope: &Scope) -> &'static Icon {
         Scope::Calculator => &icons::CALCULATOR,
         Scope::Snippets => &icons::QUOTE,
         Scope::Calendar { .. } => &icons::CALENDAR,
-        Scope::Windows { .. } => &icons::PANEL,
+        Scope::Windows { .. } | Scope::Context { .. } => &icons::PANEL,
         Scope::Rows { .. } | Scope::Query => &icons::SEARCH,
     }
 }

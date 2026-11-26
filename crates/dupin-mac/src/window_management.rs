@@ -1,16 +1,17 @@
-//! The Accessibility side of the extensions' `windows` capability: the displays, and the
-//! focused window of the app that was in front of Dupin when the panel opened.
+//! The Accessibility side of the extensions' `windows` and `context` capabilities: the
+//! displays, the app that was in front of Dupin when the panel opened, its focused window and
+//! the file that window shows.
 
 use std::ffi::c_void;
 use std::ptr::{self, NonNull};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use dupin_host_services::ServiceError;
 use dupin_host_services::windows::{self, App, Display, Frame, Window};
+use dupin_host_services::{ServiceError, context};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSScreen, NSWorkspace};
 use objc2_core_foundation::{CFRetained, CFString, CFType};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString, NSURL};
 
 use crate::accessibility::{self, AX_NO_VALUE, AX_POINT, AX_SIZE, attribute};
 use crate::privacy::Permission;
@@ -31,17 +32,30 @@ struct Target {
     app: App,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Captured {
     displays: Vec<Display>,
     /// None while Dupin itself was in front, since its own windows are never arranged.
     target: Option<Target>,
+    /// The file the target's focused window shows, read on the first request after the panel
+    /// opened rather than on every opening, so no app is asked unless a package wants it.
+    document: Arc<OnceLock<Option<String>>>,
+}
+
+impl Default for Captured {
+    fn default() -> Self {
+        Self::new(Vec::new(), None)
+    }
 }
 
 impl Captured {
     fn new(displays: Vec<Display>, front: Option<Target>) -> Self {
         let target = front.filter(|target| target.pid > 0 && target.pid as u32 != std::process::id());
-        Self { displays, target }
+        Self {
+            displays,
+            target,
+            document: Arc::default(),
+        }
     }
 }
 
@@ -84,6 +98,55 @@ impl Front {
     fn target(&self) -> Option<Target> {
         self.lock().target.clone()
     }
+
+    /// The file the target's focused window showed, read once per opening, and only while
+    /// macOS already trusts Dupin with Accessibility: this never asks.
+    fn document(&self, read: impl FnOnce(i32) -> Option<String>) -> Option<String> {
+        let (target, slot) = {
+            let captured = self.lock();
+            (captured.target.clone(), Arc::clone(&captured.document))
+        };
+        slot.get_or_init(|| target.and_then(|target| read(target.pid)))
+            .clone()
+    }
+}
+
+/// The `context` capability's backend: what [`Front`] noted as the panel opened.
+pub struct Context(pub Arc<Front>);
+
+impl context::Context for Context {
+    fn frontmost(&self) -> Option<context::App> {
+        self.0.target().map(|target| context::App {
+            name: target.app.name,
+            bundle_id: target.app.bundle_id,
+            pid: target.pid.unsigned_abs(),
+        })
+    }
+
+    fn document(&self) -> Option<context::Document> {
+        let path = self.0.document(|pid| {
+            if !accessibility::is_trusted() {
+                return None;
+            }
+            document_path(pid)
+        })?;
+        Some(context::Document { path })
+    }
+}
+
+/// The local path of the file the app's focused window shows, as its `AXDocument` names it.
+fn document_path(pid: i32) -> Option<String> {
+    let window = focused_window(pid).ok()??;
+    let url = attribute(&window, "AXDocument")
+        .ok()?
+        .downcast::<CFString>()
+        .ok()?
+        .to_string();
+    let url = NSURL::URLWithString(&NSString::from_str(&url))?;
+    if !url.isFileURL() {
+        return None;
+    }
+    Some(url.filePathURL()?.path()?.to_string())
 }
 
 /// Display bounds in top-left coordinates, with the primary display first.
@@ -272,6 +335,55 @@ mod tests {
             windows.set_frame(Frame::new(0.0, 0.0, 100.0, 100.0)),
             Err(no_window())
         );
+    }
+
+    #[test]
+    fn the_document_is_read_once_per_opening_and_never_with_dupin_in_front() {
+        use dupin_host_services::context::Context as _;
+
+        let editor = Target {
+            pid: 4242,
+            app: App {
+                name: "Editor".into(),
+                bundle_id: Some("com.example.editor".into()),
+            },
+        };
+        let front = std::sync::Arc::new(Front::default());
+        *front.lock() = Captured::new(Vec::new(), Some(editor.clone()));
+        let reads = std::cell::Cell::new(0);
+        let read = |pid| {
+            reads.set(reads.get() + 1);
+            assert_eq!(pid, 4242);
+            Some("/Users/me/notes.md".to_owned())
+        };
+        assert_eq!(front.document(read), Some("/Users/me/notes.md".into()));
+        assert_eq!(front.document(read), Some("/Users/me/notes.md".into()));
+        assert_eq!(reads.get(), 1, "one opening reads the app once");
+        *front.lock() = Captured::new(Vec::new(), Some(editor));
+        assert_eq!(front.document(read), Some("/Users/me/notes.md".into()));
+        assert_eq!(reads.get(), 2, "the next opening reads it again");
+        assert_eq!(
+            Context(front.clone()).frontmost(),
+            Some(context::App {
+                name: "Editor".into(),
+                bundle_id: Some("com.example.editor".into()),
+                pid: 4242,
+            })
+        );
+
+        let dupin = Target {
+            pid: std::process::id() as i32,
+            app: App {
+                name: "Dupin".into(),
+                bundle_id: None,
+            },
+        };
+        *front.lock() = Captured::new(Vec::new(), Some(dupin));
+        assert_eq!(
+            front.document(|_| panic!("Dupin never reads its own windows")),
+            None
+        );
+        assert_eq!(Context(front).frontmost(), None);
     }
 
     #[test]

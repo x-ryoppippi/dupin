@@ -316,7 +316,7 @@ The fixture holds the catalogue from step to step as the launcher does, so an `a
 
 ### Replies
 
-`replies` answers host requests in place of this Mac, by service: `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `calendar` and `windows`, plus `consent` for your decision on each scope. A request with no reply fails rather than reaching the network, a program or a file of yours.
+`replies` answers host requests in place of this Mac, by service: `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `calendar`, `windows` and `context`, plus `consent` for your decision on each scope. A request with no reply fails rather than reaching the network, a program or a file of yours.
 
 <details>
 <summary>Every reply</summary>
@@ -334,6 +334,7 @@ Every request still goes through the broker, against the scopes `package.json` d
 | `calculator`  | Each expression's answer, in the [calculator](./extension-permissions.md#calculator)'s shape, or `null` for one it doesn't answer. Any other expression fails with `unavailable`.                                                                                                      |
 | `calendar`    | The events a read can see, in the [calendar](./extension-permissions.md#calendar)'s shape; a read returns those overlapping its range that match its `query`, in its `order`. Whole days are counted from `now` in UTC.                                                                |
 | `windows`     | `{ "displays": [...], "focused": … }`: the displays and the focused window, in the [windows](./extension-permissions.md#windows) service's shape, or `null` for no window. A move goes through the same bounds as on a Mac and updates `focused`, so the next step sees where it went. |
+| `context`     | `{ "frontmost": …, "document": … }`: the app and the file in the [context](./extension-permissions.md#context) service's shapes, each `null` or left out for none.                                                                                                                     |
 | `consent`     | Your decision on each declared scope, named as grant files name it: `"allow"`, `"deny"` (granted, then revoked) or `"pending"` (`needs-consent`). A scope left out is allowed, and macOS access counts as allowed. Naming a scope the package doesn't declare is an error.             |
 
 </details>

@@ -20,7 +20,8 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 	"clipboard": ["read", "write", "watch", "paste"],
 	"dictionary": ["lookup"],
 	"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 },
-	"windows": ["read", "arrange"]
+	"windows": ["read", "arrange"],
+	"context": ["frontmost", "document"]
 }
 ```
 
@@ -36,10 +37,11 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 | `snippets`   | `write`: adding, changing and deleting the snippets the user stores in Dupin, which needs an activation. Reading them is not a scope; only the package Dupin ships for Snippets is handed them.                  | the capability    |
 | `calendar`   | `read` within `pastDays` and `futureDays` of today, each 0–366.                                                                                                                                                  | the capability    |
 | `windows`    | `read`, the displays and the focused window, and `arrange`, moving and resizing it, which needs an activation.                                                                                                   | access            |
+| `context`    | `frontmost`, the app in front when the panel opened, and `document`, the file its focused window showed. Neither needs an activation or macOS access of its own.                                                 | access            |
 | `rows`       | For each kind of row Dupin's own sources find (`text`, `url`, `file`, `app`), the fields the package's filters and kind actions may receive: `title`, and `text`, `url`, `name` or `path`.                       | kind              |
 | `query`      | `read`: what is typed beyond the package's keyword: in the searches its matchers are composed into, and the main search for the built-in it answers there (Calculator).                                          | the capability    |
 
-A scope is written as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `rows:file` or `query` in grant files.
+A scope is written as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `context:document`, `rows:file` or `query` in grant files.
 
 ## Checking an operation
 
@@ -122,7 +124,7 @@ Calendar reads need macOS Calendars access, clipboard reads and watching need th
 
 ## OS-backed services
 
-`dupin-host-services` has a service for each OS-backed capability: `dictionary`, `calendar`, `clipboard` and `windows`. Each defines a narrow backend trait that `dupin-mac` implements (`SystemDictionary`, which backs the bundled Dictionary extension, `EventStore`, which backs the bundled Calendar search extension, `GeneralPasteboard`, and `window_management::Windows`, which reads and moves the focused window of the app the panel opened over through the Accessibility API) and a `Fixture` for tests, validates and bounds its inputs and results, and returns serialisable data or a `ServiceError` whose `code` a guest can branch on. The services read OS access themselves and never prompt: a call while macOS hasn't been asked returns `needs-permission`, which the host can turn into a Request Access row. The calendar service also checks the range against the permit's `Bounds`, the clipboard service refuses reads and writes without an activation trigger, beside the broker's own checks, and the windows service refuses a frame that isn't finite, is out of bounds or lies off every display. Clipboard watches share one subscription to the monitor thread clipboard history uses, read each copy once and deliver on threads of their own, so a guest slow to take a copy never holds up the monitor; reads and watches skip concealed, transient and auto-generated copies, and copies from ignored apps or, while any app is ignored, copies the monitor didn't see land, before reading anything. A clipboard write names files by the handles the `files` service issued, so it can only put entries inside a granted scope on the pasteboard.
+`dupin-host-services` has a service for each OS-backed capability: `dictionary`, `calendar`, `clipboard`, `windows` and `context`. Each defines a narrow backend trait that `dupin-mac` implements (`SystemDictionary`, which backs the bundled Dictionary extension, `EventStore`, which backs the bundled Calendar search extension, `GeneralPasteboard`, and `window_management::Windows`, which reads and moves the focused window of the app the panel opened over through the Accessibility API) and a `Fixture` for tests, validates and bounds its inputs and results, and returns serialisable data or a `ServiceError` whose `code` a guest can branch on. The services read OS access themselves and never prompt: a call while macOS hasn't been asked returns `needs-permission`, which the host can turn into a Request Access row. The calendar service also checks the range against the permit's `Bounds`, the clipboard service refuses reads and writes without an activation trigger, beside the broker's own checks, and the windows service refuses a frame that isn't finite, is out of bounds or lies off every display. Clipboard watches share one subscription to the monitor thread clipboard history uses, read each copy once and deliver on threads of their own, so a guest slow to take a copy never holds up the monitor; reads and watches skip concealed, transient and auto-generated copies, and copies from ignored apps or, while any app is ignored, copies the monitor didn't see land, before reading anything. A clipboard write names files by the handles the `files` service issued, so it can only put entries inside a granted scope on the pasteboard.
 
 ## The broker bridge
 
@@ -132,7 +134,7 @@ For each request the session:
 
 1. decodes the arguments strictly (unknown fields, wrong types and oversized values are `invalid` before the broker sees them);
 2. builds the broker `Request` and calls `Broker::check`; a call whose generation has moved on is `revoked`;
-3. runs the service only within the permit (the HTTP origin it names, the files root and the program the user picked, the package's own storage namespace with its quota and retention, checked against stored data in the same step as each write, the calendar window, the windows of the app the panel opened over);
+3. runs the service only within the permit (the HTTP origin it names, the files root and the program the user picked, the package's own storage namespace with its quota and retention, checked against stored data in the same step as each write, the calendar window, the windows of the app the panel opened over, and what `context` noted as it opened);
 4. calls `Broker::validate` again before an effect and before releasing the result, and drops the result if the permit no longer holds or the call ended.
 
 `NeedsConsent` fails the request with `needs-consent` and keeps a `ConsentRequest`, the revision and declared scope to show, for the panel and Settings; a request while the package is off fails with `disabled` and is remembered the same way. Allow passes that revision and scope back to `Broker::consent` and turns the package on; it re-runs nothing, and the panel only takes the answered row away. Deny revokes the scope. A guest result is shown only while the generation it started at is current, so a revocation mid-call drops the rows it produced.

@@ -577,6 +577,56 @@ fn a_render_answers_host_requests_from_the_fixture_it_renders() {
 }
 
 #[test]
+fn context_is_answered_from_the_fixture_and_only_what_it_holds() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "context": ["frontmost", "document"] }),
+        "import { context } from 'dupin';\n\
+         const settle = async (work) => { try { return JSON.stringify(await work()); } catch (error) { return error.code; } };\n\
+         export async function search() {\n\
+         \treturn [{ title: `${await settle(() => context.frontmost())} | ${await settle(() => context.document())}` }];\n\
+         }\n",
+    );
+    for (replies, title) in [
+        (
+            json!({ "context": { "frontmost": { "name": "Zed", "bundleId": "dev.zed.Zed", "pid": 501 }, "document": { "path": "/Users/me/dupin/README.md" } } }),
+            r#"{"bundleId":"dev.zed.Zed","name":"Zed","pid":501} | {"path":"/Users/me/dupin/README.md"}"#,
+        ),
+        (
+            json!({ "context": { "frontmost": { "name": "Terminal", "bundleId": "com.apple.Terminal", "pid": 7 } } }),
+            r#"{"bundleId":"com.apple.Terminal","name":"Terminal","pid":7} | null"#,
+        ),
+        (
+            json!({ "context": { "document": { "path": "relative/README.md" } } }),
+            "null | null",
+        ),
+        (json!({}), "unavailable | unavailable"),
+        (
+            json!({ "context": {}, "consent": { "context:document": "deny" } }),
+            "null | revoked",
+        ),
+    ] {
+        write_fixture(
+            &package,
+            "context.json",
+            json!({ "fixture": 1, "replies": replies, "steps": [{ "query": "x" }] }),
+        );
+        assert_eq!(only_title(&test(&package, false, &|| false).unwrap()), title);
+    }
+
+    write_fixture(
+        &package,
+        "context.json",
+        json!({ "fixture": 1, "replies": { "context": { "frontmost": { "name": "Zed" } } }, "steps": [{ "query": "x" }] }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    assert_eq!(
+        report.json["fixtures"][0]["diagnostic"]["field"],
+        "replies.context.frontmost"
+    );
+}
+
+#[test]
 fn an_empty_clipboard_reply_reads_as_empty_and_a_missing_one_fails() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_root, package) = capable(
