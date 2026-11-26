@@ -15,7 +15,7 @@ use dupin_core::{CommandId, Config, Provider};
 use dupin_extension_bridge::services::{self, Services};
 use dupin_extension_bridge::{
     Bridge, ClipboardAccess, ConsentState, Failure, OsAccess, OsPermission, PackageId, Request, Scope,
-    Trigger, WindowsAccess,
+    ScopeName, Trigger, WindowsAccess,
 };
 use dupin_host_services::calendar;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Storage};
@@ -79,6 +79,9 @@ fn case(name: &str) -> Option<Override> {
         )
         .ships_off(),
         "web-search" => Override::extension("web-search", None),
+        "proc" => Override::signals("proc"),
+        "port" => Override::signals("port"),
+        "agent" => Override::signals("agent"),
         "window-management" => Override::extension(
             "window-management",
             Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),
@@ -138,6 +141,18 @@ impl Override {
             uses,
             ships_off: false,
         }
+    }
+
+    /// A package that ships off and lists what programs report; stopping a process is the
+    /// most it can reach.
+    fn signals(name: &'static str) -> Self {
+        Self::extension(
+            name,
+            Some(Use::Effect(Request::Exec {
+                profile: ScopeName::new("terminate").unwrap(),
+            })),
+        )
+        .ships_off()
     }
 
     fn ships_off(self) -> Self {

@@ -123,6 +123,10 @@ let
         enable = true;
         deny = [ "exec:terminate" ];
       };
+      proc = {
+        enable = true;
+        deny = [ "exec:force-quit" ];
+      };
     };
   };
   bundledOnly = evaluate { bundledExtensions.window-management.enable = true; };
@@ -178,6 +182,11 @@ assert
     "files:ssh-include"
     "storage"
   ];
+assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
+  "proc"
+  "port"
+  "agent"
+];
 assert bundledExtensions.dupin == [ ];
 assert !failed bundledOnly && failed unbundled && failed undeclared;
 assert lib.hasInfix "it declares calendar"
@@ -250,6 +259,10 @@ pkgs.runCommand "dupin-home-manager-module"
         "bundled:remote" = {
           enabled = true;
           deny = [ "exec:terminate" ];
+        };
+        "bundled:proc" = {
+          enabled = true;
+          deny = [ "exec:force-quit" ];
         };
       };
     };

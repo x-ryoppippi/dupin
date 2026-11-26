@@ -27,7 +27,7 @@ pub use call::exec_profile;
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
     Generation, GrantSource, Local, LocalStore, MemoryLocal, OsAccess, OsConsumer, OsPermission, PackageId,
-    Permit, Reconciliation, Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger,
+    Permit, Reconciliation, Request, Revision, SaveError, Scope, ScopeKey, ScopeName, StoreError, Trigger,
     WindowsAccess,
 };
 use dupin_extension_host::Services as HostServices;

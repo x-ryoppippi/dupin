@@ -50,6 +50,9 @@ export const sections = [
 			'features/maps.md',
 			'features/window-management.md',
 			'features/remote.md',
+			'features/processes.md',
+			'features/ports.md',
+			'features/coding-agents.md',
 		],
 	},
 	{

@@ -232,7 +232,7 @@ Each profile's `{input}` placeholders take one line of text. A script needs no p
 | `catalogue`   | `true` lets the profile run when Dupin asks for the extension's [catalogue](./extension-api.md#itemsctx), without an action of yours, so a list of what a program reports refreshes on its own. Its `search`, views and event handlers still can't run it, and an action still can.                         |
 | `sshAgent`    | `true` hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys.                                                                                                                                                                                                                          |
 
-A catalogue profile is how an extension lists what a program such as `ps` reports every few seconds while you look at it, without running a program as you type: Dupin asks for the catalogue on first use and then in the background each time its `ttl` passes.
+A catalogue profile is how [Processes](./processes.md), [Ports](./ports.md) and [Coding Agents](./coding-agents.md) list what a program such as `ps` reports every few seconds while you look at it, without running a program as you type: Dupin asks for the catalogue on first use and then in the background each time its `ttl` passes.
 
 ```json
 "exec": {
