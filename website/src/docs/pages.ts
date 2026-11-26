@@ -9,6 +9,7 @@ export const sections = [
 		title: 'Getting started',
 		pages: ['usage.md', 'tutorial.md', 'configuration.md', 'features/keywords.md'],
 	},
+	{ title: 'About', pages: ['philosophy.md', 'name.md'] },
 	{
 		title: 'Built-in features',
 		intro: 'Native to Dupin and always there.',
@@ -64,7 +65,6 @@ export const sections = [
 			'features/mcp.md',
 		],
 	},
-	{ title: 'About', pages: ['philosophy.md', 'name.md'] },
 ] as const satisfies readonly { title: string; intro?: string; pages: readonly string[] }[];
 
 export type DocPath = (typeof sections)[number]['pages'][number];
