@@ -3,8 +3,14 @@ import { render } from 'svelte/server';
 import DesignChoices from '../components/docs/DesignChoices.svelte';
 import LauncherLoop from '../components/docs/LauncherLoop.svelte';
 import PanelHandoff from '../components/docs/PanelHandoff.svelte';
+import WaysIn from '../components/docs/WaysIn.svelte';
 
-const components: Record<string, Component> = { DesignChoices, LauncherLoop, PanelHandoff };
+const components: Record<string, Component> = {
+	DesignChoices,
+	LauncherLoop,
+	PanelHandoff,
+	WaysIn,
+};
 
 // A page in docs/ writes `<Name>` fallback `</Name>` for a component of the site. GitHub drops the
 // unknown tag and shows the fallback; the site draws the component instead. The renderer leaves

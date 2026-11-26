@@ -66,9 +66,12 @@ export const sections = [
 			'features/extension-permissions.md',
 			'features/extension-testing.md',
 			'features/extension-distribution.md',
-			'features/cli.md',
-			'features/mcp.md',
 		],
+	},
+	{
+		title: 'Scripts and agents',
+		intro: 'Drive Dupin from a terminal, a script or an AI agent.',
+		pages: ['features/cli.md', 'features/mcp.md'],
 	},
 ] as const satisfies readonly { title: string; intro?: string; pages: readonly string[] }[];
 

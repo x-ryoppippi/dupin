@@ -1,6 +1,12 @@
 # MCP server
 
-`dupin mcp` serves the [Model Context Protocol](https://modelcontextprotocol.io) over stdio, so an agent such as Claude Code can read Dupin's configuration and use its panel.
+`dupin mcp` serves the [Model Context Protocol](https://modelcontextprotocol.io) over stdio, so an agent such as Claude Code can read Dupin's configuration and use its panel. Like the [command line](./cli.md), it lets something outside Dupin drive it; [extensions](./extensions.md) run inside Dupin instead.
+
+<WaysIn>
+
+Three ways in: you use the panel; extensions run inside Dupin, sandboxed; scripts and agents drive Dupin from outside with `dupin` and `dupin mcp`.
+
+</WaysIn>
 
 ## Open it
 
