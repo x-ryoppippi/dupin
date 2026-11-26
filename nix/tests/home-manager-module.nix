@@ -119,6 +119,10 @@ let
       dictionary = { };
       calculator.deny = [ "query" ];
       snippets.deny = [ "snippets" ];
+      proc = {
+        enable = true;
+        deny = [ "exec:force-quit" ];
+      };
     };
   };
   bundledOnly = evaluate { bundledExtensions.window-management.enable = true; };
@@ -161,6 +165,11 @@ assert
     "windows:arrange"
   ];
 assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
+assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
+  "proc"
+  "port"
+  "agent"
+];
 assert bundledExtensions.dupin == [ ];
 assert !failed bundledOnly && failed unbundled && failed undeclared;
 assert lib.hasInfix "it declares calendar"
@@ -230,6 +239,10 @@ pkgs.runCommand "dupin-home-manager-module"
         "bundled:clipboard-history".enabled = false;
         "bundled:calculator".deny = [ "query" ];
         "bundled:snippets".deny = [ "snippets" ];
+        "bundled:proc" = {
+          enabled = true;
+          deny = [ "exec:force-quit" ];
+        };
       };
     };
     bundledGrants = bundledOnly.xdg.configFile."dupin/extension-grants.toml".source;

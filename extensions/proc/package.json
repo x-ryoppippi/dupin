@@ -1,0 +1,83 @@
+{
+	"name": "proc",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Processes",
+		"keyword": "proc",
+		"icon": "sf:cpu",
+		"main": "main.ts",
+		"capabilities": {
+			"exec": {
+				"processes": {
+					"program": "/bin/ps",
+					"args": [
+						"-axww",
+						"-o",
+						"pid=,ppid=,uid=,user=,%cpu=,rss=,etime=,comm="
+					],
+					"output": true,
+					"outputBytes": 1048576,
+					"catalogue": true
+				},
+				"commands": {
+					"program": "/bin/ps",
+					"args": [
+						"-ww",
+						"-o",
+						"pid=,args=",
+						"-p",
+						"{pids}"
+					],
+					"output": true,
+					"outputBytes": 1048576,
+					"catalogue": true
+				},
+				"cwd": {
+					"program": "/usr/sbin/lsof",
+					"args": [
+						"-a",
+						"-d",
+						"cwd",
+						"-F",
+						"n",
+						"-p",
+						"{pids}"
+					],
+					"output": true
+				},
+				"identify": {
+					"program": "/bin/ps",
+					"args": [
+						"-o",
+						"comm=",
+						"-p",
+						"{pid}"
+					],
+					"output": true
+				},
+				"terminate": {
+					"program": "/bin/kill",
+					"args": [
+						"-TERM",
+						"{pid}"
+					]
+				},
+				"force-quit": {
+					"program": "/bin/kill",
+					"args": [
+						"-KILL",
+						"{pid}"
+					]
+				},
+				"activity-monitor": {
+					"program": "/usr/bin/open",
+					"args": [
+						"-b",
+						"com.apple.ActivityMonitor"
+					]
+				}
+			}
+		}
+	}
+}
