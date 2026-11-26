@@ -293,8 +293,7 @@ impl Session {
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
-    #[cfg(test)]
-    fn with_clock(
+    pub fn with_clock(
         history: History,
         commands: CommandRegistry,
         clock: fn() -> u64,

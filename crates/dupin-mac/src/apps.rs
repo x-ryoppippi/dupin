@@ -71,6 +71,29 @@ impl AppsProvider {
         }
     }
 
+    /// These bundles only, each with the name Finder shows and the names Spotlight adds,
+    /// without scanning or reading the system's: fixture apps in place of the Mac's.
+    pub fn fixed(apps: impl IntoIterator<Item = (PathBuf, String, Vec<String>)>, rows: Rows) -> Self {
+        let apps = apps
+            .into_iter()
+            .map(|(path, display, extra)| {
+                let name = path
+                    .file_stem()
+                    .map_or_else(|| display.clone(), |stem| stem.to_string_lossy().into_owned());
+                App {
+                    name,
+                    aliases: Vec::new(),
+                    icon: path.clone(),
+                    path,
+                }
+                .with_names(&display, extra)
+            })
+            .collect();
+        let provider = Self::with_roots(Vec::new(), rows);
+        *provider.index.lock().unwrap_or_else(|e| e.into_inner()) = Some((0, apps));
+        provider
+    }
+
     /// Watch the application folders and invalidate the cached list when an app changes.
     /// Bundle writes are debounced before the cached list is rebuilt.
     pub fn watch(
@@ -387,6 +410,28 @@ mod tests {
             fs::canonicalize(root.join("Real/Linked.app")).unwrap()
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fixed_apps_are_found_by_every_name_without_a_scan() {
+        let provider = AppsProvider::fixed(
+            [(
+                PathBuf::from("/System/Applications/System Settings.app"),
+                "System Settings".into(),
+                vec!["System Preferences".into()],
+            )],
+            rows(),
+        );
+        let mut found = Vec::new();
+        provider
+            .search(&Request::detached("prefs", 10), &mut |items| found.extend(items))
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "/System/Applications/System Settings.app");
+        assert_eq!(
+            text_subtitle(&found[0]),
+            "System Preferences · /System/Applications"
+        );
     }
 
     #[test]

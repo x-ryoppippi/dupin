@@ -175,6 +175,16 @@ let
       '';
     }
   );
+  # scripts/search-quality.nu's benchmark, on the checks' dependency build; never shipped.
+  searchQualityBinary = craneLib.buildPackage (
+    debugArgs
+    // {
+      pname = "dupin-search-quality";
+      cargoArtifacts = debugArtifacts;
+      cargoExtraArgs = "--offline --locked --package dupin-search-quality";
+      doCheck = false;
+    }
+  );
   # Dupin.app around a release binary.
   app =
     binary: passthru:
@@ -207,6 +217,7 @@ app cargoBinary {
     cargoVendorDir
     cargoBinary
     latencyBinary
+    searchQualityBinary
     ;
   inherit (commonArgs) cargoDeps;
   inherit (native) bundledExtensions thirdPartyNotices;

@@ -383,6 +383,29 @@ nu scripts/size.nu report target/size.json --repo x-ryoppippi/dupin    # against
 
 There is no per-crate breakdown: the shipped binary is stripped, and `cargo bloat --crates` would need a second fat-LTO build with symbols, which takes several times the minute it could cost.
 
+## Search quality
+
+Keypress latency measures how fast the results arrive; search quality measures whether they are the right ones, as the distance from intent to result: how many keystrokes a person needs before the row they want is first. `scripts/search-quality.nu` measures it with `dupin-search-quality`, a benchmark that types each case into a launcher `Session` built as the app builds its main search, so it ranks through the same code: the apps source (`dupin_mac::AppsProvider`, here over fixture apps, with the native fuzzy matcher), the system commands, the history's boosts, the rows that name keywords, web searches and aliases, and how the session merges providers' rows. It needs no UI and no permissions, and it is deterministic: every case runs at the same fixed time.
+
+```sh
+cargo build -p dupin-search-quality                                    # or nix build .#dupin-search-quality
+nu scripts/search-quality.nu run                                       # target/search-quality/results.json
+nu scripts/search-quality.nu compare main.json target/search-quality/results.json
+nu scripts/search-quality.nu report target/search-quality/results.json --repo x-ryoppippi/dupin   # against main's (needs gh)
+```
+
+`scripts/search-quality/corpus.toml` holds the fixtures, none of them read from a real Mac: a stock macOS install's apps and a plausible set of third-party ones chosen for names that compete for the same letters (Arc, Ardia and Arto; AppCleaner, Activity Monitor and Alfred 6), the other names Spotlight knows an app by (System Settings as System Preferences, Music as Apple Radio), the commands keywords enter (`cal`, `d`, `clip`, `emoji`, `snap`, …), web search aliases, `[aliases]` for apps, and named histories of picks: `base`, a heavy user's month, and smaller ones for particular scenarios, such as the report of #300. The web search's own row stands in for the bundled web-search extension, which the benchmark leaves out: it only has to take the pinned first place a typed alias gives it.
+
+Each case in `scripts/search-quality/cases.toml` names its `intent` (the row wanted: `app:<name>`, `command:<id>`, `web:<alias>` or `system:<title>`), the `query` a person would type for it, the `history` it runs with (`base` unless it says otherwise, `[]` for a fresh install) and `tags`. The benchmark types the query one character at a time and records where the row is after each. A case records how Dupin ranks today, good or poor: a case that never reaches first, such as initials (`vsc` for Visual Studio Code), is a known weakness to improve, not an error. A case the corpus can't answer (an unknown app, command, web search or history) fails the run, as does a corpus that names an app it doesn't list; the crate's test runs the repository's cases, so that also fails `cargo test`.
+
+From each case's ranks the script derives the keystrokes until the row is first, whether it ever drops out of the 8 rows the panel shows (`VISIBLE_ROWS`) after being in them, and, over all cases, the mean keystrokes until first (a case never first counts as its whole query and one more), the share first within 1, 2, 3 and 5 keystrokes, and the hardest cases.
+
+CI's `search-quality` job builds `.#dupin-search-quality` on the checks' dependency build whenever the app could have changed, runs every case, and uploads `results.json` as the `search-quality` artifact, on `main` and on pull requests. A regression never fails the job; the benchmark itself failing does, and the required `e2e` job fails unless `search-quality` passed, so a pull request can't break the benchmark. On a pull request, `report` compares the results with those of the CI run on the `main` commit the pull request's merge commit sits on, or, when that run measured nothing, of the latest `main` run that did (`scripts/main-build.nu`, as the size and latency reports do). A case regresses when it needs more keystrokes than on main or its row is lower after any keystroke, and improves when it needs fewer or is higher after one and lower after none; a case whose intent, query or history changed is compared with nothing, and the report says when the corpus or cases changed at all.
+
+The comparison goes to the job's summary, and the Search quality comment workflow (`search-quality-comment.yml`) keeps one comment (`<!-- dupin-search-quality -->`) on the pull request up to date with it: the summary line against main's, the cases that regressed with their ranks on main and here and what to do, then the hardest cases, every case, and a JSON block of the same for an agent to parse, collapsed. Like the size and latency comments, the workflow runs on `workflow_run`, executes only the default branch's code, and `report` refuses results whose names, queries or intents are not ones a case could have or whose ranks are not ranks.
+
+Agents working on or reviewing a pull request that touches ranking, matching, the history or the session's merging should read its search-quality comment and explain any case it flags before calling the work done. When a change is meant to trade one case for another, or a case no longer asks for what a person would want, change `cases.toml` in the same pull request and say why; keep a case's `id` while its intent stays the same, so it is compared with main's.
+
 ## Rust visibility
 
 `just hawk` checks workspace API visibility and fails on warnings. The same

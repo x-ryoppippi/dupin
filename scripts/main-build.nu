@@ -1,5 +1,5 @@
-# The main build a pull request's measurements are compared with, shared by scripts/size.nu and
-# scripts/latency.nu: CI uploads each measurement as an artifact from every build, on main and
+# The main build a pull request's measurements are compared with, shared by scripts/size.nu,
+# scripts/latency.nu and scripts/search-quality.nu: CI uploads each measurement as an artifact from every build, on main and
 # on pull requests, and a pull request is compared with the main build it merged onto.
 
 # The artifact `artifact` of the main build to compare `commit` with: the CI run of the main
