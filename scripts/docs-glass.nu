@@ -4,7 +4,6 @@ use docs-images.nu [
     MANIFEST
     GLASS
     CLIP_FPS
-    CAPTION_SPACE
     manifest-entries
     image-id
     image-themes
@@ -20,6 +19,8 @@ use e2e/keys.nu key-script
 const STAGE = path self docs-glass/Stage.swift
 # Wallpaper around the panel, in points, so the glass's edge shows against it.
 const MARGIN = 32
+# The website's demo frame in points, whose shape every clip is cut to.
+const STAGE = {width: 680, height: 578}
 
 # The wallpapers the glass is recorded over, drawn here rather than shipped: soft blobs of colour
 # for the glass to bend, with nothing sharp to read through the text. Positions and radii are in
@@ -301,7 +302,6 @@ def finish-glass [
     let name = $id | str replace --all / -
     let scale = $panel.scale
     let margin = $MARGIN * $scale | math round
-    let space = $CAPTION_SPACE * $scale | math round
     let x = [
         ($panel.x - $margin)
         0
@@ -310,13 +310,17 @@ def finish-glass [
         ($panel.y - $margin)
         0
     ] | math max
-    # H.264 takes only even sides. The Dock and the menu bar are above the wallpaper, so the cut
-    # stops short of them.
-    let width = ($panel.width + 2 * $margin) // 2 * 2
-    let height = ([
-        ($panel.y + $panel.height + $margin + $space)
-        $panel.bottom
-    ] | math min) - $y | $in // 2 * 2
+    # Every clip is cut to the same rectangle: the aspect ratio of the page's demo frame (`STAGE`)
+    # with the wallpaper around the panel, so the frame is filled whichever tab shows and
+    # switching never moves it. It must cover the tallest panel with its captions, and end above
+    # the Dock, which is not wallpaper. H.264 takes only even sides.
+    let width = ($STAGE.width * $scale + 2 * $margin) // 2 * 2
+    let height = ($width * $STAGE.height / $STAGE.width | math ceil) // 2 * 2 + 2
+    if $y + $height > $panel.bottom {
+        error make {
+            msg: $"($id): a ($width)x($height) cut from ($y) ends below the wallpaper, at ($panel.bottom)"
+        }
+    }
     let crop = $"crop=($width):($height):($x):($y)"
     # A key shows in the panel some way after System Events presses it, so the clip is lined up
     # on the frame the first key changed, not on when the script started.
