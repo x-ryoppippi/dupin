@@ -1,0 +1,60 @@
+name: Telemetry
+
+# The collector Worker in telemetry/, deployed with `void deploy` when a change to it reaches main.
+# CI's `telemetry` job tests pull requests.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - telemetry/**
+      - assets/logo/dupin.svg
+      - .github/workflows/telemetry.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # setup-nix's Hestia cache checks for evicted packs up front.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nix-cache
+      - run: nix profile install --inputs-from . nixpkgs#nodejs nixpkgs#pnpm_12 nixpkgs#just
+      - run: just telemetry::test
+      - run: just telemetry::typecheck
+
+      # Until the repository has the credentials and the KV namespace, this skips the deployment
+      # and says why instead of failing.
+      - name: Check for Cloudflare credentials
+        id: credentials
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+          HAS_NAMESPACE: ${{ vars.DUPIN_TELEMETRY_KV_NAMESPACE_ID != '' }}
+        run: |
+          if [ "$HAS_TOKEN" = true ] && [ "$HAS_ACCOUNT" = true ] && [ "$HAS_NAMESPACE" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Telemetry Worker not deployed::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets and the DUPIN_TELEMETRY_KV_NAMESPACE_ID repository variable to deploy it (docs/development.md#deployment)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy telemetry.dupin.app
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DUPIN_TELEMETRY_KV_NAMESPACE_ID: ${{ vars.DUPIN_TELEMETRY_KV_NAMESPACE_ID }}
+        run: just telemetry::deploy

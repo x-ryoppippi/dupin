@@ -418,7 +418,7 @@ just website::lint    # oxlint, type-aware and type-checked through tsrs
 just website::deploy  # build and deploy the static site
 ```
 
-Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. The site is static assets only, with no Worker code: HTTP reaches HTTPS through the `dupin.app` zone's Always Use HTTPS setting, and `dupin.app/gh` redirects to the repository through `_redirects`, declared in `website/vite.config.ts`.
+Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. The `Website` workflow builds and lints the site on every pull request that changes `website/`, `docs/`, `assets/logo/` or `VERSION`, and deploys it with `just website::deploy` (the `dupin` Worker on `dupin.app`) when such a change reaches `main`; see [Deployment](#deployment). The site is static assets only, with no Worker code: HTTP reaches HTTPS through the `dupin.app` zone's Always Use HTTPS setting, and `dupin.app/gh` redirects to the repository through `_redirects`, declared in `website/vite.config.ts`.
 
 Icons are `icon-[set--name]` classes that ox-content turns into one self-hosted stylesheet from the `@iconify-json/*` collections installed in `website/`; add the collection before using a new set. For agents and crawlers the site also serves `/llms.txt`, a Markdown twin of each page (`/index.md`, `/download.md`), `sitemap.xml` and `robots.txt`; the Markdown is built in `website/src/markdown.ts` from the same data as the pages, and `website/public/_headers` sets their content types.
 
@@ -431,3 +431,22 @@ nix shell --inputs-from . nixpkgs#resvg --command resvg --skip-system-fonts \
   --use-fonts-dir "$(nix build --inputs-from . --no-link --print-out-paths nixpkgs#inter)/share/fonts" \
   assets/social/og.svg website/public/og.png
 ```
+
+## Deployment
+
+GitHub Actions deploys both Cloudflare Workers from `main`, never from a developer's Mac:
+
+| Workflow    | Runs when `main` changes                       | Deploys                                                              |
+| ----------- | ---------------------------------------------- | -------------------------------------------------------------------- |
+| `Website`   | `website/`, `docs/`, `assets/logo/`, `VERSION` | `dupin.app`, with `cf deploy` (`just website::deploy`)               |
+| `Telemetry` | `telemetry/`, `assets/logo/dupin.svg`          | `telemetry.dupin.app`, with `void deploy` (`just telemetry::deploy`) |
+
+Both can also be run by hand from **Actions**. One run of each deploys at a time, and a deployment that started finishes. Until the credentials below exist, a run builds and tests as usual, skips the deployment and says so in a notice, so CI stays green.
+
+They read these from the repository's **Settings → Secrets and variables → Actions**:
+
+- `CLOUDFLARE_API_TOKEN` (secret): an API token created from the **Edit Cloudflare Workers** template, limited to Dupin's account (**Account Resources**) and the `dupin.app` zone (**Zone Resources**). It grants Workers Scripts, Workers KV Storage and Workers Routes edit; add **Zone → DNS → Edit** so the first telemetry deployment can attach the `telemetry.dupin.app` custom domain.
+- `CLOUDFLARE_ACCOUNT_ID` (secret): the account ID `website/cloudflare.config.ts` and `telemetry/void.config.ts` name.
+- `DUPIN_TELEMETRY_KV_NAMESPACE_ID` (variable, not secret): the ID of a KV namespace named `dupin-telemetry-rollups`, created once under **Storage & Databases → Workers KV**. The collector's daily rollups live there.
+
+The Analytics Engine dataset `dupin_telemetry` is created by the Worker's first write and needs no setup. Workers Builds is no longer needed for `dupin.app`: disconnect it in the `dupin` Worker's **Settings → Build** once the `Website` workflow has deployed, so the two don't both deploy each merge.
