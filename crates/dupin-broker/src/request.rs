@@ -1,8 +1,8 @@
 use std::path::{Component, Path};
 
 use crate::scope::{
-    ClipboardAccess, FilesAccess, Method, Origin, RowField, RowKind, Scope, ScopeKey, ScopeName, StorageOp,
-    WindowsAccess,
+    ClipboardAccess, ContextAccess, FilesAccess, Method, Origin, RowField, RowKind, Scope, ScopeKey,
+    ScopeName, StorageOp, WindowsAccess,
 };
 
 /// One operation a host service is about to perform for a package.
@@ -43,6 +43,8 @@ pub enum Request {
         future_days: u32,
     },
     Windows(WindowsAccess),
+    /// Handing the package what Dupin noted about where the user was when the panel opened.
+    Context(ContextAccess),
     /// Handing the package `field` of rows of `kind` that Dupin's own sources found.
     Rows {
         kind: RowKind,
@@ -80,16 +82,19 @@ impl Request {
             Self::SnippetsWrite => ScopeKey::Snippets,
             Self::CalendarRead { .. } => ScopeKey::Calendar,
             Self::Windows(access) => ScopeKey::Windows(*access),
+            Self::Context(access) => ScopeKey::Context(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
             Self::Query => ScopeKey::Query,
         })
     }
 
-    /// Mutations and runs of native programs need a host-verified user activation.
-    pub(crate) fn needs_activation(&self) -> bool {
+    /// Mutations and runs of native programs need a host-verified user activation, except a
+    /// profile `declared` to run in the background, which the user allowed as such.
+    pub(crate) fn needs_activation(&self, declared: &Scope) -> bool {
         match self {
             Self::Http { method, .. } => method.mutates(),
-            Self::Exec { .. } | Self::Script { .. } | Self::SnippetsWrite => true,
+            Self::Exec { .. } => !matches!(declared, Scope::Exec { background: true, .. }),
+            Self::Script { .. } | Self::SnippetsWrite => true,
             Self::Clipboard(access) => *access != ClipboardAccess::Watch,
             Self::Windows(access) => *access == WindowsAccess::Arrange,
             Self::Files { .. }
@@ -98,6 +103,7 @@ impl Request {
             | Self::DictionaryLookup
             | Self::CalculatorEvaluate
             | Self::CalendarRead { .. }
+            | Self::Context(_)
             | Self::Rows { .. }
             | Self::Query => false,
         }

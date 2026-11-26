@@ -19,8 +19,9 @@ just build       # nix build .#dupin
 just build-debug # cargo build -p dupin
 just run         # build the bundle, then open it
 just package     # a signed dist/Dupin.zip; see releasing
-just snap        # headless renders (see Headless renders)
+just render      # headless renders (see Headless renders)
 just docs-images # the images in docs/images (see Documentation images)
+just docs-glass  # the home page's Liquid Glass clips (see Liquid Glass clips)
 just footprint   # the peak-footprint budget (see Peak memory)
 ```
 
@@ -161,12 +162,12 @@ On every pull request, the `autofix.ci` workflow runs `nix fmt` after the [Rune 
 
 ## Headless renders
 
-Every build of Dupin, the released app included, takes Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/snap.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
+Every build of Dupin, the released app included, takes Rune's headless flags (`--snap`, Rune's own name for writing the frame to a PNG, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/render.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
 
 ```sh
 cargo build -p dupin
-nu scripts/snap.nu
-nu scripts/snap.nu --only calendar --theme dark # one scenario, in one appearance
+nu scripts/render.nu
+nu scripts/render.nu --only calendar --theme dark # one scenario, in one appearance
 ```
 
 `--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead, and clipboard scenarios the history in `scripts/fixtures/clipboard.json`, or a scenario's own in `<name>.clipboard/history.json`, whose `image` entries name PNG files beside it. A scenario with a `<name>.snapshots/snapshots.json`, a list of snapshots, starts with them saved in scratch storage. A scenario with a `<name>.home/` folder runs with a copy of it as its home: apps in its `Applications` folder are found like any other, and its `Library/Application Support/Dupin/history.json` is the usage history, where `$HOME` in an app's path stands for the copy's path. A scenario's own snapshots, clipboard history, extensions, grants and home are read only beside its own `<name>.toml`. Headless renders draw the panel's plain card where a window shows Liquid Glass.
@@ -179,7 +180,7 @@ dupin.app/docs is this folder, rendered when the website builds (`just website::
 
 The images in `docs/images` are rendered, never taken by hand. `scripts/docs-images/images.toml` lists each one; `just docs-images` (`nu scripts/docs-images.nu` after `cargo build -p dupin`) renders every one in light and dark to `docs/images/<page>/<name>-<theme>.png`, compresses them losslessly with oxipng and deletes the images the list no longer has. `--only <text>` renders just the images whose `<page>/<name>` contains it. Re-run it after a change to anything an image shows, and commit the result.
 
-Every image comes from fixtures, so a render on any Mac shows nothing of that Mac's: a bundled or example extension's own fixture through `dupin ext snap`, or a headless scenario run in a scratch home that holds the fixture documents and usage history the list names, with the fixture clipboard history and snapshots, and with `DUPIN_HEADLESS_APPS=/System/Applications`. A headless run takes that `PATH`-style list in place of the app folders, so it lists only the stock apps; `dupin ext snap` sets it empty. Spotlight indexes nothing in a scratch home, and on some Macs not even a fresh disk image, so no image shows a Spotlight search: the file images start from Recent items. Settings pages are drawn from the `prefs` window (`--window prefs`).
+Every image comes from fixtures, so a render on any Mac shows nothing of that Mac's: a bundled or example extension's own fixture through `dupin ext render`, or a headless scenario run in a scratch home that holds the fixture documents and usage history the list names, with the fixture clipboard history and snapshots, and with `DUPIN_HEADLESS_APPS=/System/Applications`. A headless run takes that `PATH`-style list in place of the app folders, so it lists only the stock apps; `dupin ext render` sets it empty. Spotlight indexes nothing in a scratch home, and on some Macs not even a fresh disk image, so no image shows a Spotlight search: the file images start from Recent items. Settings pages are drawn from the `prefs` window (`--window prefs`).
 
 A page embeds an image as a `<picture>` whose `prefers-color-scheme: dark` source is the dark image, so GitHub shows the one matching the reader's theme:
 
@@ -190,7 +191,7 @@ A page embeds an image as a `<picture>` whose `prefers-color-scheme: dark` sourc
 </picture>
 ```
 
-Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image and clip exists in both themes, `docs/images` holds nothing else, some page embeds each one and every image a page embeds exists.
+Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image and clip exists in each of its themes, `docs/images` holds nothing else, some page or the website embeds each one and every image either embeds exists.
 
 ### Clips
 
@@ -204,6 +205,18 @@ The same list's `[[clips]]` are short recordings: each plays its `steps` (typed 
 ```
 
 Animated WebP, not video, because the same Markdown is read on GitHub, which shows a `<video>` only for files uploaded to an issue or pull request, never one in the repository; GitHub shows an animated WebP as an image, and so does every current browser, without a player or autoplay rules. A clip must never type into a Spotlight search (Space on an empty query, or `in`), since Spotlight answers from the rendering Mac's own index; the files clips start from Recent items and folder browsing instead, which read only the scratch home.
+
+The website's home page plays clips of its own, on page `home`: one per tab of its demo (Apps, Files, In files, Dictionary, Keywords and Clipboard) over Liquid Glass, and the Apps tab again over each backdrop shader (`apps-flow`, `apps-aurora` and so on) for its backdrop switcher. Every tab over every shader would be six times the bytes for the same point. A page outside GitHub can play video, and a [backdrop shader](./features/shaders.md) changes every pixel of every frame, where an animated WebP is several times larger than a video, so these set `video = true`: `ffmpeg` encodes the frames over the page's black (`background`) as an H.264 MP4, and the last frame is saved as `<name>-<theme>-poster.webp`, which the page shows before the video plays and in its place under reduced motion. `themes = ["dark"]` renders only the theme the site uses, `scale` sets the scale (2, so their text stays sharp on a Retina screen), `backdrop` names the shader as `config.toml` would (the example shaders are in the scratch configuration's `shaders` folder), and `captions = false` leaves the captions off. The website names each file at the path it serves it from (`/docs/images/home/apps-dark.mp4`), and `check` counts those as embeds.
+
+### Liquid Glass clips
+
+A headless render draws Liquid Glass as an opaque fallback, since there is no desktop behind it to refract, so the clips marked `glass = true` are recorded from the real app instead. `just docs-glass` (`nu scripts/docs-glass.nu --app result/Applications/Dupin.app` after `nix build .#dupin`) needs macOS 26 or later in Dark mode, and a terminal already allowed Screen Recording and Accessibility; it never asks for either. For each clip it starts the bundle's `dupin` as an instance of its own, with the scratch home and configuration the headless clips use, no hotkey (so a Dupin already running keeps its own) and its own `XDG_RUNTIME_DIR`; covers the screens with a borderless window showing the wallpaper, so the desktop picture is never changed; records the screen with ffmpeg; opens the panel with `dupin open`; presses the clip's steps at their times through System Events; and cuts the recording to the panel and the wallpaper around it, with the same captions below, to the files `just docs-clips` would render. Its log, scratch home and raw recording stay in `target/docs-glass` until the next run. Apps are the Mac's own, so record on a Mac with only stock apps, or on CI. Two tabs aren't `glass`: Clipboard, since the real app records a copy only once macOS lets it read the clipboard in the background, a permission a recording must not grant; and Files, since the real app on the runner listed no Recent items from the scratch home's history, leaving no folder to browse.
+
+The wallpaper is the manifest's `wallpaper`, a clip's own `wallpaper`, or `--wallpaper` for every clip: a preset drawn by ImageMagick (`dusk`, `lagoon` or `ember`, soft blobs of colour for the glass to bend, with nothing sharp behind the text) or the path to an image. Only wallpapers made here are published; macOS's own are Apple's.
+
+`docs/images/glass.json` lists each clip recorded this way, with the macOS version, wallpaper and screen scale. `just docs-clips` keeps those and renders the rest headless over their `backdrop` (Flow) in their place, and the website says which tabs are headless recordings over Flow. `check` fails if it lists a clip that isn't `glass = true`.
+
+The `Docs glass` workflow (`.github/workflows/docs-glass.yml`) runs the same on a `blacksmith-6vcpu-macos-latest` runner, which runs macOS 26 with a GUI session and grants its runner Screen Recording and Accessibility, as the E2E job relies on. Dispatch it (optionally with `only` or `wallpaper`), then `gh run download <run> --name docs-glass --dir docs/images` and commit the result. A pull request that changes the recorder runs it too. The runner's screen is at 1×, so its recordings are half the resolution of a Retina Mac's.
 
 ## Native E2E evidence
 
@@ -282,7 +295,7 @@ nu scripts/latency.nu parity target/latency/results.json     # extensions agains
 
 `nix build .#dupin-latency` builds the same binary, inside a `Dupin.app` whose Resources hold the repository's `extensions/`, so it runs the bundled extensions as the released app does; outside one, a binary built away from the source tree finds none. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
 
-Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it and, for an extension, the `package` behind it (`bundled:<name>` for one that ships with Dupin); the run fails when a measured keypress does not search that provider answered by that package, or by Dupin itself for an implementation without one, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. For a built-in command a bundled extension answers, only the rows from that package count as the provider's: the command shows a row of its own when its package is off, missing or failing, and that row is cheap enough to pass any budget. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
+Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it and, for an extension, the `package` behind it (`bundled:<name>` for one that ships with Dupin); the run fails when a measured keypress does not search that provider answered by that package, or by Dupin itself for an implementation without one, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A headless run reaches no program, so a package whose catalogue runs one, as Processes does, is measured against a fixture: its implementation's `extensions` folder holds only `.headless-fixture.json`, `{ "name": <bundled package>, "fixture": <file beside it> }`, whose replies, `exec` included, answer every host request and whose consent turns the package on, as `dupin ext render` hands a fixture over. For a built-in command a bundled extension answers, only the rows from that package count as the provider's: the command shows a row of its own when its package is off, missing or failing, and that row is cheap enough to pass any budget. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
 
 For each scenario the results give p50, p95 and p99 of the total, and p50 and p95 of each stage, which add up to it:
 
@@ -381,6 +394,29 @@ nu scripts/size.nu report target/size.json --repo x-ryoppippi/dupin    # against
 
 There is no per-crate breakdown: the shipped binary is stripped, and `cargo bloat --crates` would need a second fat-LTO build with symbols, which takes several times the minute it could cost.
 
+## Search quality
+
+Keypress latency measures how fast the results arrive; search quality measures whether they are the right ones, as the distance from intent to result: how many keystrokes a person needs before the row they want is first. `scripts/search-quality.nu` measures it with `dupin-search-quality`, a benchmark that types each case into a launcher `Session` built as the app builds its main search, so it ranks through the same code: the apps source (`dupin_mac::AppsProvider`, here over fixture apps, with the native fuzzy matcher), the system commands, the history's boosts, the rows that name keywords, web searches and aliases, and how the session merges providers' rows. It needs no UI and no permissions, and it is deterministic: every case runs at the same fixed time.
+
+```sh
+cargo build -p dupin-search-quality                                    # or nix build .#dupin-search-quality
+nu scripts/search-quality.nu run                                       # target/search-quality/results.json
+nu scripts/search-quality.nu compare main.json target/search-quality/results.json
+nu scripts/search-quality.nu report target/search-quality/results.json --repo x-ryoppippi/dupin   # against main's (needs gh)
+```
+
+`scripts/search-quality/corpus.toml` holds the fixtures, none of them read from a real Mac: a stock macOS install's apps and a plausible set of third-party ones chosen for names that compete for the same letters (Arc, Ardia and Arto; AppCleaner, Activity Monitor and Alfred 6), the other names Spotlight knows an app by (System Settings as System Preferences, Music as Apple Radio), the commands keywords enter (`cal`, `d`, `clip`, `emoji`, `snap`, …), web search aliases, `[aliases]` for apps, and named histories of picks: `base`, a heavy user's month, and smaller ones for particular scenarios, such as the report of #300. The web search's own row stands in for the bundled web-search extension, which the benchmark leaves out: it only has to take the pinned first place a typed alias gives it.
+
+Each case in `scripts/search-quality/cases.toml` names its `intent` (the row wanted: `app:<name>`, `command:<id>`, `web:<alias>` or `system:<title>`), the `query` a person would type for it, the `history` it runs with (`base` unless it says otherwise, `[]` for a fresh install) and `tags`. The benchmark types the query one character at a time and records where the row is after each. A case records how Dupin ranks today, good or poor: a case that never reaches first, such as initials (`vsc` for Visual Studio Code), is a known weakness to improve, not an error. A case the corpus can't answer (an unknown app, command, web search or history) fails the run, as does a corpus that names an app it doesn't list; the crate's test runs the repository's cases, so that also fails `cargo test`.
+
+From each case's ranks the script derives the keystrokes until the row is first, whether it ever drops out of the 8 rows the panel shows (`VISIBLE_ROWS`) after being in them, and, over all cases, the mean keystrokes until first (a case never first counts as its whole query and one more), the share first within 1, 2, 3 and 5 keystrokes, and the hardest cases.
+
+CI's `search-quality` job builds `.#dupin-search-quality` on the checks' dependency build whenever the app could have changed, runs every case, and uploads `results.json` as the `search-quality` artifact, on `main` and on pull requests. A regression never fails the job; the benchmark itself failing does, and the required `e2e` job fails unless `search-quality` passed, so a pull request can't break the benchmark. On a pull request, `report` compares the results with those of the CI run on the `main` commit the pull request's merge commit sits on, or, when that run measured nothing, of the latest `main` run that did (`scripts/main-build.nu`, as the size and latency reports do). A case regresses when it needs more keystrokes than on main or its row is lower after any keystroke, and improves when it needs fewer or is higher after one and lower after none; a case whose intent, query or history changed is compared with nothing, and the report says when the corpus or cases changed at all.
+
+The comparison goes to the job's summary, and the Search quality comment workflow (`search-quality-comment.yml`) keeps one comment (`<!-- dupin-search-quality -->`) on the pull request up to date with it: the summary line against main's, the cases that regressed with their ranks on main and here and what to do, then the hardest cases, every case, and a JSON block of the same for an agent to parse, collapsed. Like the size and latency comments, the workflow runs on `workflow_run`, executes only the default branch's code, and `report` refuses results whose names, queries or intents are not ones a case could have or whose ranks are not ranks.
+
+Agents working on or reviewing a pull request that touches ranking, matching, the history or the session's merging should read its search-quality comment and explain any case it flags before calling the work done. When a change is meant to trade one case for another, or a case no longer asks for what a person would want, change `cases.toml` in the same pull request and say why; keep a case's `id` while its intent stays the same, so it is compared with main's.
+
 ## Rust visibility
 
 `just hawk` checks workspace API visibility and fails on warnings. The same
@@ -422,7 +458,7 @@ Run them locally with `nix build .#checks.aarch64-darwin.licences .#checks.aarch
 
 ## Website
 
-`website/` holds <https://dupin.app>, with its own pnpm project. Pages are Svelte components in `website/src/pages/` that [ox-content](https://github.com/ubugeeei-prod/ox-content)'s custom host (`website/src/host/index.ts`) renders to static HTML; the browser then hydrates the same component from the props written into the page, which runs the panel demo, the copy buttons and the download channel switch. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
+`website/` holds <https://dupin.app>, with its own pnpm project. Pages are Svelte components in `website/src/pages/` that [ox-content](https://github.com/ubugeeei-prod/ox-content)'s custom host (`website/src/host/index.ts`) renders to static HTML; the browser then hydrates the same component from the props written into the page, which runs the home page's recordings, the copy buttons and the download channel switch. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
 
 ```sh
 just website::install # dependencies from the lockfile

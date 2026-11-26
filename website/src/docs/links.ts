@@ -5,10 +5,12 @@ import { docRoute, githubUrl, isPublished } from './pages.ts';
 
 const external = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;
 
-// The images the site serves, by extension, with their content types.
+// The images the site serves, by extension, with their content types: docs/images holds the home
+// page's recordings as MP4 too.
 export const imageTypes: Readonly<Record<string, string>> = {
 	'.png': 'image/png',
 	'.webp': 'image/webp',
+	'.mp4': 'video/mp4',
 	'.svg': 'image/svg+xml',
 	'.jpg': 'image/jpeg',
 	'.jpeg': 'image/jpeg',

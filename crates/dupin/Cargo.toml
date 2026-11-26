@@ -9,7 +9,7 @@ homepage.workspace = true
 license.workspace = true
 
 [features]
-# Rune's headless runs outside a debug build: `dupin ext snap` from the shipped app, and the
+# Rune's headless runs outside a debug build: `dupin ext render` from the shipped app, and the
 # latency benchmark (scripts/latency.nu). It adds about 33 KB to the release binary.
 default = ["tooling"]
 tooling = ["rune/tooling"]

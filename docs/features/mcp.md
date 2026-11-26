@@ -13,14 +13,16 @@ Add `dupin mcp` to your agent's MCP servers (see [Configuration](#configuration)
 
 ## What you can do
 
-| Key / action                                   | What it does                                                           |
-| ---------------------------------------------- | ---------------------------------------------------------------------- |
-| `read_config`, `validate_config`               | Return or check the configuration files, without the launcher.         |
-| `get_active_config`                            | Returns the values the launcher has applied.                           |
-| `open_panel`                                   | Shows the panel, optionally with a `query` typed in.                   |
-| `pick`                                         | Shows `values` in the panel and waits for you to choose one.           |
-| <kbd>↩</kbd> / <kbd>Esc</kbd> on a `pick`      | Hands the chosen value back, or dismisses it ("Cancelled").            |
-| `ext_check`, `ext_run`, `ext_test`, `ext_snap` | Work on an extension package; see [Extension tools](#extension-tools). |
+| Key / action                                     | What it does                                                           |
+| ------------------------------------------------ | ---------------------------------------------------------------------- |
+| `read_config`, `validate_config`                 | Return or check the configuration files, without the launcher.         |
+| `get_active_config`                              | Returns the values the launcher has applied.                           |
+| `open_panel`                                     | Shows the panel, optionally with a `query` typed in.                   |
+| `pick`                                           | Shows `values` in the panel and waits for you to choose one.           |
+| <kbd>↩</kbd> / <kbd>Esc</kbd> on a `pick`        | Hands the chosen value back, or dismisses it ("Cancelled").            |
+| `list_snapshots`, `read_snapshot`                | List the saved [snapshots](./snapshots.md), or read one's content.     |
+| `open_snapshot`                                  | Shows the Snapshots window, optionally with one snapshot selected.     |
+| `ext_check`, `ext_run`, `ext_test`, `ext_render` | Work on an extension package; see [Extension tools](#extension-tools). |
 
 Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 
@@ -34,6 +36,9 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 | `get_active_config` | Returns the values the launcher has applied, as `dupin config get` prints them.                                               |
 | `open_panel`        | Shows the panel, optionally with a `query` typed in, as `dupin open --query` does.                                            |
 | `pick`              | Shows `values` (1 to 1000 JSON values) in the panel and waits up to five minutes for you to choose one, as `dupin pick` does. |
+| `list_snapshots`    | Returns the saved snapshots' metadata, newest first, as `dupin snapshots list --json` does.                                   |
+| `read_snapshot`     | Takes an `id` and returns that snapshot's saved content: what the Snapshots window shows of it.                               |
+| `open_snapshot`     | Shows the Snapshots window, with the snapshot `id` selected if given, as `dupin snapshots open [--id]` does.                  |
 
 `read_config` reports the base's `path`, `exists`, `readOnly` and TOML `source` at the top level. The `overlay`, what Settings saved over a read-only base, has `exists`, its TOML `source`, read from encrypted storage or from the running launcher that holds it, and `active`, which is true when the base is read-only. `lockedKeys` is empty for a writable base and null if the read-only base has invalid TOML syntax.
 
@@ -41,11 +46,15 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 
 `pick` answers `{"value": ...}` with the chosen value unchanged.
 
+`list_snapshots` answers `entries` (each with `id`, `saved_at`, `mode`, `title` and `query`), `truncated` and any storage `problem`. `read_snapshot` answers the same metadata plus `views`: the result rows and text the window shows, each a `text` (`title`, `subtitle`), `detail` (`title`, `body`) or `pair` (`source`, `result`). A snapshot too large for one reply keeps its first views that fit; `truncated` is then true and `omitted_views` counts the rest. Its resume state is never returned. `open_snapshot` answers `{"shown": true}`; an unknown `id` is "NotFound: snapshot".
+
+Reading a snapshot returns what you saved, which can include what you typed and the results shown, to the agent you connected. The tools only read: they don't save, delete or resume a snapshot, and never run its saved actions.
+
 </details>
 
 ## Notes
 
-- `get_active_config`, `open_panel` and `pick` need the resident launcher running.
+- `get_active_config`, `open_panel`, `pick` and the snapshot tools need the resident launcher running.
 - No tool writes configuration, runs a script or opens a file ([#34](https://github.com/x-ryoppippi/dupin/issues/34)).
 
 <details>
@@ -90,7 +99,7 @@ The server is a thin client of the same local control socket as the [`dupin` com
 
 ## Extension tools
 
-Started with `--workspace DIR`, the server also offers `ext_check`, `ext_run`, `ext_test` and `ext_snap` for packages inside that folder, so an agent can write a package and check it without the launcher. See [Testing and snapshots](./extension-testing.md#testing-and-snapshots).
+Started with `--workspace DIR`, the server also offers `ext_check`, `ext_run`, `ext_test` and `ext_render` for packages inside that folder, so an agent can write a package and check it without the launcher. `ext_render` draws the panel to a PNG; the snapshot tools above read results you saved. See [Testing and rendering](./extension-testing.md#testing-and-rendering).
 
 <details>
 <summary>The tools, their arguments and an example</summary>
@@ -106,12 +115,12 @@ Started with `--workspace DIR`, the server also offers `ext_check`, `ext_run`, `
 }
 ```
 
-| Tool        | Arguments                    | What it does                                                                                                                                                                                  |
-| ----------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ext_check` | `package`                    | Loads and compiles the package as `dupin ext check` does and returns its `id`, `name`, `version` and `keyword`.                                                                               |
-| `ext_run`   | `package`, `query`           | Asks it one query as `dupin ext run --json` does. Its host requests fail as `unavailable`.                                                                                                    |
-| `ext_test`  | `package`                    | Replays its fixtures as `dupin ext test --json` does and returns the report. It never rewrites them.                                                                                          |
-| `ext_snap`  | `package`, `fixture`, `step` | Renders the panel after a fixture's step as `dupin ext snap` does and returns the PNG as image content, with its `step`, `width`, `height` and `scale`. `fixture` is relative to the package. |
+| Tool         | Arguments                    | What it does                                                                                                                                                                                    |
+| ------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ext_check`  | `package`                    | Loads and compiles the package as `dupin ext check` does and returns its `id`, `name`, `version` and `keyword`.                                                                                 |
+| `ext_run`    | `package`, `query`           | Asks it one query as `dupin ext run --json` does. Its host requests fail as `unavailable`.                                                                                                      |
+| `ext_test`   | `package`                    | Replays its fixtures as `dupin ext test --json` does and returns the report. It never rewrites them.                                                                                            |
+| `ext_render` | `package`, `fixture`, `step` | Renders the panel after a fixture's step as `dupin ext render` does and returns the PNG as image content, with its `step`, `width`, `height` and `scale`. `fixture` is relative to the package. |
 
 `package` is a folder relative to the workspace. Without `--workspace`, these tools aren't listed and calling one is an unknown tool.
 
@@ -131,11 +140,13 @@ A tool that fails returns a result with `isError: true` and the reason as text, 
 <details>
 <summary>Tool failures and JSON-RPC codes</summary>
 
-| Failure                                | Reason text            |
-| -------------------------------------- | ---------------------- |
-| `open_panel` while Dupin isn't running | "Dupin is not running" |
-| A `pick` the user dismisses            | "Cancelled"            |
-| An argument it doesn't accept          | What is wrong          |
+| Failure                                               | Reason text               |
+| ----------------------------------------------------- | ------------------------- |
+| A launcher tool while Dupin isn't running             | "Dupin is not running"    |
+| `read_snapshot` or `open_snapshot` of an unknown `id` | "NotFound: snapshot"      |
+| A snapshot tool while snapshots are loading           | "Busy: snapshots loading" |
+| A `pick` the user dismisses                           | "Cancelled"               |
+| An argument it doesn't accept                         | What is wrong             |
 
 | Code     | For                                                    |
 | -------- | ------------------------------------------------------ |

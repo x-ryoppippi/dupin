@@ -211,6 +211,13 @@ pub trait Windows: Send + Sync {
     fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure>;
 }
 
+pub trait Context: Send + Sync {
+    /// The app in front when the panel opened, or `null`.
+    fn frontmost(&self) -> Result<Value, Failure>;
+    /// The file the front app's focused window showed then, or `null`.
+    fn document(&self) -> Result<Value, Failure>;
+}
+
 /// What a host service is missing, such as one a headless run has no use for.
 pub struct Unavailable(pub &'static str);
 
@@ -318,6 +325,15 @@ impl Windows for Unavailable {
     }
 }
 
+impl Context for Unavailable {
+    fn frontmost(&self) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn document(&self) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+}
+
 impl From<dupin_host_services::ServiceError> for Failure {
     fn from(error: dupin_host_services::ServiceError) -> Self {
         Failure {
@@ -338,6 +354,7 @@ pub struct Services {
     pub snippets: Box<dyn Snippets>,
     pub calendar: Box<dyn Calendar>,
     pub windows: Box<dyn Windows>,
+    pub context: Box<dyn Context>,
 }
 
 impl Services {
@@ -353,6 +370,7 @@ impl Services {
             snippets: Box::new(Unavailable("snippets aren't available")),
             calendar: Box::new(Unavailable("calendars aren't available")),
             windows: Box::new(Unavailable("windows aren't available")),
+            context: Box::new(Unavailable("what you were using isn't available")),
         }
     }
 }
@@ -431,6 +449,8 @@ pub(crate) mod fixture {
     pub(crate) struct Exec {
         pub(crate) stdout: String,
         pub(crate) runs: Mutex<Vec<(String, BTreeMap<String, exec::Value>)>>,
+        /// The program and the timeout of each run, in the same order.
+        pub(crate) launches: Mutex<Vec<(exec::Target, std::time::Duration)>>,
     }
 
     impl super::Exec for Arc<Exec> {
@@ -445,6 +465,10 @@ pub(crate) mod fixture {
                 .lock()
                 .unwrap()
                 .push((profile.name().into(), values.clone()));
+            self.launches
+                .lock()
+                .unwrap()
+                .push((profile.target().clone(), profile.options().timeout));
             Ok(exec::Outcome {
                 exit: exec::Exit::Code(0),
                 output: profile.options().return_output.then(|| exec::Output {
@@ -574,6 +598,18 @@ pub(crate) mod fixture {
         fn set_frame(&self, frame: super::windows::Frame) -> Result<Value, Failure> {
             self.moves.lock().unwrap().push(frame);
             Ok(serde_json::to_value(frame).unwrap())
+        }
+    }
+
+    /// An editor in front, showing a note.
+    pub(crate) struct Context;
+
+    impl super::Context for Context {
+        fn frontmost(&self) -> Result<Value, Failure> {
+            Ok(serde_json::json!({ "name": "Editor", "bundleId": "com.example.editor", "pid": 4242 }))
+        }
+        fn document(&self) -> Result<Value, Failure> {
+            Ok(serde_json::json!({ "path": "/Users/me/notes.md" }))
         }
     }
 

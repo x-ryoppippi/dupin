@@ -76,6 +76,11 @@ impl Snapshots {
                 crate::control::MAX_FRAME / 2,
             ))
             .map_err(|_| "could not encode snapshots".into()),
+            Command::SnapshotsRead { .. } if !self.loaded => Err("Busy: snapshots loading".into()),
+            Command::SnapshotsRead { id } => match self.entries.iter().find(|s| &s.id == id) {
+                Some(entry) => Ok(content(entry, crate::control::MAX_FRAME - 1024)),
+                None => Err("NotFound: snapshot".into()),
+            },
             Command::SnapshotsOpen { id } => {
                 if id.is_some() && !self.loaded {
                     Err("Busy: snapshots loading".into())
@@ -552,6 +557,37 @@ fn summaries(entries: &[Snapshot], problem: Option<String>, budget: usize) -> cr
     list
 }
 
+/// What the Snapshots window shows of one snapshot: its metadata and visible views, never its
+/// resume state. Views that would not fit in `budget` bytes are left out and counted.
+fn content(entry: &Snapshot, budget: usize) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "id": entry.id,
+        "saved_at": entry.saved_at,
+        "mode": entry.mode,
+        "title": entry.title,
+        "query": entry.query,
+        "views": [],
+        "truncated": false,
+        "omitted_views": 0,
+    });
+    let mut size = serde_json::to_vec(&value)
+        .expect("snapshot content encodes")
+        .len();
+    let mut views = Vec::new();
+    for view in &entry.views {
+        let view = serde_json::to_value(view).expect("snapshot view encodes");
+        size += view.to_string().len() + 1;
+        if size > budget {
+            break;
+        }
+        views.push(view);
+    }
+    value["omitted_views"] = (entry.views.len() - views.len()).into();
+    value["truncated"] = (views.len() < entry.views.len()).into();
+    value["views"] = views.into();
+    value
+}
+
 /// What the `snap` keyword lists: each saved snapshot's metadata, newest first, as the
 /// window last loaded it, and the commands a snapshot may resume. Only the metadata the
 /// window's own list shows is kept here, never saved content.
@@ -719,6 +755,54 @@ mod tests {
     }
 
     #[test]
+    fn read_content_has_the_visible_views_and_no_state_and_fits_a_frame() {
+        let mut entry = saved("a", 5);
+        entry.state = Some(dupin_plugin_protocol::State {
+            version: 1,
+            data: serde_json::json!({"secret": 1}),
+        });
+        entry.views.push(dupin_core::View::Pair {
+            source: "2 + 2".into(),
+            result: "4".into(),
+        });
+        let value = content(&entry, crate::control::MAX_FRAME - 1024);
+        assert_eq!(value["views"][0]["kind"], "text");
+        assert_eq!(value["views"][0]["title"], "Private content");
+        assert_eq!(value["views"][1]["result"], "4");
+        assert_eq!(value["truncated"], false);
+        assert_eq!(value["omitted_views"], 0);
+        for key in ["state", "explicit", "version"] {
+            assert!(value.get(key).is_none());
+        }
+
+        entry.views = (0..3)
+            .map(|_| dupin_core::View::Detail {
+                title: "t".into(),
+                body: "\"".repeat(300 * 1024),
+            })
+            .collect();
+        let value = content(&entry, crate::control::MAX_FRAME - 1024);
+        assert_eq!(value["truncated"], true);
+        assert_eq!(value["views"].as_array().unwrap().len(), 0);
+        assert_eq!(value["omitted_views"], 3);
+        entry.views[0] = dupin_core::View::Detail {
+            title: "t".into(),
+            body: "x".repeat(100 * 1024),
+        };
+        let value = content(&entry, crate::control::MAX_FRAME - 1024);
+        assert_eq!(value["views"].as_array().unwrap().len(), 1);
+        assert_eq!(value["omitted_views"], 2);
+        crate::control::write_frame(
+            &mut Vec::new(),
+            &crate::control::Reply {
+                id: 1,
+                result: Ok(value),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn snapshot_control_never_writes_or_resumes() {
         use crate::control::{Call, Command, Request as ControlRequest};
         let panel = rune::App::new(rune::AppSpec::new(
@@ -754,12 +838,17 @@ mod tests {
             };
             (call, receiver)
         };
-        let (call, reply) = request(Command::SnapshotsList {});
-        s.control(call);
-        assert_eq!(
-            reply.recv().unwrap().result.unwrap_err(),
-            "Busy: snapshots loading"
-        );
+        for command in [
+            Command::SnapshotsList {},
+            Command::SnapshotsRead { id: "saved".into() },
+        ] {
+            let (call, reply) = request(command);
+            s.control(call);
+            assert_eq!(
+                reply.recv().unwrap().result.unwrap_err(),
+                "Busy: snapshots loading"
+            );
+        }
         s.loaded = true;
         for (command, expected) in [
             (
@@ -768,7 +857,12 @@ mod tests {
                 },
                 Some("NotFound: snapshot"),
             ),
+            (
+                Command::SnapshotsRead { id: "missing".into() },
+                Some("NotFound: snapshot"),
+            ),
             (Command::SnapshotsList {}, None),
+            (Command::SnapshotsRead { id: "saved".into() }, None),
         ] {
             let (call, reply) = request(command);
             s.control(call);

@@ -1,4 +1,4 @@
-// Types for Dupin extensions, apiVersion 4. Dupin never reads this file; it is for editors and
+// Types for Dupin extensions, apiVersion 5. Dupin never reads this file; it is for editors and
 // `tsc --noEmit`. `dupin ext new` copies it into each package.
 //
 // Dupin runs a TypeScript `dupin.main` as written by erasing its types, without type-checking.
@@ -9,7 +9,7 @@
 
 declare module 'dupin' {
 	/** The guest API this file describes. The host's `dupin` module exports the same value. */
-	export const apiVersion: 4;
+	export const apiVersion: 5;
 
 	type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -49,7 +49,10 @@ declare module 'dupin' {
 		detail?: DetailPane;
 		/** Up to eight, counting the ones `url` and `text` add. */
 		actions?: Action[];
-		/** Up to three, shown at the row's end: `{ text }` as it is, `{ tag }` as a label. */
+		/**
+		 * Up to three, shown at the row's end: `{ text }` as it is, `{ tag }` as a label,
+		 * `{ freshness }` as how long ago it was and `{ state }` as a label in the state's colour.
+		 */
 		accessories?: Accessory[];
 		/**
 		 * From `search` or a view: the row shows its title and this, one or two lines of up to
@@ -58,8 +61,17 @@ declare module 'dupin' {
 		answer?: string;
 	}
 
-	/** One line of up to 64 bytes. */
-	export type Accessory = { text: string } | { tag: string };
+	/**
+	 * `text` and `tag` are one line of up to 64 bytes. `freshness` is when the row's data was
+	 * read, in milliseconds since the epoch as `Date.now()` gives them, which Dupin writes as
+	 * `12 s ago`, `5 min ago` and so on each time it draws the row. `state` says the row's
+	 * source can't be reached (`Offline`) or what it shows is out of date (`Stale`).
+	 */
+	export type Accessory =
+		| { text: string }
+		| { tag: string }
+		| { freshness: number }
+		| { state: 'offline' | 'stale' };
 
 	/** Runs `actions[run](data, ctx)` when the user chooses it. */
 	export interface ItemAction {
@@ -346,7 +358,10 @@ declare module 'dupin' {
 	 * front (which needs Accessibility; without it, Dupin says how to allow it); open a view on
 	 * a page above the one the action was chosen on, titled `title` or the extension's title;
 	 * close that page; ask its view (or the search) again; give it new state, which asks its view
-	 * again; or, from a form's submit, show what is wrong with its fields. The ones that move or
+	 * again; from a form's submit, show what is wrong with its fields; or enter a command, named
+	 * as an alias names it (a built-in's name, such as `calendar`, or an extension's package
+	 * name), with `query` typed after its keyword: the package's own, or, from a package that
+	 * ships with Dupin, any other. The ones that move or
 	 * change a page take a `toast` too, which Dupin shows once it has. An effect lands only while
 	 * the page it was chosen on is still the one on screen. Toasts are one line of up to 512
 	 * bytes, state at most 16 KiB of JSON and each field error one line of up to 256 bytes.
@@ -359,7 +374,8 @@ declare module 'dupin' {
 		| { type: 'pop'; toast?: string }
 		| { type: 'refresh'; toast?: string }
 		| { type: 'replaceState'; state: Json; toast?: string }
-		| { type: 'fieldErrors'; errors: Record<string, string> };
+		| { type: 'fieldErrors'; errors: Record<string, string> }
+		| { type: 'enter'; command: string; query?: string };
 
 	/**
 	 * What an action receives beside its data. On one of the package's pages, `query` and
@@ -556,14 +572,34 @@ declare module 'dupin' {
 	export interface Capabilities {
 		/** Up to 32 `https://host[:port]` origins, lowercase, without a path or `:443`. */
 		http?: { origin: `https://${string}`; methods: HttpMethod[] }[];
-		/** Up to 16 named scopes; the user picks the file or folder each one is. */
-		files?: Record<string, { kind: 'file' | 'directory'; access: ('read' | 'list')[] }>;
+		/**
+		 * Up to 16 named scopes. `path`, absolute or under `~/`, names the file or folder the
+		 * scope is; without it the user picks one.
+		 */
+		files?: Record<
+			string,
+			{ kind: 'file' | 'directory'; access: ('read' | 'list')[]; path?: string }
+		>;
 		/**
 		 * Up to 16 named profiles: an argument template whose `{input}` placeholders take one line
-		 * of text each, run with a program the user picks; or `@script:<name>` for one of the
-		 * user's script commands. `output` asks to receive stdout and stderr.
+		 * of text each, run with the program at the absolute path `program` names, or one the user
+		 * picks; or `@script:<name>` for one of the user's script commands. `output` asks to
+		 * receive stdout and stderr; `sshAgent` hands a picked program `SSH_AUTH_SOCK`, so `ssh`
+		 * can use the user's agent; `background` lets the profile run while the user types, in
+		 * `items` and in event handlers, rather than only in an action; `outputBytes`, with
+		 * `output`, is the most of each stream it receives, 64 KiB unless declared and 1 MiB at most.
 		 */
-		exec?: Record<string, { args?: string[]; output?: boolean }>;
+		exec?: Record<
+			string,
+			{
+				args?: string[];
+				output?: boolean;
+				program?: string;
+				background?: boolean;
+				sshAgent?: boolean;
+				outputBytes?: number;
+			}
+		>;
 		/**
 		 * Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until
 		 * deleted. `sync` asks for `storage:sync`: once the user grants it on a Mac, a package installed
@@ -583,6 +619,11 @@ declare module 'dupin' {
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };
 		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
 		windows?: ('read' | 'arrange')[];
+		/**
+		 * `frontmost` reads which app was in front when the panel opened; `document` reads the
+		 * file its focused window showed. Neither needs an action the user chose.
+		 */
+		context?: ('frontmost' | 'document')[];
 		/**
 		 * The fields of each kind of row Dupin's own sources find that the package's filters and
 		 * kind actions may receive. Another extension's rows never reach them.
@@ -664,6 +705,8 @@ declare module 'dupin' {
 		readText(scope: string, path: string, options?: { limit?: number }): Promise<string>;
 		/** At most `limit` entries, 200 by default and 1,000 at most. */
 		list(scope: string, path?: string, options?: { limit?: number }): Promise<FileEntry[]>;
+		/** The absolute path of the file or folder the scope is, for Dupin's actions and programs. */
+		root(scope: string): Promise<string>;
 	};
 
 	export interface ExecResult {
@@ -677,7 +720,10 @@ declare module 'dupin' {
 		readonly truncated?: boolean;
 	}
 
-	/** `exec` capability, only in an action. `profile` is a key of `exec`, such as `@script:open-in-zed`. */
+	/**
+	 * `exec` capability, only in an action unless the profile declares `background`. `profile` is
+	 * a key of `exec`, such as `@script:open-in-zed`.
+	 */
 	export const exec: {
 		run(profile: string, inputs?: Record<string, string | number>): Promise<ExecResult>;
 	};
@@ -960,5 +1006,34 @@ declare module 'dupin' {
 		 * the user chose.
 		 */
 		setFrame(frame: WindowFrame): Promise<WindowFrame>;
+	};
+
+	export interface FrontmostApp {
+		readonly name: string;
+		readonly bundleId: string | null;
+		/** Its process ID. */
+		readonly pid: number;
+	}
+
+	export interface FrontDocument {
+		/** An absolute path. */
+		readonly path: string;
+	}
+
+	/**
+	 * `context` capability: what Dupin noted, as the panel opened, about where the user was. The
+	 * same answer holds until the panel next opens. Text selected there reaches the package as
+	 * the query, when the user opens Dupin with the Selection hotkey.
+	 */
+	export const context: {
+		/** The app that was in front, or `null` when Dupin itself was. Needs `frontmost`. */
+		frontmost(): Promise<FrontmostApp | null>;
+		/**
+		 * The local file that app's focused window showed, as the app reports it through
+		 * Accessibility, or `null`: when the app names none, as terminals and browsers don't, or
+		 * while Dupin hasn't been allowed Accessibility for another feature. Dupin never asks for
+		 * that access for this. Needs `document`.
+		 */
+		document(): Promise<FrontDocument | null>;
 	};
 }

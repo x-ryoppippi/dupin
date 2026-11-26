@@ -118,6 +118,6 @@ target/debug/dupin --script scripts/themes/preview.json --realtime \
   --snap /tmp/theme.png --at mark:end --size 680x500 --scale 2
 ```
 
-Use width 400 for Ocean and 900 for Rose. These fixtures disable hotkeys and updates; never point screenshot runs at your regular configuration. Headless snapshots show the same resolved palette, fonts and geometry, using the material fallback.
+Use width 400 for Ocean and 900 for Rose. These fixtures disable hotkeys and updates; never point screenshot runs at your regular configuration. Headless renders show the same resolved palette, fonts and geometry, using the material fallback.
 
 </details>

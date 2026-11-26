@@ -1,8 +1,8 @@
 <div align="center">
     <img src="./assets/logo/dupin.svg" alt="Dupin logo" width="112" height="112">
     <h1>Dupin</h1>
-    <p><strong>type a keyword, reach anything</strong></p>
-    <p>A light, always-ready Mac launcher: Alfred's successor, with extensions your agent can write.</p>
+    <p><a href="./docs/name.md">/dy.pɛ̃/</a></p>
+    <p><strong>The doorway to your Mac: type a keyword, reach anything.</strong></p>
     <p>
         <a href="https://dupin.app">Website</a> ·
         <a href="https://dupin.app/docs/">Docs</a> ·
@@ -16,6 +16,8 @@
 </div>
 
 ## Why Dupin
+
+**A launcher should be the doorway to your desktop, not a replacement for it.** [Read the philosophy](./docs/philosophy.md).
 
 - **Fast.** The panel is already drawn when you press the hotkey, and app search shows its results under 3 ms after each keystroke (p95, measured in CI on every change to the app).
 - **Built for searching, and simple.** Type a keyword, reach anything; the launcher stays a launcher.
@@ -36,8 +38,16 @@ Free ⌘Space first ([how](./docs/features/hotkeys.md#freeing-the-hotkey)). More
 
 [GPL-3.0-or-later](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Telemetry](./docs/features/telemetry.md) · [Sponsor](https://github.com/sponsors/ryoppippi)
 
+## Sponsors
+
 <p align="center">
     <a href="https://coderabbit.link/ryoppippi"><picture><source media="(prefers-color-scheme: dark)" srcset="./docs/public/coderabbit-logo-dark.svg"><img src="./docs/public/coderabbit-logo.svg" alt="CodeRabbit" width="140"></picture></a>
     &nbsp;&nbsp;
     <a href="https://blacksmith.sh"><picture><source media="(prefers-color-scheme: dark)" srcset="./docs/public/blacksmith-logo-dark.svg"><img src="./docs/public/blacksmith-logo.svg" alt="CI powered by Blacksmith" width="140"></picture></a>
+</p>
+
+<p align="center">
+    <a href="https://github.com/sponsors/ryoppippi">
+        <img src="https://sponsors.ryoppippi.com/sponsors.png" alt="Sponsors">
+    </a>
 </p>

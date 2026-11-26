@@ -598,7 +598,7 @@ def pull-request-report [] {
     let alone = render (against-main (do $run 3.0 3.2 1.5) null $tolerance $floor) null $context
     assert (
         $alone
-        | str contains "No main build has measured latency yet, so there is nothing to compare with."
+        | str contains "This run carries no results from main to compare with"
     )
     assert not ($alone | str contains "Machine-readable")
 

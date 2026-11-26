@@ -11,7 +11,7 @@ use dupin_extension_bridge::{
     Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, PackageStorage, Scope, Trigger,
 };
 use dupin_extension_http::{HttpConfig, HttpService, Limits};
-use dupin_host_services::{calendar, clipboard, dictionary, exec, windows};
+use dupin_host_services::{calendar, clipboard, context, dictionary, exec, windows};
 use dupin_mac::privacy::CalendarAccess;
 use serde_json::Value;
 
@@ -74,7 +74,7 @@ pub struct Platform {
 /// that act on the Mac. Tests and headless runs get one that keeps grants in memory
 /// and reaches no service of the Mac's but a headless run's fixture calendar, as the built-in
 /// Calendar search reads it, and fixed definitions, as the bundled Dictionary renders them; a
-/// headless render may still declare a base beside its own config, and one `dupin ext snap`
+/// headless render may still declare a base beside its own config, and one `dupin ext render`
 /// starts answers from the fixture it renders.
 pub fn open(platform: Platform) -> Bridge {
     if cfg!(test) {
@@ -151,7 +151,10 @@ pub fn open(platform: Platform) -> Bridge {
             platform.calendar_access,
         )))),
         windows: Box::new(Windows(windows::Service::new(
-            dupin_mac::window_management::Windows(platform.front),
+            dupin_mac::window_management::Windows(platform.front.clone()),
+        ))),
+        context: Box::new(Context(context::Service::new(
+            dupin_mac::window_management::Context(platform.front),
         ))),
     };
     let bridge = match base_path() {
@@ -355,6 +358,18 @@ impl services::Windows for Windows {
     }
 }
 
+struct Context(context::Service<dupin_mac::window_management::Context>);
+
+impl services::Context for Context {
+    fn frontmost(&self) -> Result<Value, Failure> {
+        encoded(self.0.frontmost())
+    }
+
+    fn document(&self) -> Result<Value, Failure> {
+        encoded(self.0.document())
+    }
+}
+
 /// Executable profiles and `@script:` targets, run as script commands are: through the
 /// script catalogue and the runner's process groups and extension slots.
 struct Programs {
@@ -380,5 +395,107 @@ impl services::Exec for Programs {
         cancel: &AtomicBool,
     ) -> Result<exec::Outcome, exec::ExecError> {
         exec::run(profile, values, &Lookup(&self.scripts), &self.runner, cancel)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::ExitStatusExt;
+    use std::time::Instant;
+
+    use dupin_js_runtime::{ActionEffect, PageContext};
+    use serde_json::json;
+
+    use super::*;
+    use crate::extensions::{ACTION_DEADLINE, bundled, load_bundled};
+
+    /// The bundled Processes package signals a child this test started, through the broker and
+    /// the runner the launcher uses, and refuses launchd, Dupin and a PID that now runs another
+    /// program before running anything that signals.
+    #[test]
+    fn processes_signal_only_the_process_the_row_showed() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let home = tempfile::tempdir().unwrap();
+        let services = Services {
+            exec: Box::new(Programs {
+                scripts: Arc::new(RwLock::new(Catalog::default())),
+                runner: Runner::new(home.path().to_owned(), Arc::new(|_, _| {})),
+            }),
+            ..Services::none()
+        };
+        let bridge = Bridge::new(Broker::new(Base::default(), Local::default()), None, services);
+        let folder = bundled::find(&bundled::directory().unwrap(), "proc").unwrap();
+        let extension = load_bundled(&folder).unwrap();
+        bridge.set_bundled(&extension.package, extension.revision.clone(), true);
+        let _ = bridge.install(
+            &extension.package,
+            extension.revision.clone(),
+            extension.capabilities.clone(),
+        );
+        bridge.set_enabled(&extension.package, true).unwrap();
+        // Each program is the user's to allow, as the panel asks before it first runs.
+        for entry in bridge.scopes(&extension.package) {
+            bridge
+                .allow(&extension.package, &extension.revision, &entry.scope, None)
+                .unwrap();
+        }
+        let act = |name: &str, data: serde_json::Value| {
+            let call = bridge.call(&extension.package, Trigger::Activation);
+            let acted = extension
+                .act(
+                    name,
+                    &data,
+                    &PageContext::default(),
+                    Instant::now() + ACTION_DEADLINE,
+                    &call.services,
+                )
+                .unwrap();
+            match acted.effect {
+                Some(ActionEffect::Toast { text }) => text,
+                other => panic!("{other:?}"),
+            }
+        };
+
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": pid, "name": "sleep", "path": "/bin/cat" })
+            ),
+            format!("PID {pid} now belongs to another program, so Dupin left it alone")
+        );
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": 1, "name": "launchd", "path": "/sbin/launchd" })
+            ),
+            "Dupin doesn't signal launchd"
+        );
+        let dupin = json!({
+            "pid": std::process::id(),
+            "name": "dupin",
+            "path": "/Applications/Dupin.app/Contents/MacOS/dupin",
+        });
+        assert_eq!(act("forceQuit", dupin), "Dupin doesn't signal dupin");
+        assert!(child.try_wait().unwrap().is_none(), "nothing was stopped yet");
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": pid, "name": "sleep", "path": "/bin/sleep" })
+            ),
+            format!("Asked sleep ({pid}) to quit")
+        );
+        assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGTERM));
+        assert_eq!(
+            act(
+                "terminate",
+                json!({ "pid": pid, "name": "sleep", "path": "/bin/sleep" })
+            ),
+            format!("sleep ({pid}) has already ended")
+        );
     }
 }

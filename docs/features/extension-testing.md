@@ -8,18 +8,18 @@ dupin ext dev greeter                      # keep a live copy in the extensions 
 dupin ext check greeter                    # load and compile it
 dupin ext run greeter --query 'Dupin'      # answer one query
 dupin ext test greeter                     # replay its fixtures
-dupin ext snap greeter greeter/fixtures/search.json search.png
+dupin ext render greeter greeter/fixtures/search.json search.png
 ```
 
-| Command                                                                                                    | Does                                                                              |
-| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [`dupin ext new <dir> [--ts \| --bundle]`](#creating-a-package)                                            | Creates a package in a new or empty folder.                                       |
-| [`dupin ext dev <dir> [--sourcemap]`](#developing-live)                                                    | Publishes a development copy to the extensions folder and keeps it current.       |
-| [`dupin ext check <dir>`](#checking-and-running)                                                           | Loads and compiles the package and says what it exports.                          |
-| [`dupin ext run <dir> --query Q [--json]`](#checking-and-running)                                          | Answers one query as the launcher would.                                          |
-| [`dupin ext test <dir> [--update] [--json]`](#testing-and-snapshots)                                       | Replays every fixture and compares each step with its `expect`.                   |
-| [`dupin ext snap <dir> <fixture> <output.png> [--step N] [--record DIR] [--json]`](#testing-and-snapshots) | Renders the panel after a fixture's step, and with `--record` records the replay. |
-| [`dupin ext build <dir> [--sourcemap]`](./extension-distribution.md#building-a-bundle)                     | Bundles a package with npm dependencies.                                          |
+| Command                                                                                                      | Does                                                                              |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| [`dupin ext new <dir> [--ts \| --bundle]`](#creating-a-package)                                              | Creates a package in a new or empty folder.                                       |
+| [`dupin ext dev <dir> [--sourcemap]`](#developing-live)                                                      | Publishes a development copy to the extensions folder and keeps it current.       |
+| [`dupin ext check <dir>`](#checking-and-running)                                                             | Loads and compiles the package and says what it exports.                          |
+| [`dupin ext run <dir> --query Q [--json]`](#checking-and-running)                                            | Answers one query as the launcher would.                                          |
+| [`dupin ext test <dir> [--update] [--json]`](#testing-and-rendering)                                         | Replays every fixture and compares each step with its `expect`.                   |
+| [`dupin ext render <dir> <fixture> <output.png> [--step N] [--record DIR] [--json]`](#testing-and-rendering) | Renders the panel after a fixture's step, and with `--record` records the replay. |
+| [`dupin ext build <dir> [--sourcemap]`](./extension-distribution.md#building-a-bundle)                       | Bundles a package with npm dependencies.                                          |
 
 <details>
 <summary>Packages and the host</summary>
@@ -68,7 +68,7 @@ The workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and
 <details>
 <summary><code>dupin.d.ts</code></summary>
 
-`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 4 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, accessories and answers, item actions, `views` with their lists, details and forms, `actions` with their effects on pages, `events`, the `filters` and kind actions a package [provides to `[advanced]`](./advanced.md#extensions), the capabilities and `DupinError`.
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 5 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, accessories and answers, item actions, `views` with their lists, details and forms, `actions` with their effects on pages, `events`, the `filters` and kind actions a package [provides to `[advanced]`](./advanced.md#extensions), the capabilities and `DupinError`.
 
 </details>
 
@@ -92,7 +92,7 @@ dupin ext check examples/extensions/word-count-js
 dupin ext run examples/extensions/word-count-js --query 'two words'
 ```
 
-`check` compiles the package and says whether it exports `search` or `items`. `run` answers one query as the launcher would; host requests fail as `unavailable`, so use [`dupin ext test`](#testing-and-snapshots) to answer them from a fixture. Both exit non-zero on failure.
+`check` compiles the package and says whether it exports `search` or `items`. `run` answers one query as the launcher would; host requests fail as `unavailable`, so use [`dupin ext test`](#testing-and-rendering) to answer them from a fixture. Both exit non-zero on failure.
 
 <details>
 <summary>What they do</summary>
@@ -129,15 +129,15 @@ With `--json`, `run` prints the answer in the [protocol](../plugin-protocol.md)'
 
 </details>
 
-## Testing and snapshots
+## Testing and rendering
 
 ```sh
 dupin ext test greeter
 dupin ext test greeter --update
-dupin ext snap greeter greeter/fixtures/search.json search.png
+dupin ext render greeter greeter/fixtures/search.json search.png
 ```
 
-`dupin ext test` replays every [fixture](#fixtures) in `fixtures/` and compares each step with its `expect`; `--update` rewrites the expectations to what the steps produced. `dupin ext snap` renders the panel after step `N` (counting from 1), or the last step, as a PNG.
+`dupin ext test` replays every [fixture](#fixtures) in `fixtures/` and compares each step with its `expect`; `--update` rewrites the expectations to what the steps produced. `dupin ext render` renders the panel after step `N` (counting from 1), or the last step, as a PNG. Rendering only draws the panel to a file; it has nothing to do with [Snapshots](./snapshots.md), which save results in the launcher.
 
 ```text
 FAIL fixtures/search.json
@@ -163,13 +163,13 @@ Each difference names the path in the outcome and both values; something the out
 </details>
 
 <details>
-<summary>How snap renders</summary>
+<summary>How render draws</summary>
 
-`snap` answers host requests from the fixture's `replies`, through the broker and with the fixture's `consent`, exactly as `test` does, so `search` and `items` show what they would in the launcher.
+`render` answers host requests from the fixture's `replies`, through the broker and with the fixture's `consent`, exactly as `test` does, so `search` and `items` show what they would in the launcher.
 
-`snap` starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. A package Dupin ships for a built-in, such as Calendar or Calculator, answers that built-in as it does in the launcher: the render turns the built-in on, types the query after its keyword, or in the main search for one that answers there, and hands the package the fixture's `preferences` in place of the built-in's settings and only the grants the fixture's `consent` gives. It chooses a step's `push` and `run` actions from the row's action panel, fills in and submits forms and closes pages with the keys a person would press, so the panel shows the page an action opened and the toast it showed; a `clipboard` event reaches the package as a copy does, at its step. Copy, Paste, Open URL and Reveal actions and other events change nothing on screen and aren't replayed. To show what the package had stored before the first step, seed `replies.storage` with it.
+`render` starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. A package Dupin ships for a built-in, such as Calendar or Calculator, answers that built-in as it does in the launcher: the render turns the built-in on, types the query after its keyword, or in the main search for one that answers there, and hands the package the fixture's `preferences` in place of the built-in's settings and only the grants the fixture's `consent` gives. It chooses a step's `push` and `run` actions from the row's action panel, fills in and submits forms and closes pages with the keys a person would press, so the panel shows the page an action opened and the toast it showed; a `clipboard` event reaches the package as a copy does, at its step. Copy, Paste, Open URL and Reveal actions and other events change nothing on screen and aren't replayed. To show what the package had stored before the first step, seed `replies.storage` with it.
 
-The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, and Dupin says how long ago a row's `time` was by the same clock, so two renders of one fixture on one Mac are the same bytes on any day. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `snap` then fails with `render-failed`. `--json` prints `{ "png", "step", "width", "height", "scale", "shown" }`, where `shown` is every text the panel shows, in the order it lays them out.
+The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, and Dupin says how long ago a row's `time` was by the same clock, so two renders of one fixture on one Mac are the same bytes on any day. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `render` then fails with `render-failed`. `--json` prints `{ "png", "step", "width", "height", "scale", "shown" }`, where `shown` is every text the panel shows, in the order it lays them out.
 
 `--record DIR` also records the replay, up to the same step, as `DIR/frame_0000.png` and on, 10 frames a second at the fixture's scale and at least 720 points tall, so the panel has room to grow, with the keys it pressed in `DIR/script.json` (Rune's script format). A recording presses keys at a pace a reader can follow, slower than a still needs; the still at `output.png` is the same either way. `scripts/docs-images.nu` turns such a recording into a clip for these docs.
 
@@ -265,7 +265,7 @@ Each step does one thing and may `expect` what it produced; only the keys `expec
 
 Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, `windows`, each frame it moved the focused window to, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it.
 
-`expect` names any of `rows`, `selected`, `effect`, `toasts`, `panel` (`"hide"` or `"paste"` when an action hides the panel), `clipboard`, `windows`, `storage`, `invalidated`, `error` and `view`. Only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`.
+`expect` names any of `rows`, `selected`, `effect`, `toasts`, `panel` (`"hide"` or `"paste"` when an action hides the panel, `{ "enter": { "command", "query" } }` when it enters another command), `clipboard`, `windows`, `storage`, `invalidated`, `error` and `view`. Only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`.
 
 </details>
 
@@ -285,20 +285,20 @@ A step's `activate` may name an action by the ID the launcher gives it: `copy`, 
 
 A query step answers as the keyword does: `search`'s rows for a query that isn't blank, then the `items()` catalogue's matches, ranked by Dupin's own matcher (without usage history, which a fixture doesn't have) and losing their `section` once the query ranks them, then its web searches filled with the query.
 
-The fixture holds the catalogue from step to step as the launcher does, so an `activate` or `event` step whose handler calls `items.invalidate()` has `invalidated: true` in its outcome, and the next query asks `items` with `reason` `"invalidated"` and the cursor and applies the update it answers.
+The fixture holds the catalogue from step to step as the launcher does, so an `activate` or `event` step whose handler calls `items.invalidate()` has `invalidated: true` in its outcome, and the next query asks `items` with `reason` `"invalidated"` and the cursor and applies the update it answers. A package in the folder Dupin's bundled extensions are in, such as the repository's `extensions/`, replays as that bundled package, as the launcher runs it: with its own storage, and entering another package's command, which only a bundled package may.
 
 </details>
 
 ### Environment
 
-| `environment` key | Default                        | Fixes                           |
-| ----------------- | ------------------------------ | ------------------------------- |
-| `now`             | `"2026-01-01T09:00:00Z"`       | The clock, which doesn't move.  |
-| `seed`            | `1`                            | `Math.random`.                  |
-| `timeZone`        | `"UTC"`                        | The extension host's time zone. |
-| `locale`          | `"en-GB"`                      | `LANG` for the headless render. |
-| `theme`           | `"dark"`                       | `snap`'s appearance.            |
-| `window`          | `{ "width": 680, "scale": 2 }` | `snap`'s panel size and scale.  |
+| `environment` key | Default                        | Fixes                            |
+| ----------------- | ------------------------------ | -------------------------------- |
+| `now`             | `"2026-01-01T09:00:00Z"`       | The clock, which doesn't move.   |
+| `seed`            | `1`                            | `Math.random`.                   |
+| `timeZone`        | `"UTC"`                        | The extension host's time zone.  |
+| `locale`          | `"en-GB"`                      | `LANG` for the headless render.  |
+| `theme`           | `"dark"`                       | `render`'s appearance.           |
+| `window`          | `{ "width": 680, "scale": 2 }` | `render`'s panel size and scale. |
 
 <details>
 <summary>Every key in full</summary>
@@ -309,42 +309,43 @@ The fixture holds the catalogue from step to step as the launcher does, so an `a
 | `seed`            | `1`                            | `Math.random`, which returns the same numbers for the same seed.                                           |
 | `timeZone`        | `"UTC"`                        | The extension host's time zone, a tz database name this Mac has, for local-time `Date` methods.            |
 | `locale`          | `"en-GB"`                      | `LANG` for the headless render. The guest has no `Intl`, so no answer depends on it yet.                   |
-| `theme`           | `"dark"`                       | `snap`'s appearance, `dark` or `light`.                                                                    |
-| `window`          | `{ "width": 680, "scale": 2 }` | `snap`'s panel width (400–1200 points), scale (1–3) and, optionally, `height` (60–2000 points).            |
+| `theme`           | `"dark"`                       | `render`'s appearance, `dark` or `light`.                                                                  |
+| `window`          | `{ "width": 680, "scale": 2 }` | `render`'s panel width (400–1200 points), scale (1–3) and, optionally, `height` (60–2000 points).          |
 
 </details>
 
 ### Replies
 
-`replies` answers host requests in place of this Mac, by service: `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `calendar` and `windows`, plus `consent` for your decision on each scope. A request with no reply fails rather than reaching the network, a program or a file of yours.
+`replies` answers host requests in place of this Mac, by service: `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `calendar`, `windows` and `context`, plus `consent` for your decision on each scope. A request with no reply fails rather than reaching the network, a program or a file of yours.
 
 <details>
 <summary>Every reply</summary>
 
 Every request still goes through the broker, against the scopes `package.json` declares, so an undeclared origin, a method or path out of scope, or a clipboard read while typing fails exactly as in the launcher, before any reply is looked up.
 
-| `replies` key | Value                                                                                                                                                                                                                                                                                  |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http`        | `[{ "request": { "method", "url" }, "response": { "status", "headers", "body" or "json" } }]`. `method` defaults to `GET` and `status` to `200`; the URL must match exactly. Any other request fails with `network`.                                                                   |
-| `files`       | Each declared `files` scope's contents by name: a string for a `file` scope, or an object of relative paths and texts for a `directory` scope. Each scope is bound to a scratch folder holding exactly these files, empty when left out.                                               |
-| `exec`        | `[{ "profile", "args", "status", "stdout", "stderr" }]`. `profile` is the declared name, `@script:` included; `args`, if given, must equal the arguments after the inputs fill the template. Nothing is run.                                                                           |
-| `storage`     | The `data` of each record the package's storage holds when the fixture starts, oldest first, stored within its declared quota in a scratch store that ends with the fixture.                                                                                                           |
-| `clipboard`   | What a clipboard read returns, such as `{ "type": "text", "text": "…" }`, or `null` for an empty clipboard. Watched copies come as `event` steps.                                                                                                                                      |
-| `dictionary`  | Each term's entries, in the [dictionary](./extension-permissions.md#dictionary)'s shape. Any other term fails with `unavailable`.                                                                                                                                                      |
-| `calculator`  | Each expression's answer, in the [calculator](./extension-permissions.md#calculator)'s shape, or `null` for one it doesn't answer. Any other expression fails with `unavailable`.                                                                                                      |
-| `calendar`    | The events a read can see, in the [calendar](./extension-permissions.md#calendar)'s shape; a read returns those overlapping its range that match its `query`, in its `order`. Whole days are counted from `now` in UTC.                                                                |
-| `windows`     | `{ "displays": [...], "focused": … }`: the displays and the focused window, in the [windows](./extension-permissions.md#windows) service's shape, or `null` for no window. A move goes through the same bounds as on a Mac and updates `focused`, so the next step sees where it went. |
-| `consent`     | Your decision on each declared scope, named as grant files name it: `"allow"`, `"deny"` (granted, then revoked) or `"pending"` (`needs-consent`). A scope left out is allowed, and macOS access counts as allowed. Naming a scope the package doesn't declare is an error.             |
+| `replies` key | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http`        | `[{ "request": { "method", "url" }, "response": { "status", "headers", "body" or "json" } }]`. `method` defaults to `GET` and `status` to `200`; the URL must match exactly. Any other request fails with `network`.                                                                                                                                                                                                                                                                                              |
+| `files`       | Each declared `files` scope's contents by name: a string for a `file` scope, or an object of relative paths and texts for a `directory` scope. Each scope is bound to a scratch folder holding exactly these files, empty when left out. `files.root` reports a scope that names its `path` under `~/` as if the home folder were `/Users/dupin`, and any other as `/fixture/<name>`, so its answers are the same on every Mac; an undecided scope that names its path is missing, as a folder this Mac lacks is. |
+| `exec`        | `[{ "profile", "args", "status", "stdout", "stderr" }]`. `profile` is the declared name, `@script:` included; `args`, if given, must equal the arguments after the inputs fill the template. Nothing is run.                                                                                                                                                                                                                                                                                                      |
+| `storage`     | The `data` of each record the package's storage holds when the fixture starts, oldest first, stored within its declared quota in a scratch store that ends with the fixture.                                                                                                                                                                                                                                                                                                                                      |
+| `clipboard`   | What a clipboard read returns, such as `{ "type": "text", "text": "…" }`, or `null` for an empty clipboard. Watched copies come as `event` steps.                                                                                                                                                                                                                                                                                                                                                                 |
+| `dictionary`  | Each term's entries, in the [dictionary](./extension-permissions.md#dictionary)'s shape. Any other term fails with `unavailable`.                                                                                                                                                                                                                                                                                                                                                                                 |
+| `calculator`  | Each expression's answer, in the [calculator](./extension-permissions.md#calculator)'s shape, or `null` for one it doesn't answer. Any other expression fails with `unavailable`.                                                                                                                                                                                                                                                                                                                                 |
+| `calendar`    | The events a read can see, in the [calendar](./extension-permissions.md#calendar)'s shape; a read returns those overlapping its range that match its `query`, in its `order`. Whole days are counted from `now` in UTC.                                                                                                                                                                                                                                                                                           |
+| `windows`     | `{ "displays": [...], "focused": … }`: the displays and the focused window, in the [windows](./extension-permissions.md#windows) service's shape, or `null` for no window. A move goes through the same bounds as on a Mac and updates `focused`, so the next step sees where it went.                                                                                                                                                                                                                            |
+| `context`     | `{ "frontmost": …, "document": … }`: the app and the file in the [context](./extension-permissions.md#context) service's shapes, each `null` or left out for none.                                                                                                                                                                                                                                                                                                                                                |
+| `consent`     | Your decision on each declared scope, named as grant files name it: `"allow"`, `"deny"` (granted, then revoked) or `"pending"` (`needs-consent`). A scope left out is allowed, and macOS access counts as allowed. Naming a scope the package doesn't declare is an error.                                                                                                                                                                                                                                        |
 
 </details>
 
 ## Through MCP
 
-[`dupin mcp --workspace DIR`](./mcp.md#extension-tools) offers `ext_check`, `ext_run`, `ext_test` and `ext_snap` to an agent, for packages inside `DIR`.
+[`dupin mcp --workspace DIR`](./mcp.md#extension-tools) offers `ext_check`, `ext_run`, `ext_test` and `ext_render` to an agent, for packages inside `DIR`.
 
 <details>
 <summary>How they differ from the commands</summary>
 
-They are the commands above, offline: no build runs, nothing is written to the workspace (`ext_test` never updates), no grant you made applies and nothing asks macOS for access. `ext_snap` returns the PNG itself.
+They are the commands above, offline: no build runs, nothing is written to the workspace (`ext_test` never updates), no grant you made applies and nothing asks macOS for access. `ext_render` returns the PNG itself.
 
 </details>

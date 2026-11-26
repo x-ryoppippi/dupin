@@ -23,10 +23,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime};
 
+pub use call::exec_profile;
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
     Generation, GrantSource, Local, LocalStore, MemoryLocal, OsAccess, OsConsumer, OsPermission, PackageId,
-    Permit, Reconciliation, Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger,
+    Permit, Reconciliation, Request, Revision, SaveError, Scope, ScopeKey, StorageOp, StoreError, Trigger,
     WindowsAccess,
 };
 use dupin_extension_host::Services as HostServices;
@@ -59,9 +60,10 @@ impl ConsentRequest {
         self.scope.key()
     }
 
-    /// Whether granting needs a file, folder or program the user picks first.
-    pub fn needs_binding(&self) -> bool {
-        self.scope.needs_binding()
+    /// Whether granting needs a file, folder or program the user picks first, since the
+    /// package names none.
+    pub fn needs_pick(&self) -> bool {
+        self.scope.needs_pick()
     }
 }
 
@@ -189,6 +191,10 @@ struct Inner {
     /// and only [`Bridge::open_grants`] holds the store's lock for longer than a write.
     read: AtomicBool,
     files: Mutex<HashMap<PackageId, FilesTable>>,
+    /// What `files.root` reports for a binding instead of the binding itself.
+    shown_roots: Mutex<HashMap<PathBuf, String>>,
+    /// The folder a path a package declares under `~/` is in.
+    home: Mutex<Option<PathBuf>>,
     watches: watch::Watches,
     /// The image of each package's latest clipboard change, which its handler may store
     /// without the bytes crossing to the guest.
@@ -266,6 +272,8 @@ impl Bridge {
                 local: Mutex::new(local),
                 read: AtomicBool::new(read),
                 files: Mutex::default(),
+                shown_roots: Mutex::default(),
+                home: Mutex::new(std::env::home_dir()),
                 watches: watch::Watches::default(),
                 clips: Mutex::default(),
                 listener: Mutex::default(),
@@ -472,9 +480,30 @@ impl Bridge {
         self.inner.lock().asked_while_off.contains(id)
     }
 
+    /// Has `files.root` report `shown` for a scope bound to `binding`, so a fixture whose
+    /// scopes live in a scratch folder answers with the same path on every run.
+    pub fn show_root_as(&self, binding: PathBuf, shown: String) {
+        self.inner
+            .shown_roots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(binding, shown);
+    }
+
+    /// Resolves the paths packages declare under `~/` in `home` instead of the user's home
+    /// folder, as a fixture does in its scratch folder.
+    pub fn set_home(&self, home: Option<PathBuf>) {
+        *self
+            .inner
+            .home
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = home;
+    }
+
     /// Grants `scope` exactly as the user saw it for `revision`, with the path they picked
-    /// for a files or exec scope. Turning the scope on also turns the package on, since the
-    /// user chose to let it act. Nothing that failed for want of it runs again.
+    /// for a files or exec scope, or without one, the path the package declares for it.
+    /// Turning the scope on also turns the package on, since the user chose to let it act.
+    /// Nothing that failed for want of it runs again.
     pub fn allow(
         &self,
         id: &PackageId,
@@ -483,6 +512,7 @@ impl Bridge {
         binding: Option<PathBuf>,
     ) -> Result<(), SaveError> {
         let key = scope.key();
+        let binding = binding.or_else(|| Some(scope.declared_path()?.resolve(self.inner.home().as_deref()?)));
         self.change(id, |broker| {
             broker.consent(id, revision, scope, binding)?;
             if !broker.is_enabled(id) {
@@ -674,6 +704,13 @@ impl Bridge {
 }
 
 impl Inner {
+    fn home(&self) -> Option<PathBuf> {
+        self.home
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }

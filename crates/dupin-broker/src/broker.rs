@@ -644,7 +644,7 @@ impl Broker {
         if let Some(reason) = request.exceeds(declared) {
             return Decision::Deny(Denial::OutOfScope { key, reason });
         }
-        if request.needs_activation() && trigger != Trigger::Activation {
+        if request.needs_activation(declared) && trigger != Trigger::Activation {
             return Decision::Deny(Denial::NeedsActivation);
         }
         let needs = |reason| {

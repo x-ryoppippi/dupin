@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--record DIR] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin sync status|now|off [--json]\ndupin sync on|join [--folder DIR] [--passphrase-stdin] [--json]\ndupin sync remove-device ID [--json]\ndupin telemetry [status|enable|disable] [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin render VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext render DIR FIXTURE.json OUTPUT.png [--step N] [--record DIR] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin sync status|now|off [--json]\ndupin sync on|join [--folder DIR] [--passphrase-stdin] [--json]\ndupin sync remove-device ID [--json]\ndupin telemetry [status|enable|disable] [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 /// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
 fn ext_help() -> String {
     HELP.lines()
@@ -23,7 +23,7 @@ enum Action {
     SnapshotsOpen(Option<String>),
     SnapshotsClose,
     Set(String, String),
-    Snap(String, String),
+    Render(String, String),
     /// Check an extension folder.
     ExtCheck(String),
     /// Ask an extension folder for a query.
@@ -31,7 +31,7 @@ enum Action {
     /// Replay an extension folder's fixtures, rewriting their expectations with `true`.
     ExtTest(String, bool),
     /// Render a fixture's step: the folder, the fixture, the PNG and the step.
-    ExtSnap(String, String, String, Option<usize>, Option<String>),
+    ExtRender(String, String, String, Option<usize>, Option<String>),
     /// Print the revision declared grants name for an extension folder.
     ExtRevision(String),
     /// Install, list, update, remove or restore packages in the extensions folder.
@@ -142,14 +142,14 @@ fn parse(args: &[String]) -> Result<Action, String> {
         {
             Ok(Action::ExtTest(folder.to_string(), update))
         }
-        ["ext", "snap", folder, fixture, output]
+        ["ext", "render", folder, fixture, output]
             if [folder, fixture, output].iter().all(|arg| !arg.starts_with('-'))
                 && step.is_none_or(|step| step > 0)
                 && !update
                 && !build_flags
                 && workspace.is_none() =>
         {
-            Ok(Action::ExtSnap(
+            Ok(Action::ExtRender(
                 folder.to_string(),
                 fixture.to_string(),
                 output.to_string(),
@@ -195,8 +195,8 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["config", "set", base, desired] if !base.starts_with('-') && !desired.starts_with('-') => {
             Ok(Action::Set(base.to_string(), desired.to_string()))
         }
-        ["snap", view, out] if !view.starts_with('-') && !out.starts_with('-') => {
-            Ok(Action::Snap(view.to_string(), out.to_string()))
+        ["render", view, out] if !view.starts_with('-') && !out.starts_with('-') => {
+            Ok(Action::Render(view.to_string(), out.to_string()))
         }
         ["ext", "install", source] if !source.starts_with('-') => {
             Ok(Action::ExtPackages(Packages::Install(source.to_string())))
@@ -286,7 +286,7 @@ pub fn run() -> bool {
     let picked = matches!(action, Ok(Action::Pick(_)));
     let result = action.map_err(Failure::from).and_then(|action| {
         let output = match &action {
-            Action::Snap(_, output) if json => Some(output.clone()),
+            Action::Render(_, output) if json => Some(output.clone()),
             _ => None,
         };
         if let Some(output) = output {
@@ -433,14 +433,14 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             desired: serde_json::from_slice(&file(&desired, 65536)?)
                 .map_err(|_| "invalid desired configuration")?,
         })?),
-        Action::Snap(input, output) => {
+        Action::Render(input, output) => {
             let view: protocol::View = serde_json::from_slice(&file(&input, protocol::MAX_RESPONSE_BYTES)?)
                 .map_err(|_| "invalid view")?;
             let req = protocol::Request {
                 version: protocol::VERSION,
-                request_id: "snap".into(),
+                request_id: "render".into(),
                 generation: "1".into(),
-                command: "snap".into(),
+                command: "render".into(),
                 query: String::new(),
                 limit: 1,
                 state: None,
@@ -517,7 +517,8 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtRun(folder, query) => {
-            let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
+            let extension =
+                std::sync::Arc::new(crate::extensions::load_folder(std::path::Path::new(&folder))?);
             let batches = crate::extensions::answer(
                 &extension,
                 &query,
@@ -544,8 +545,8 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             crate::out::out!("{}", report.text);
             Ok(Value::Null)
         }
-        Action::ExtSnap(folder, fixture, output, step, frames) => {
-            let snapped = crate::extensions::snap(
+        Action::ExtRender(folder, fixture, output, step, frames) => {
+            let rendered = crate::extensions::render(
                 std::path::Path::new(&folder),
                 std::path::Path::new(&fixture),
                 step,
@@ -554,14 +555,14 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 &|| false,
             )?;
             if json {
-                return Ok(snapped_json(&snapped));
+                return Ok(rendered_json(&rendered));
             }
             crate::out::outln!(
                 "Rendered step {} of {fixture} to {output}: {}×{} points at {}×",
-                snapped.step,
-                snapped.width,
-                snapped.height,
-                snapped.scale
+                rendered.step,
+                rendered.width,
+                rendered.height,
+                rendered.scale
             );
             Ok(Value::Null)
         }
@@ -702,14 +703,14 @@ fn describe_telemetry(status: &Value) -> String {
     )
 }
 
-pub(crate) fn snapped_json(snapped: &crate::extensions::Snapped) -> Value {
+pub(crate) fn rendered_json(rendered: &crate::extensions::Rendered) -> Value {
     serde_json::json!({
-        "png": snapped.png,
-        "step": snapped.step,
-        "width": snapped.width,
-        "height": snapped.height,
-        "scale": snapped.scale,
-        "shown": snapped.shown,
+        "png": rendered.png,
+        "step": rendered.step,
+        "width": rendered.width,
+        "height": rendered.height,
+        "scale": rendered.scale,
+        "shown": rendered.shown,
     })
 }
 
@@ -1360,7 +1361,7 @@ mod tests {
         assert_eq!(
             parse(&args(&[
                 "ext",
-                "snap",
+                "render",
                 "greeter",
                 "fixtures/search.json",
                 "out.png",
@@ -1368,7 +1369,7 @@ mod tests {
                 "2"
             ]))
             .unwrap(),
-            Action::ExtSnap(
+            Action::ExtRender(
                 "greeter".into(),
                 "fixtures/search.json".into(),
                 "out.png".into(),
@@ -1379,7 +1380,7 @@ mod tests {
         assert_eq!(
             parse(&args(&[
                 "ext",
-                "snap",
+                "render",
                 "greeter",
                 "fixtures/search.json",
                 "out.png",
@@ -1387,7 +1388,7 @@ mod tests {
                 "frames"
             ]))
             .unwrap(),
-            Action::ExtSnap(
+            Action::ExtRender(
                 "greeter".into(),
                 "fixtures/search.json".into(),
                 "out.png".into(),
@@ -1399,7 +1400,7 @@ mod tests {
         for invalid in [
             &[
                 "ext",
-                "snap",
+                "render",
                 "greeter",
                 "fixtures/search.json",
                 "out.png",
@@ -1408,7 +1409,7 @@ mod tests {
             ][..],
             &[
                 "ext",
-                "snap",
+                "render",
                 "greeter",
                 "fixtures/search.json",
                 "out.png",
@@ -1417,13 +1418,13 @@ mod tests {
             ],
             &[
                 "ext",
-                "snap",
+                "render",
                 "greeter",
                 "fixtures/search.json",
                 "out.png",
                 "--update",
             ],
-            &["ext", "snap", "greeter", "fixtures/search.json"],
+            &["ext", "render", "greeter", "fixtures/search.json"],
             &["ext", "test", "greeter", "--step", "1"],
             &["ext", "run", "greeter", "--query", "x", "--update"],
             &["ext", "check", "greeter", "--workspace", "x"],

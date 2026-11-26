@@ -1,0 +1,1733 @@
+# What a person wants and what they type for it, for scripts/search-quality.nu: each case's
+# `query` is typed one character at a time into the main search over corpus.toml, and the
+# benchmark records where the `intent` row is after every keystroke.
+#
+# - `id`: names the case; keep it when editing the case, so a pull request is compared with
+#   main's figures for it. Lowercase letters, digits, `.` and `-`.
+# - `intent`: the row wanted. `app:<name>` (as corpus.toml lists it), `command:<id>` (the row
+#   naming a command a keyword enters), `web:<alias>` (a web search) or `system:<title>`.
+# - `query`: what a person would type until it is first, the whole of it; the benchmark finds
+#   how much of it is needed. A case records how Dupin ranks today, good or poor: a case that
+#   never reaches first is a known weakness to improve, not an error.
+# - `history`: the corpus histories it runs with; `base` (a heavy user's) by default, `[]` for
+#   a fresh install.
+# - `tags`: what the case covers, for reading the results.
+#
+# See docs/development.md, "Search quality".
+
+# Typing the start of an app's name, with a heavy user's history and on a fresh install.
+[[cases]]
+id = "prefix.safari"
+intent = "app:Safari"
+query = "safari"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.slack"
+intent = "app:Slack"
+query = "slack"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.mail"
+intent = "app:Mail"
+query = "mail"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.messages"
+intent = "app:Messages"
+query = "messages"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.music"
+intent = "app:Music"
+query = "music"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.notes"
+intent = "app:Notes"
+query = "notes"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.notion"
+intent = "app:Notion"
+query = "notion"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.notion-calendar"
+intent = "app:Notion Calendar"
+query = "notion calendar"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.photos"
+intent = "app:Photos"
+query = "photos"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.photo-booth"
+intent = "app:Photo Booth"
+query = "photo booth"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.preview"
+intent = "app:Preview"
+query = "preview"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.reminders"
+intent = "app:Reminders"
+query = "reminders"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.calendar"
+intent = "app:Calendar"
+query = "calendar"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.calculator"
+intent = "app:Calculator"
+query = "calculator"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.contacts"
+intent = "app:Contacts"
+query = "contacts"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.console"
+intent = "app:Console"
+query = "console"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.terminal"
+intent = "app:Terminal"
+query = "terminal"
+tags = ["prefix", "decay"]
+
+[[cases]]
+id = "prefix.textedit"
+intent = "app:TextEdit"
+query = "textedit"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.telegram"
+intent = "app:Telegram"
+query = "telegram"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.tailscale"
+intent = "app:Tailscale"
+query = "tailscale"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.tableplus"
+intent = "app:TablePlus"
+query = "tableplus"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.spotify"
+intent = "app:Spotify"
+query = "spotify"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.spark"
+intent = "app:Spark"
+query = "spark"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.signal"
+intent = "app:Signal"
+query = "signal"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.shortcuts"
+intent = "app:Shortcuts"
+query = "shortcuts"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.stickies"
+intent = "app:Stickies"
+query = "stickies"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.stocks"
+intent = "app:Stocks"
+query = "stocks"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.steam"
+intent = "app:Steam"
+query = "steam"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.screenshot"
+intent = "app:Screenshot"
+query = "screenshot"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.screen-sharing"
+intent = "app:Screen Sharing"
+query = "screen sharing"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.script-editor"
+intent = "app:Script Editor"
+query = "script editor"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.system-settings"
+intent = "app:System Settings"
+query = "system settings"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.system-information"
+intent = "app:System Information"
+query = "system information"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.activity-monitor"
+intent = "app:Activity Monitor"
+query = "activity monitor"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.app-store"
+intent = "app:App Store"
+query = "app store"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.appcleaner"
+intent = "app:AppCleaner"
+query = "appcleaner"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.automator"
+intent = "app:Automator"
+query = "automator"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.alfred"
+intent = "app:Alfred 6"
+query = "alfred"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.adguard"
+intent = "app:AdGuard Mini"
+query = "adguard"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.affinity"
+intent = "app:Affinity Designer 2"
+query = "affinity"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.airport"
+intent = "app:AirPort Utility"
+query = "airport"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.arc"
+intent = "app:Arc"
+query = "arc"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.arto"
+intent = "app:Arto"
+query = "arto"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.ardia"
+intent = "app:Ardia"
+query = "ardia"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.facetime"
+intent = "app:FaceTime"
+query = "facetime"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.find-my"
+intent = "app:Find My"
+query = "find my"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.final-cut"
+intent = "app:Final Cut Pro"
+query = "final cut"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.firefox"
+intent = "app:Firefox"
+query = "firefox"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.figma"
+intent = "app:Figma"
+query = "figma"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.font-book"
+intent = "app:Font Book"
+query = "font book"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.freeform"
+intent = "app:Freeform"
+query = "freeform"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.ghostty"
+intent = "app:Ghostty"
+query = "ghostty"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.garageband"
+intent = "app:GarageBand"
+query = "garageband"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.google-chrome"
+intent = "app:Google Chrome"
+query = "google chrome"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.grapher"
+intent = "app:Grapher"
+query = "grapher"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.hammerspoon"
+intent = "app:Hammerspoon"
+query = "hammerspoon"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.home"
+intent = "app:Home"
+query = "home"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.iina"
+intent = "app:IINA"
+query = "iina"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.image-capture"
+intent = "app:Image Capture"
+query = "image capture"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.imovie"
+intent = "app:iMovie"
+query = "imovie"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.iphone-mirroring"
+intent = "app:iPhone Mirroring"
+query = "iphone"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.journal"
+intent = "app:Journal"
+query = "journal"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.karabiner"
+intent = "app:Karabiner-Elements"
+query = "karabiner"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.keka"
+intent = "app:Keka"
+query = "keka"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.keychain"
+intent = "app:Keychain Access"
+query = "keychain"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.keynote"
+intent = "app:Keynote"
+query = "keynote"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.kindle"
+intent = "app:Kindle"
+query = "kindle"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.line"
+intent = "app:LINE"
+query = "line"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.linear"
+intent = "app:Linear"
+query = "linear"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.logic"
+intent = "app:Logic Pro"
+query = "logic"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.maps"
+intent = "app:Maps"
+query = "maps"
+tags = ["prefix", "web"]
+
+[[cases]]
+id = "prefix.migration"
+intent = "app:Migration Assistant"
+query = "migration"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.mission-control"
+intent = "app:Mission Control"
+query = "mission control"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.numbers"
+intent = "app:Numbers"
+query = "numbers"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.news"
+intent = "app:News"
+query = "news"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.obsidian"
+intent = "app:Obsidian"
+query = "obsidian"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.orbstack"
+intent = "app:OrbStack"
+query = "orbstack"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.pages"
+intent = "app:Pages"
+query = "pages"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.passwords"
+intent = "app:Passwords"
+query = "passwords"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.phone"
+intent = "app:Phone"
+query = "phone"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.pixelmator"
+intent = "app:Pixelmator Pro"
+query = "pixelmator"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.podcasts"
+intent = "app:Podcasts"
+query = "podcasts"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.postman"
+intent = "app:Postman"
+query = "postman"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.raycast"
+intent = "app:Raycast"
+query = "raycast"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.rectangle"
+intent = "app:Rectangle"
+query = "rectangle"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.siri"
+intent = "app:Siri"
+query = "siri"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.sublime"
+intent = "app:Sublime Text"
+query = "sublime"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.things"
+intent = "app:Things 3"
+query = "things"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.time-machine"
+intent = "app:Time Machine"
+query = "time machine"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.tips"
+intent = "app:Tips"
+query = "tips"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.transmit"
+intent = "app:Transmit 5"
+query = "transmit"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.tv"
+intent = "app:TV"
+query = "tv"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.unarchiver"
+intent = "app:The Unarchiver"
+query = "unarchiver"
+tags = ["word-start"]
+
+[[cases]]
+id = "prefix.vlc"
+intent = "app:VLC"
+query = "vlc"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.voice-memos"
+intent = "app:Voice Memos"
+query = "voice memos"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.warp"
+intent = "app:Warp"
+query = "warp"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.weather"
+intent = "app:Weather"
+query = "weather"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.whatsapp"
+intent = "app:WhatsApp"
+query = "whatsapp"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.wireshark"
+intent = "app:Wireshark"
+query = "wireshark"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.xcode"
+intent = "app:Xcode"
+query = "xcode"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.zed"
+intent = "app:Zed"
+query = "zed"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.zoom"
+intent = "app:zoom.us"
+query = "zoom"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.zotero"
+intent = "app:Zotero"
+query = "zotero"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.1password"
+intent = "app:1Password"
+query = "1password"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.1password-safari"
+intent = "app:1Password for Safari"
+query = "1password for safari"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.safari-preview"
+intent = "app:Safari Technology Preview"
+query = "safari tech"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.microsoft-word"
+intent = "app:Microsoft Word"
+query = "microsoft word"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.chatgpt"
+intent = "app:ChatGPT"
+query = "chatgpt"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.claude"
+intent = "app:Claude"
+query = "claude"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.cursor"
+intent = "app:Cursor"
+query = "cursor"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.discord"
+intent = "app:Discord"
+query = "discord"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.docker"
+intent = "app:Docker"
+query = "docker"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.deepl"
+intent = "app:DeepL"
+query = "deepl"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.disk-utility"
+intent = "app:Disk Utility"
+query = "disk utility"
+tags = ["prefix"]
+
+[[cases]]
+id = "prefix.dictionary-app"
+intent = "app:Dictionary"
+query = "dictionary"
+tags = ["prefix", "keyword"]
+
+# The same, on a fresh install with no history.
+[[cases]]
+id = "fresh.safari"
+intent = "app:Safari"
+query = "safari"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.slack"
+intent = "app:Slack"
+query = "slack"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.mail"
+intent = "app:Mail"
+query = "mail"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.music"
+intent = "app:Music"
+query = "music"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.notes"
+intent = "app:Notes"
+query = "notes"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.notion"
+intent = "app:Notion"
+query = "notion"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.calendar"
+intent = "app:Calendar"
+query = "calendar"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.terminal"
+intent = "app:Terminal"
+query = "terminal"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.spotify"
+intent = "app:Spotify"
+query = "spotify"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.spark"
+intent = "app:Spark"
+query = "spark"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.arc"
+intent = "app:Arc"
+query = "arc"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.ardia"
+intent = "app:Ardia"
+query = "ardia"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.arto"
+intent = "app:Arto"
+query = "arto"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.photos"
+intent = "app:Photos"
+query = "photos"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.preview"
+intent = "app:Preview"
+query = "preview"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.messages"
+intent = "app:Messages"
+query = "messages"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.maps"
+intent = "app:Maps"
+query = "maps"
+history = []
+tags = ["prefix", "fresh", "web"]
+
+[[cases]]
+id = "fresh.xcode"
+intent = "app:Xcode"
+query = "xcode"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.firefox"
+intent = "app:Firefox"
+query = "firefox"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.system-settings"
+intent = "app:System Settings"
+query = "system settings"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.activity-monitor"
+intent = "app:Activity Monitor"
+query = "activity monitor"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.app-store"
+intent = "app:App Store"
+query = "app store"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.appcleaner"
+intent = "app:AppCleaner"
+query = "appcleaner"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.visual-studio-code"
+intent = "app:Visual Studio Code"
+query = "visual studio code"
+history = []
+tags = ["prefix", "fresh"]
+
+# A later word of the name, typed from its start.
+[[cases]]
+id = "word.facetime-time"
+intent = "app:FaceTime"
+query = "time"
+history = []
+tags = ["word-start", "fresh"]
+
+[[cases]]
+id = "word.monitor"
+intent = "app:Activity Monitor"
+query = "monitor"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.studio"
+intent = "app:Visual Studio Code"
+query = "studio"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.player"
+intent = "app:QuickTime Player"
+query = "player"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.chrome"
+intent = "app:Google Chrome"
+query = "chrome"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.word"
+intent = "app:Microsoft Word"
+query = "word"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.excel"
+intent = "app:Microsoft Excel"
+query = "excel"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.outlook"
+intent = "app:Microsoft Outlook"
+query = "outlook"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.powerpoint"
+intent = "app:Microsoft PowerPoint"
+query = "powerpoint"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.teams"
+intent = "app:Microsoft Teams"
+query = "teams"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.memos"
+intent = "app:Voice Memos"
+query = "memos"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.booth"
+intent = "app:Photo Booth"
+query = "booth"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.mirroring"
+intent = "app:iPhone Mirroring"
+query = "mirroring"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.cleanshot"
+intent = "app:CleanShot X"
+query = "cleanshot"
+tags = ["prefix"]
+
+[[cases]]
+id = "word.snitch"
+intent = "app:Little Snitch"
+query = "snitch"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.designer"
+intent = "app:Affinity Designer 2"
+query = "designer"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.machine"
+intent = "app:Time Machine"
+query = "machine"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.capture"
+intent = "app:Image Capture"
+query = "capture"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.playground"
+intent = "app:Image Playground"
+query = "playground"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.access"
+intent = "app:Keychain Access"
+query = "access"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.disk"
+intent = "app:Disk Utility"
+query = "disk"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.midi"
+intent = "app:Audio MIDI Setup"
+query = "midi"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.print"
+intent = "app:Print Center"
+query = "print"
+tags = ["prefix"]
+
+[[cases]]
+id = "word.color-meter"
+intent = "app:Digital Color Meter"
+query = "color meter"
+tags = ["word-start"]
+
+[[cases]]
+id = "word.browser"
+intent = "app:Brave Browser"
+query = "brave"
+tags = ["prefix"]
+
+[[cases]]
+id = "word.options"
+intent = "app:Logi Options+"
+query = "logi"
+tags = ["prefix"]
+
+[[cases]]
+id = "word.touch"
+intent = "app:BetterTouchTool"
+query = "touch"
+tags = ["word-start"]
+
+# Initials and other abbreviations. Recorded as Dupin ranks them today.
+[[cases]]
+id = "initials.vsc"
+intent = "app:Visual Studio Code"
+query = "vsc"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.vscode"
+intent = "app:Visual Studio Code"
+query = "vscode"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.am"
+intent = "app:Activity Monitor"
+query = "am"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.ss"
+intent = "app:System Settings"
+query = "ss"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.qtp"
+intent = "app:QuickTime Player"
+query = "qtp"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.gc"
+intent = "app:Google Chrome"
+query = "gc"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.du"
+intent = "app:Disk Utility"
+query = "du"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.btt"
+intent = "app:BetterTouchTool"
+query = "btt"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.fcp"
+intent = "app:Final Cut Pro"
+query = "fcp"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.ka"
+intent = "app:Keychain Access"
+query = "ka"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.tm"
+intent = "app:Time Machine"
+query = "tm"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.pb"
+intent = "app:Photo Booth"
+query = "pb"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.ms-word"
+intent = "app:Microsoft Word"
+query = "msword"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.1p"
+intent = "app:1Password"
+query = "1p"
+history = []
+tags = ["initials", "fresh"]
+
+# Names Spotlight knows an app by besides its own.
+[[cases]]
+id = "alternate.system-preferences"
+intent = "app:System Settings"
+query = "system preferences"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.preferences"
+intent = "app:System Settings"
+query = "preferences"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.settings"
+intent = "app:System Settings"
+query = "settings"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.prefs"
+intent = "app:System Settings"
+query = "prefs"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.apple-radio"
+intent = "app:Music"
+query = "apple radio"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.radio"
+intent = "app:Music"
+query = "radio"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.apple-music"
+intent = "app:Music"
+query = "apple music"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.apple-tv"
+intent = "app:TV"
+query = "apple tv"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.ibooks"
+intent = "app:Books"
+query = "ibooks"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.find-my-iphone"
+intent = "app:Find My"
+query = "find my iphone"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.quicktime"
+intent = "app:QuickTime Player"
+query = "quicktime"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.grab"
+intent = "app:Screenshot"
+query = "grab"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.applescript"
+intent = "app:Script Editor"
+query = "applescript"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.codex"
+intent = "app:ChatGPT"
+query = "codex"
+tags = ["alternate-name"]
+
+[[cases]]
+id = "alternate.code"
+intent = "app:Visual Studio Code"
+query = "code"
+tags = ["alternate-name", "history"]
+
+[[cases]]
+id = "alternate.code-fresh"
+intent = "app:Visual Studio Code"
+query = "code"
+history = []
+tags = ["alternate-name", "fresh"]
+
+[[cases]]
+id = "alternate.zoom-fresh"
+intent = "app:zoom.us"
+query = "zoom"
+history = []
+tags = ["alternate-name", "fresh"]
+
+# Rows that name a command a keyword enters, a web search, or an aliased app.
+[[cases]]
+id = "keyword.cal"
+intent = "command:calendar.events"
+query = "cal"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.calc"
+intent = "command:calculator.evaluate"
+query = "calc"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.d"
+intent = "command:dictionary.lookup"
+query = "d"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.define"
+intent = "command:dictionary.lookup"
+query = "define"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.clip"
+intent = "command:clipboard.history"
+query = "clip"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.emoji"
+intent = "command:extension.emoji"
+query = "emoji"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.snap"
+intent = "command:snapshots.list"
+query = "snap"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.snip"
+intent = "command:snippets.search"
+query = "snip"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.window"
+intent = "command:extension.window-management"
+query = "window"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.repo"
+intent = "command:extension.repo"
+query = "repo"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.help"
+intent = "command:extension.dupin"
+query = "help"
+tags = ["keyword"]
+
+[[cases]]
+id = "keyword.list-snapshots"
+intent = "command:snapshots.list"
+query = "?"
+tags = ["keyword", "list"]
+
+[[cases]]
+id = "keyword.list-calendar"
+intent = "command:calendar.events"
+query = "?"
+tags = ["keyword", "list"]
+
+[[cases]]
+id = "keyword.cal-fresh"
+intent = "command:calendar.events"
+query = "cal"
+history = []
+tags = ["keyword", "fresh"]
+
+[[cases]]
+id = "keyword.calendar-app-over-cal"
+intent = "app:Calendar"
+query = "cale"
+tags = ["keyword", "prefix", "history"]
+
+[[cases]]
+id = "keyword.calculator-app-over-calc"
+intent = "app:Calculator"
+query = "calcu"
+tags = ["keyword", "prefix"]
+
+[[cases]]
+id = "alias.vs"
+intent = "app:Visual Studio Code"
+query = "vs"
+tags = ["alias"]
+
+[[cases]]
+id = "alias.term"
+intent = "app:Ghostty"
+query = "term"
+tags = ["alias"]
+
+[[cases]]
+id = "alias.ob"
+intent = "app:Obsidian"
+query = "ob"
+tags = ["alias"]
+
+[[cases]]
+id = "alias.terminal-past-term"
+intent = "app:Terminal"
+query = "termi"
+tags = ["alias", "prefix", "decay"]
+
+[[cases]]
+id = "web.g"
+intent = "web:g"
+query = "g"
+tags = ["web"]
+
+[[cases]]
+id = "web.gh"
+intent = "web:gh"
+query = "gh"
+tags = ["web"]
+
+[[cases]]
+id = "web.maps"
+intent = "web:maps"
+query = "maps"
+tags = ["web"]
+
+[[cases]]
+id = "web.yt"
+intent = "web:yt"
+query = "yt"
+tags = ["web"]
+
+[[cases]]
+id = "web.ddg"
+intent = "web:ddg"
+query = "ddg"
+tags = ["web"]
+
+[[cases]]
+id = "web.w"
+intent = "web:w"
+query = "w"
+tags = ["web"]
+
+[[cases]]
+id = "web.npm"
+intent = "web:npm"
+query = "npm"
+tags = ["web"]
+
+[[cases]]
+id = "web.crates"
+intent = "web:crates"
+query = "crates"
+tags = ["web"]
+
+[[cases]]
+id = "web.mdn"
+intent = "web:mdn"
+query = "mdn"
+tags = ["web"]
+
+[[cases]]
+id = "web.az"
+intent = "web:az"
+query = "az"
+tags = ["web"]
+
+# System commands, which follow the apps.
+[[cases]]
+id = "system.lock-screen"
+intent = "system:Lock Screen"
+query = "lock screen"
+tags = ["system"]
+
+[[cases]]
+id = "system.sleep"
+intent = "system:Sleep"
+query = "sleep"
+tags = ["system"]
+
+[[cases]]
+id = "system.sleep-displays"
+intent = "system:Sleep Displays"
+query = "sleep displays"
+tags = ["system"]
+
+[[cases]]
+id = "system.dark-mode"
+intent = "system:Toggle Dark Mode"
+query = "dark mode"
+tags = ["system", "word-start"]
+
+# What the history learns: the apps a heavy user opens with a few letters.
+[[cases]]
+id = "history.sl"
+intent = "app:Slack"
+query = "sl"
+tags = ["history"]
+
+[[cases]]
+id = "history.saf"
+intent = "app:Safari"
+query = "saf"
+tags = ["history"]
+
+[[cases]]
+id = "history.gho"
+intent = "app:Ghostty"
+query = "gho"
+tags = ["history"]
+
+[[cases]]
+id = "history.mes"
+intent = "app:Messages"
+query = "mes"
+tags = ["history"]
+
+[[cases]]
+id = "history.sp"
+intent = "app:Spotify"
+query = "sp"
+tags = ["history"]
+
+[[cases]]
+id = "history.spa"
+intent = "app:Spark"
+query = "spa"
+tags = ["history"]
+
+[[cases]]
+id = "history.no"
+intent = "app:Notion"
+query = "no"
+tags = ["history"]
+
+[[cases]]
+id = "history.note"
+intent = "app:Notes"
+query = "note"
+tags = ["history"]
+
+[[cases]]
+id = "history.cla"
+intent = "app:Claude"
+query = "cla"
+tags = ["history"]
+
+[[cases]]
+id = "history.chat"
+intent = "app:ChatGPT"
+query = "chat"
+tags = ["history"]
+
+[[cases]]
+id = "history.lin"
+intent = "app:Linear"
+query = "lin"
+tags = ["history"]
+
+[[cases]]
+id = "history.art"
+intent = "app:Arto"
+query = "art"
+tags = ["history"]
+
+[[cases]]
+id = "history.1pa"
+intent = "app:1Password"
+query = "1pa"
+tags = ["history"]
+
+[[cases]]
+id = "history.mu"
+intent = "app:Music"
+query = "mu"
+tags = ["history"]
+
+[[cases]]
+id = "history.fig"
+intent = "app:Figma"
+query = "fig"
+tags = ["history"]
+
+[[cases]]
+id = "history.dis"
+intent = "app:Discord"
+query = "dis"
+tags = ["history"]
+
+[[cases]]
+id = "history.zo"
+intent = "app:zoom.us"
+query = "zo"
+tags = ["history"]
+
+[[cases]]
+id = "history.sys"
+intent = "app:System Settings"
+query = "sys"
+tags = ["history"]
+
+[[cases]]
+id = "history.act"
+intent = "app:Activity Monitor"
+query = "act"
+tags = ["history"]
+
+[[cases]]
+id = "history.pre"
+intent = "app:Preview"
+query = "pre"
+tags = ["history"]
+
+[[cases]]
+id = "history.pho"
+intent = "app:Photos"
+query = "pho"
+tags = ["history"]
+
+[[cases]]
+id = "history.xc"
+intent = "app:Xcode"
+query = "xc"
+tags = ["history"]
+
+[[cases]]
+id = "history.chr"
+intent = "app:Google Chrome"
+query = "chr"
+tags = ["history"]
+
+[[cases]]
+id = "history.s-safari"
+intent = "app:Safari"
+query = "s"
+tags = ["history"]
+
+[[cases]]
+id = "history.s-slack"
+intent = "app:Slack"
+query = "s"
+tags = ["history"]
+
+[[cases]]
+id = "history.no-notes"
+intent = "app:Notes"
+query = "notes"
+tags = ["history", "prefix"]
+
+[[cases]]
+id = "history.sp-spark"
+intent = "app:Spark"
+query = "spar"
+tags = ["history", "prefix"]
+
+[[cases]]
+id = "history.ma-mail"
+intent = "app:Mail"
+query = "ma"
+tags = ["history"]
+
+[[cases]]
+id = "history.ma-maps"
+intent = "app:Maps"
+query = "map"
+tags = ["history", "prefix"]
+
+[[cases]]
+id = "history.longer-query"
+intent = "app:Safari Technology Preview"
+query = "saf"
+history = ["base", "longer-query"]
+tags = ["history"]
+
+[[cases]]
+id = "history.same-query"
+intent = "app:Microsoft Teams"
+query = "te"
+history = ["base", "same-query"]
+tags = ["history"]
+
+[[cases]]
+id = "history.same-query-telegram"
+intent = "app:Telegram"
+query = "tele"
+history = ["base", "same-query"]
+tags = ["history", "prefix"]
+
+# Habits that fade: an old pick or a dropped app gives way to the new one.
+[[cases]]
+id = "decay.new-habit"
+intent = "app:Spotify"
+query = "s"
+history = ["old-habit", "new-habit"]
+tags = ["decay", "history"]
+
+[[cases]]
+id = "decay.old-habit"
+intent = "app:Safari"
+query = "s"
+history = ["old-habit"]
+tags = ["decay", "history"]
+
+[[cases]]
+id = "decay.stale-pick"
+intent = "app:Arc"
+query = "ar"
+history = ["stale-pick"]
+tags = ["decay"]
+
+[[cases]]
+id = "decay.wrong-pick-arc"
+intent = "app:Arc"
+query = "arc"
+history = ["recent-pick"]
+tags = ["history", "prefix"]
+
+[[cases]]
+id = "decay.old-same-query-teams"
+intent = "app:Microsoft Teams"
+query = "teams"
+history = ["old-same-query"]
+tags = ["decay", "word-start"]
+
+# #300: Ardia missing for `ar` because usage outranked the prefix match.
+[[cases]]
+id = "issue-300.ardia"
+intent = "app:Ardia"
+query = "ardia"
+history = ["issue-300"]
+tags = ["issue-300", "history", "prefix"]
+
+[[cases]]
+id = "issue-300.arto"
+intent = "app:Arto"
+query = "arto"
+history = ["issue-300"]
+tags = ["issue-300", "history", "prefix"]
+
+[[cases]]
+id = "issue-300.arc"
+intent = "app:Arc"
+query = "arc"
+history = ["issue-300"]
+tags = ["issue-300", "history", "prefix"]
+
+[[cases]]
+id = "issue-300.music-radio"
+intent = "app:Music"
+query = "ardi"
+history = ["issue-300"]
+tags = ["issue-300", "history"]
+
+[[cases]]
+id = "issue-300.appcleaner"
+intent = "app:AppCleaner"
+query = "appcleaner"
+history = ["issue-300"]
+tags = ["issue-300", "history", "prefix"]
+
+[[cases]]
+id = "issue-300.alfred"
+intent = "app:Alfred 6"
+query = "alfred"
+history = ["issue-300"]
+tags = ["issue-300", "history", "prefix"]
+
+[[cases]]
+id = "issue-300.activity-monitor"
+intent = "app:Activity Monitor"
+query = "activity"
+history = ["issue-300"]
+tags = ["issue-300", "history", "prefix"]

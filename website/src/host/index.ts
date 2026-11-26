@@ -11,6 +11,7 @@ import Docs from '../pages/Docs.svelte';
 import NotFound from '../pages/NotFound.svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
 import { downloadMarkdown, homeMarkdown } from '../markdown.ts';
+import { docComponents } from '../docs/components.ts';
 import { keepSidebarScroll } from '../docs/sidebar-scroll.ts';
 import { imageRoute, imageTypes, linkedImages } from '../docs/links.ts';
 import {
@@ -53,17 +54,22 @@ const cardRoute = (pathname: string, card: OgCard): OxContentCustomHostRoute => 
 // What a page needs of its render, which a not-found page in dev has too.
 type PageContext = Pick<OxContentCustomHostRenderContext, 'mode' | 'assets'>;
 
-function assetHead(context: PageContext): string {
+// The Japanese display font is preloaded only where a page marks Japanese text, so the rest of
+// the site doesn't fetch it; its @font-face still loads lazily by unicode-range.
+function assetHead(context: PageContext, japanese: boolean): string {
+	const selfHostedAssets = japanese
+		? context.assets.selfHosted
+		: { ...context.assets.selfHosted, preloads: [] };
 	return context.mode === 'serve'
 		? context.assets.document({
 				sharedStyles: ['/src/styles/site.css', '/src/styles/docs.css'],
 				clientEntries: ['/src/client/index.ts'],
-				selfHostedAssets: context.assets.selfHosted,
+				selfHostedAssets,
 			}).headHtml
 		: context.assets.document({
 				clientEntries: ['index.html'],
 				crossorigin: true,
-				selfHostedAssets: context.assets.selfHosted,
+				selfHostedAssets,
 			}).headHtml;
 }
 
@@ -162,7 +168,7 @@ function renderDocument(
 <link rel="alternate" type="text/markdown" href="${page.markdownPath ?? (page.pathname === '/' ? '/index.md' : `${page.pathname.replace(/\/$/, '')}.md`)}">
 <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
 <script type="application/ld+json">${json(structuredData)}</script>
-${assetHead(context)}
+${assetHead(context, page.markdown.includes('lang="ja"'))}
 ${rendered.head}
 </head>
 <body>
@@ -219,7 +225,8 @@ async function docsRoutes(root: string): Promise<OxContentCustomHostRoute[]> {
 			inputPath,
 			source,
 			async render(context) {
-				const { html } = await context.markdown.render({ source, documentPath: inputPath });
+				const rendered = await context.markdown.render({ source, documentPath: inputPath });
+				const html = docComponents(rendered.html);
 				const title = titles.get(page) ?? siteName;
 				return {
 					...renderDocument(

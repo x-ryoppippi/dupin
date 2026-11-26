@@ -4,7 +4,7 @@ use driver.nu [
     log-count
     poll
     press
-    snap
+    evidence
     type-text
     wait-for-log
     wait-frontmost
@@ -39,7 +39,7 @@ export def settings-stage [out: path] {
         | any {|window| $window.title == 'Dupin Settings' and $window.is_focused }
     ) }
     poll $out settings-window $settings list-windows --app $DUPIN
-    snap $out settings-created
+    evidence $out settings-created
     (poll
         $out
         acknowledgements
@@ -83,7 +83,7 @@ export def settings-stage [out: path] {
         --exact
         --first
     )
-    snap $out settings-general
+    evidence $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page
     # changes, so find the next one afresh.
     let search = poll $out search $page find --app $DUPIN --name Search --exact --first
@@ -100,7 +100,7 @@ export def settings-stage [out: path] {
         --exact
         --first
     )
-    snap $out settings-search
+    evidence $out settings-search
     let appearance = (poll
         $out
         appearance
@@ -127,7 +127,7 @@ export def settings-stage [out: path] {
         --first
     )
     poll $out settings-window-again $settings list-windows --app $DUPIN
-    snap $out settings-appearance
+    evidence $out settings-appearance
 
     press $out close-settings cmd+w | ignore
     press $out settings-search-hotkey alt+space | ignore
@@ -173,5 +173,5 @@ export def settings-stage [out: path] {
     wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
     wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
     poll $out settings-from-result $settings list-windows --app $DUPIN
-    snap $out settings-from-result
+    evidence $out settings-from-result
 }

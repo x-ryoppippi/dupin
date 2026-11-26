@@ -281,6 +281,7 @@ fn files_scopes_are_bound_to_the_picked_root_and_stay_inside_it() {
         name: name("other"),
         kind: FilesKind::Directory,
         access: [FilesAccess::Read].into(),
+        path: None,
     };
     assert_eq!(
         broker.consent(&package, &rev(R1), &other, Some("/x".into())),
@@ -1594,4 +1595,87 @@ fn writing_snippets_needs_its_own_grant_and_an_action_the_user_chose() {
         denial(check(&broker, &package, &write, Trigger::Activation)),
         Denial::Revoked(ScopeKey::Snippets)
     );
+}
+
+#[test]
+fn only_a_profile_declared_for_the_background_runs_without_an_activation() {
+    let (mut broker, package) = enabled(caps(json!({
+        "exec": {
+            "status": { "program": "/usr/bin/git", "args": ["status"], "background": true },
+            "push": { "program": "/usr/bin/git", "args": ["push"] }
+        }
+    })));
+    for profile in ["status", "push"] {
+        broker
+            .approve(
+                &package,
+                &key(&format!("exec:{profile}")),
+                Some(PathBuf::from("/usr/bin/git")),
+            )
+            .unwrap();
+    }
+    let run = |profile: &str| Request::Exec {
+        profile: name(profile),
+    };
+    for trigger in [Trigger::Query, Trigger::Background, Trigger::Activation] {
+        let permit = permit(check(&broker, &package, &run("status"), trigger));
+        assert_eq!(permit.binding(), Some(std::path::Path::new("/usr/bin/git")));
+    }
+    for trigger in [Trigger::Query, Trigger::Background] {
+        assert_eq!(
+            denial(check(&broker, &package, &run("push"), trigger)),
+            Denial::NeedsActivation
+        );
+    }
+}
+
+#[test]
+fn running_in_the_background_widens_a_profile_and_asks_again() {
+    let profile = |background: bool| {
+        caps(json!({
+            "exec": { "status": { "program": "/usr/bin/git", "args": ["status"], "background": background } }
+        }))
+    };
+    let (mut broker, package) = enabled(profile(false));
+    broker
+        .approve(&package, &key("exec:status"), Some(PathBuf::from("/usr/bin/git")))
+        .unwrap();
+    let _ = broker.install(package.clone(), rev(R2), profile(true));
+    let run = Request::Exec {
+        profile: name("status"),
+    };
+    assert!(matches!(
+        broker.check(&package, &rev(R2), &run, Trigger::Activation),
+        Decision::NeedsConsent(_)
+    ));
+}
+
+#[test]
+fn a_declared_path_is_bound_like_a_picked_one_and_not_granted_by_bundling() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("bundled:repo");
+    let capabilities = caps(json!({
+        "files": { "src": { "kind": "directory", "access": ["list"], "path": "~/src" } },
+        "exec": { "git": { "program": "/usr/bin/git", "args": ["status"], "background": true } }
+    }));
+    let _ = broker.install(package.clone(), rev(R1), capabilities);
+    broker.set_bundled(package.clone(), rev(R1), true);
+    let list = Request::Files {
+        scope: name("src"),
+        access: FilesAccess::List,
+        path: String::new(),
+    };
+    assert!(matches!(
+        check(&broker, &package, &list, Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
+    assert_eq!(
+        broker.approve(&package, &key("files:src"), None),
+        Err(BrokerError::BindingRequired(key("files:src")))
+    );
+    broker
+        .approve(&package, &key("files:src"), Some(PathBuf::from("/Users/me/src")))
+        .unwrap();
+    let permit = permit(check(&broker, &package, &list, Trigger::Query));
+    assert_eq!(permit.binding(), Some(std::path::Path::new("/Users/me/src")));
 }

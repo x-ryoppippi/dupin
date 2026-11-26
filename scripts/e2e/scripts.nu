@@ -4,7 +4,7 @@ use driver.nu [
     log-count
     poll
     press
-    snap
+    evidence
     type-text
     wait-condition
     wait-for-log
@@ -126,7 +126,7 @@ export def scripts-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out scripts-arguments
+        evidence $out scripts-arguments
         press $out scripts-submit return | ignore
         (poll
             $out
@@ -158,7 +158,7 @@ export def scripts-stage [out: path] {
             'Finished ·'
             --first
         ) | ignore
-        snap $out scripts-inline
+        evidence $out scripts-inline
         let closed = log-count $log 'dupin-trace: panel closed '
         'Dupin E2E clipboard baseline' | ^pbcopy
         press $out scripts-inline-copy return | ignore
@@ -201,7 +201,7 @@ export def scripts-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out scripts-streaming
+        evidence $out scripts-streaming
         press $out scripts-cancel cmd+. | ignore
         (poll
             $out
@@ -216,7 +216,7 @@ export def scripts-stage [out: path] {
             --first
         ) | ignore
         wait-condition 'script fixture process group exit' { script-processes-stopped $out }
-        snap $out scripts-cancelled
+        evidence $out scripts-cancelled
         let echo = (poll
             $out
             scripts-echo-in-history
@@ -275,10 +275,10 @@ export def scripts-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out scripts-failure
+        evidence $out scripts-failure
         press $out scripts-failure-close cmd+w | ignore
     } catch {|failure|
-        try { snap $out scripts-failure-evidence }
+        try { evidence $out scripts-failure-evidence }
         error make $failure
     }
 }

@@ -1,6 +1,6 @@
 //! Fixtures: JSON files in a package's `fixtures/` folder that replay input against the package
 //! and state what it should answer. `dupin ext test` runs every one through the extension host;
-//! `dupin ext snap` renders one step's panel. A fixture fixes everything a run could otherwise
+//! `dupin ext render` renders one step's panel. A fixture fixes everything a run could otherwise
 //! take from the machine: the clock, `Math.random`'s seed, the locale, the time zone, the theme
 //! and the window. Each host service an extension asks for is answered from the fixture's
 //! `replies`, never from the machine.
@@ -237,6 +237,10 @@ pub struct Replies {
     /// moving a window fails as `unavailable`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub windows: Option<WindowsReply>,
+    /// The app in front and the file it showed when the panel opened, in the context service's
+    /// shapes. Left out, reading them fails as `unavailable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextReply>,
     /// Your decision on each declared scope, named as grant files name it, such as
     /// `http:https://api.github.com` or `clipboard:read`. A scope left out is allowed.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -310,6 +314,15 @@ pub struct WindowsReply {
     /// The focused window and its app in the windows service's shape, which a move updates,
     /// or `null` for none.
     pub focused: Value,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ContextReply {
+    /// `{ name, bundleId, pid }`, or `null` (as left out) for none.
+    pub frontmost: Value,
+    /// `{ path }`, or `null` (as left out) for none.
+    pub document: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

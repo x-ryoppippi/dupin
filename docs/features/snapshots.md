@@ -64,6 +64,8 @@ dupin snapshots close          # hide it
 
 The list returns the ID, saved time, mode, title and query, and flags storage problems or truncation. These commands leave the saved snapshots and usage-ranking history intact. Opening dismisses the launcher and may retain the completed query for in-memory recall. An active picker blocks opening.
 
+The [MCP server](./mcp.md) offers read-only `list_snapshots`, `read_snapshot` and `open_snapshot` tools over the same control socket, so an agent you connected can read what you saved.
+
 </details>
 
 <details>

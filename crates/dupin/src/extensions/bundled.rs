@@ -10,8 +10,10 @@ use dupin_js_runtime::Diagnostic;
 include!(concat!(env!("OUT_DIR"), "/bundled_seals.rs"));
 
 /// Bundled packages, by `name`, that stay off until the user turns them on in Settings →
-/// Extensions, since not everyone wants what they do: moving other apps' windows.
-pub const OFF_UNTIL_TURNED_ON: &[&str] = &["window-management"];
+/// Extensions, since not everyone wants what they do: moving other apps' windows, running Git
+/// over the repositories in their folders, reaching other machines over ssh, or running `ps`,
+/// `lsof` and `kill` to list and stop processes.
+pub const OFF_UNTIL_TURNED_ON: &[&str] = &["remote", "repo", "window-management", "proc", "port", "agent"];
 
 /// The content hash of each bundled package folder, by folder name, as the build found them.
 #[derive(Clone, Debug)]

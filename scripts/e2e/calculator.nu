@@ -5,7 +5,7 @@ use driver.nu [
     mentions
     poll
     press
-    snap
+    evidence
     type-text
     wait-for-log
 ]
@@ -17,7 +17,7 @@ export def calculator-stage [out: path] {
     # panel never activates, so it is key but not main. Press keys as a person would, from one
     # process: one `agent-desktop press` per key lost keys before they reached Dupin.
     type-text $out type-calculator calculator | ignore
-    snap $out typed
+    evidence $out typed
     # Fuzzy matching would still find Calculator from a query missing keys, so check every key
     # reached the field.
     let typed = {|r| $r.ok and $r.data?.match?.value? == 'calculator' }
@@ -27,12 +27,12 @@ export def calculator-stage [out: path] {
     let row = 'Calculator /System/Applications'
     let found = {|r| has-match $r }
     poll $out result $found find --app $DUPIN --name $row --exact --first
-    snap $out results
+    evidence $out results
 
     press $out preview-shortcut cmd+y | ignore
     # Quick Look is visible in recordings but absent from Dupin's AX window list.
     wait-for-log $log 'dupin-trace: quick-look shown visible=true key=true'
-    snap $out quick-look
+    evidence $out quick-look
     let left_before = log-count $log 'dupin-trace: key Left '
     let closed_before = log-count $log 'dupin-trace: quick-look picker input visible=false key=false'
     press $out close-preview escape | ignore
@@ -52,7 +52,7 @@ export def calculator-stage [out: path] {
     wait-for-log --after $left_before $log 'dupin-trace: key Left '
     wait-for-log --after $closed_before $log 'dupin-trace: quick-look picker input visible=false key=false'
     press $out quick-look-right right | ignore
-    snap $out quick-look-restored
+    evidence $out quick-look-restored
 
     let before = poll $out before-return {|r| $r.ok } list-apps
     if (mentions $before Calculator) {
@@ -62,5 +62,5 @@ export def calculator-stage [out: path] {
     }
     press $out press-return return | ignore
     poll --tries 15 $out opened {|r| $r.ok and (mentions $r Calculator) } list-apps
-    snap $out opened
+    evidence $out opened
 }

@@ -7,7 +7,7 @@ use driver.nu [
     log-count
     poll
     press
-    snap
+    evidence
     type-text
     wait-for-log
 ]
@@ -60,7 +60,7 @@ export def snapshot-stage [out: path] {
         assert-sealed $data 'Calculator /System/Applications'
         let archive_before = dir-proof $archive
         $archive_before | to json | save --force ($out | path join snapshots-archive-after-save.json)
-        snap $out snapshots-saved
+        evidence $out snapshots-saved
 
         let closed = log-count $log 'dupin-trace: panel closed '
         press $out snapshots-open cmd+shift+o | ignore
@@ -96,7 +96,7 @@ export def snapshot-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out snapshots-opened
+        evidence $out snapshots-opened
 
         type-text $out snapshots-type-filter zzz | ignore
         (poll
@@ -125,7 +125,7 @@ export def snapshot-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out snapshots-filtered
+        evidence $out snapshots-filtered
         press $out snapshots-clear-filter cmd+backspace | ignore
         (poll
             $out
@@ -154,7 +154,7 @@ export def snapshot-stage [out: path] {
             --first
         ) | ignore
         if (dir-proof $archive) != $archive_before { error make {msg: 'Editing snapshot search changed the archive'} }
-        snap $out snapshots-search-cleared
+        evidence $out snapshots-search-cleared
 
         let delete = (poll
             $out
@@ -184,7 +184,7 @@ export def snapshot-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out snapshots-confirm
+        evidence $out snapshots-confirm
         if not (open --raw ($out | path join snapshots-confirm-snapshot.json) | str contains $prompt) {
             error make {msg: 'Snapshot tree omitted the visible delete confirmation'}
         }
@@ -258,12 +258,12 @@ export def snapshot-stage [out: path] {
             textfield
             --first
         ) | ignore
-        snap $out snapshots-resummoned
+        evidence $out snapshots-resummoned
         let after = file-proof $history
         $after | to json | save --force ($out | path join snapshots-history-after.json)
         if $after != $before { error make {msg: 'Snapshot flow changed launch history'} }
     } catch {|failure|
-        try { snap $out snapshots-failure }
+        try { evidence $out snapshots-failure }
         try { cp $log ($out | path join snapshots-failure.log) }
         error make $failure
     }

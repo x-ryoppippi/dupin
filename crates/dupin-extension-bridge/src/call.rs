@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use dupin_broker::{
-    ClipboardAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey, ScopeName, StorageOp,
-    WindowsAccess,
+    ClipboardAccess, ConsentState, ContextAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope,
+    ScopeKey, ScopeName, StorageOp, WindowsAccess,
 };
 use dupin_extension_http as http;
 use dupin_host_services::{calendar, exec, files, windows};
@@ -21,6 +21,8 @@ use crate::services::Failure;
 use crate::{Session, failure_for, storage};
 
 const MAX_URL_BYTES: usize = 8 * 1024;
+/// What a command's timeout leaves of its call's time, for the call to read its result.
+const EXEC_MARGIN: Duration = Duration::from_millis(250);
 const MAX_HEADERS: usize = 64;
 const MAX_HEADER_BYTES: usize = 8 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -87,6 +89,12 @@ struct FilesArgs {
     #[serde(default)]
     path: String,
     limit: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RootArgs {
+    scope: String,
 }
 
 #[derive(Deserialize)]
@@ -223,7 +231,8 @@ impl Session {
             "http.fetch" => self.fetch(decode(args)?, deadline, cancelled),
             "files.read" => self.files(decode(args)?, FilesAccess::Read),
             "files.list" => self.files(decode(args)?, FilesAccess::List),
-            "exec.run" => self.exec(decode(args)?, cancelled),
+            "files.root" => self.files_root(decode(args)?),
+            "exec.run" => self.exec(decode(args)?, deadline, cancelled),
             "storage.put" => {
                 let Put { data, blobs, key } = decode(args)?;
                 if let Some(key) = &key
@@ -440,6 +449,20 @@ impl Session {
                     .windows
                     .set_frame(windows::Frame::new(x, y, width, height))?;
                 Ok(json!({ "frame": frame }))
+            }
+            "context.frontmost" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Context(ContextAccess::Frontmost))?;
+                let app = self.bridge.services.context.frontmost()?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "app": app }))
+            }
+            "context.document" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Context(ContextAccess::Document))?;
+                let document = self.bridge.services.context.document()?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "document": document }))
             }
             _ => Err(Failure::new(
                 "unknown-operation",
@@ -680,9 +703,32 @@ impl Session {
         }))
     }
 
+    /// A `not-found` failure for a scope the user hasn't decided on whose declared folder
+    /// doesn't exist, so a package that names several likely folders, such as `~/src` and
+    /// `~/Developer`, asks only about those the user has.
+    fn missing_declared(&self, name: &ScopeName) -> Result<(), Failure> {
+        let key = ScopeKey::Files(name.clone());
+        let declared = self
+            .bridge
+            .lock()
+            .broker
+            .consents(&self.package)
+            .into_iter()
+            .find(|(scope, state)| scope.key() == key && *state == ConsentState::Undecided)
+            .and_then(|(scope, _)| scope.declared_path().cloned());
+        let (Some(declared), Some(home)) = (declared, self.bridge.home()) else {
+            return Ok(());
+        };
+        if declared.resolve(&home).symlink_metadata().is_err() {
+            return Err(Failure::new("not-found", format!("{declared} doesn't exist")));
+        }
+        Ok(())
+    }
+
     fn files(&self, args: FilesArgs, access: FilesAccess) -> Result<Value, Failure> {
         let name = scope_name(&args.scope)?;
         bounded(&args.path, "path", 4096)?;
+        self.missing_declared(&name)?;
         let permit = self.permit(&Request::Files {
             scope: name.clone(),
             access,
@@ -762,7 +808,51 @@ impl Session {
         Ok(value)
     }
 
-    fn exec(&self, args: ExecArgs, cancelled: &AtomicBool) -> Result<Value, Failure> {
+    /// The absolute path the scope is bound to, so the package can name what it lists to
+    /// Dupin's own actions and to its programs. It reveals no more than the scope's own grant,
+    /// under whichever access the scope declares.
+    fn files_root(&self, args: RootArgs) -> Result<Value, Failure> {
+        let name = scope_name(&args.scope)?;
+        self.missing_declared(&name)?;
+        let key = ScopeKey::Files(name.clone());
+        let access = self
+            .bridge
+            .lock()
+            .broker
+            .consents(&self.package)
+            .into_iter()
+            .find_map(|(scope, _)| match scope {
+                Scope::Files { access, .. } if scope.key() == key => access.first().copied(),
+                _ => None,
+            })
+            .unwrap_or(FilesAccess::Read);
+        let permit = self.permit(&Request::Files {
+            scope: name,
+            access,
+            path: String::new(),
+        })?;
+        let binding = permit
+            .binding()
+            .ok_or_else(|| Failure::new("failed", "the permit doesn't name a file or folder"))?;
+        let shown = self
+            .bridge
+            .shown_roots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(binding)
+            .cloned();
+        let path = match shown {
+            Some(shown) => shown,
+            None => binding
+                .to_str()
+                .ok_or_else(|| Failure::new("failed", "the bound path isn't UTF-8"))?
+                .to_owned(),
+        };
+        self.release(&permit, &AtomicBool::new(false))?;
+        Ok(json!({ "path": path }))
+    }
+
+    fn exec(&self, args: ExecArgs, deadline: Instant, cancelled: &AtomicBool) -> Result<Value, Failure> {
         if args.inputs.len() > MAX_INPUTS {
             return Err(Failure::invalid(format!("at most {MAX_INPUTS} inputs")));
         }
@@ -799,7 +889,19 @@ impl Session {
             ),
         };
         let permit = self.permit(&request)?;
-        let profile = profile(&permit, script)?;
+        // A command never outlives the call that ran it, so one that takes too long times out
+        // and the call carries on, rather than the call failing at its deadline.
+        let timeout = deadline
+            .saturating_duration_since(Instant::now())
+            .saturating_sub(EXEC_MARGIN)
+            .min(exec::DEFAULT_TIMEOUT);
+        if timeout.is_zero() {
+            return Err(Failure::new(
+                "timeout",
+                "the call has no time left to run a command",
+            ));
+        }
+        let profile = profile(&permit, script, timeout)?;
         self.release(&permit, cancelled)?;
         let outcome = self
             .bridge
@@ -1039,7 +1141,7 @@ fn file_failure(error: files::FileError) -> Failure {
 
 /// The profile the permit approves. Its placeholders become required one-line text inputs; a
 /// script target takes none.
-fn profile(permit: &Permit, script: bool) -> Result<exec::Profile, Failure> {
+fn profile(permit: &Permit, script: bool, timeout: Duration) -> Result<exec::Profile, Failure> {
     let unavailable = |error: exec::ExecError| Failure::new("unavailable", error.to_string());
     match permit.scope() {
         Scope::Script { name, output } if script => exec::Profile::new(
@@ -1049,46 +1151,76 @@ fn profile(permit: &Permit, script: bool) -> Result<exec::Profile, Failure> {
             BTreeMap::new(),
             exec::Options {
                 return_output: *output,
+                timeout,
                 ..exec::Options::default()
             },
         )
         .map_err(unavailable),
-        Scope::Exec { name, args, output } if !script => {
+        scope @ Scope::Exec { .. } if !script => {
             let binding = permit
                 .binding()
                 .ok_or_else(|| Failure::new("failed", "no program was picked for the profile"))?;
-            let inputs = args
-                .iter()
-                .filter_map(|arg| placeholder(arg))
-                .map(|name| {
-                    (
-                        name,
-                        exec::Input {
-                            kind: exec::InputKind::Text {
-                                max_bytes: MAX_INPUT_BYTES,
-                                multiline: false,
-                                option_like: false,
-                            },
-                            required: true,
-                        },
-                    )
-                })
-                .collect();
-            let template: Vec<&str> = args.iter().map(String::as_str).collect();
-            exec::Profile::new(
-                name.as_str(),
-                exec::Target::Executable(binding.to_path_buf()),
-                &template,
-                inputs,
-                exec::Options {
-                    return_output: *output,
-                    ..exec::Options::default()
-                },
-            )
-            .map_err(unavailable)
+            timed_profile(scope, binding, timeout).map_err(unavailable)
         }
         _ => Err(Failure::new("failed", "the permit doesn't name a program")),
     }
+}
+
+/// The profile an `exec` scope declares, run with the program picked for it. Its placeholders
+/// become required one-line text inputs.
+pub fn exec_profile(scope: &Scope, program: &std::path::Path) -> Result<exec::Profile, exec::ExecError> {
+    timed_profile(scope, program, exec::DEFAULT_TIMEOUT)
+}
+
+fn timed_profile(
+    scope: &Scope,
+    program: &std::path::Path,
+    timeout: Duration,
+) -> Result<exec::Profile, exec::ExecError> {
+    let Scope::Exec {
+        name,
+        args,
+        output,
+        ssh_agent,
+        output_bytes,
+        ..
+    } = scope
+    else {
+        return Err(exec::ExecError::InvalidProfile(
+            "the scope doesn't run a program".into(),
+        ));
+    };
+    let inputs = args
+        .iter()
+        .filter_map(|arg| placeholder(arg))
+        .map(|name| {
+            (
+                name,
+                exec::Input {
+                    kind: exec::InputKind::Text {
+                        max_bytes: MAX_INPUT_BYTES,
+                        multiline: false,
+                        option_like: false,
+                    },
+                    required: true,
+                },
+            )
+        })
+        .collect();
+    let template: Vec<&str> = args.iter().map(String::as_str).collect();
+    exec::Profile::new(
+        name.as_str(),
+        exec::Target::Executable(program.to_path_buf()),
+        &template,
+        inputs,
+        exec::Options {
+            return_output: *output,
+            ssh_agent: *ssh_agent,
+            timeout,
+            output_bytes: output_bytes.map_or(exec::DEFAULT_OUTPUT_BYTES, |bytes| bytes as usize),
+            ..exec::Options::default()
+        },
+    )
 }
 
 /// The input an argument template element names, as in `--count={count}`.

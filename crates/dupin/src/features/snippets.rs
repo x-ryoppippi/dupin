@@ -150,13 +150,15 @@ fn unavailable() -> Item {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use dupin_core::config::Snippet;
     use dupin_core::{Action, Delivery, Effect, History, Session};
 
     use super::*;
-    use crate::extensions::{ExtensionProvider, QUERY_DEADLINE, Role, bundled, load_bundled};
+    use crate::extensions::{
+        ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, bundled, load_bundled,
+    };
 
     fn snippet(name: Option<&str>, text: &str) -> Snippet {
         Snippet {
@@ -369,7 +371,9 @@ mod tests {
 
         // What config.toml may hand over always fits the catalogue: as many snippets as it
         // holds, or their whole text budget spent on the longest keywords and names, loaded
-        // within the search's deadline.
+        // within the search's deadline. That deadline is the guest's work on a core, so it is
+        // measured as the helper's processor time: the wall clock also counts every other test
+        // the machine runs, and only bounds the call here.
         let many = (0..=dupin_core::snippets::MAX_SNIPPETS).map(|i| (format!("s{i:05}"), snippet(None, "x")));
         let long = (0..4000).map(|i| (format!("{i:032}"), snippet(Some(&"😀".repeat(80)), "😀")));
         for snippets in [many.collect(), long.collect::<BTreeMap<_, _>>()] {
@@ -382,15 +386,26 @@ mod tests {
             let last = listed.last().unwrap()["keyword"].as_str().unwrap().to_owned();
             let count = listed.len();
             preferences::set(extension.package.as_str(), held);
+            let before = crate::extensions::helper_processor_time(&extension);
             let found = extension
                 .catalogue(
                     &last,
                     10,
-                    Instant::now() + QUERY_DEADLINE,
+                    Instant::now() + ACTION_DEADLINE,
                     &dupin_extension_bridge::Call::none(),
                     Role::Keyword,
+                    None,
                 )
                 .unwrap_or_else(|error| panic!("{count} snippets: {error:?}"));
+            let (pid, after) = crate::extensions::helper_processor_time(&extension).unwrap();
+            let spent = after
+                - before
+                    .filter(|(before, _)| *before == pid)
+                    .map_or(Duration::ZERO, |(_, time)| time);
+            assert!(
+                spent < QUERY_DEADLINE,
+                "{count} snippets took {spent:?} of processor time to load"
+            );
             assert_eq!(
                 found
                     .iter()

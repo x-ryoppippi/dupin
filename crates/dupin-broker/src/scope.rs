@@ -79,6 +79,43 @@ string_type!(ScopeName, |value| {
     }
 });
 
+string_type!(DeclaredPath, |value| {
+    let relative = if let Some(rest) = value.strip_prefix("~/") {
+        rest
+    } else if let Some(rest) = value.strip_prefix('/') {
+        rest
+    } else {
+        return Err("a path starts with `/` or `~/`".into());
+    };
+    if value.len() > 1024 || !displayable(value) {
+        return Err("a path is at most 1024 bytes with no control or invisible formatting characters".into());
+    }
+    if relative.is_empty() || relative.ends_with('/') {
+        return Err("a path names a file or folder, without a trailing `/`".into());
+    }
+    if relative
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err("a path has no empty, `.` or `..` parts".into());
+    }
+    Ok(())
+});
+
+impl DeclaredPath {
+    /// The absolute path, with a leading `~/` under `home`.
+    pub fn resolve(&self, home: &std::path::Path) -> std::path::PathBuf {
+        match self.0.strip_prefix("~/") {
+            Some(rest) => home.join(rest),
+            None => std::path::PathBuf::from(&self.0),
+        }
+    }
+
+    pub fn under_home(&self) -> bool {
+        self.0.starts_with("~/")
+    }
+}
+
 /// An HTTPS origin: a lowercase DNS host and an optional port other than 443.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -263,6 +300,25 @@ impl WindowsAccess {
     }
 }
 
+/// What Dupin noted about where the user was when the panel opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextAccess {
+    /// The app that was in front: its name, bundle ID and process.
+    Frontmost,
+    /// The file the front app's focused window shows.
+    Document,
+}
+
+impl ContextAccess {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Frontmost => "frontmost",
+            Self::Document => "document",
+        }
+    }
+}
+
 /// A kind of row Dupin's own sources show, whose fields a package may be let see.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -373,6 +429,16 @@ impl OsPermission {
     }
 }
 
+/// The most output an executable profile hands back per stream unless it declares more: the
+/// exec service's own default.
+pub const EXEC_OUTPUT_BYTES: u32 = 64 * 1024;
+/// The most output a profile may declare, the exec service's own limit.
+pub const MAX_EXEC_OUTPUT_BYTES: u32 = 1024 * 1024;
+
+fn output_limit(declared: Option<u32>) -> u32 {
+    declared.unwrap_or(EXEC_OUTPUT_BYTES)
+}
+
 /// One grantable unit of a declaration. A [`ScopeKey`] names it; the rest bounds it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
@@ -385,11 +451,30 @@ pub enum Scope {
         name: ScopeName,
         kind: FilesKind,
         access: BTreeSet<FilesAccess>,
+        /// The file or folder the package names, absolute or under `~/`, which Dupin binds the
+        /// scope to when the user allows it instead of asking them to pick one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<DeclaredPath>,
     },
     Exec {
         name: ScopeName,
         args: Vec<String>,
         output: bool,
+        /// The absolute path of the program the package names, which Dupin binds the profile
+        /// to when the user allows it instead of asking them to pick one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        program: Option<DeclaredPath>,
+        /// The profile may run without an action the user chose: while they type, in
+        /// `items()` and in event handlers.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        background: bool,
+        /// The program also receives `SSH_AUTH_SOCK`, so it can use the keys the user's SSH agent
+        /// holds.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ssh_agent: bool,
+        /// The most output it hands back per stream, when that is more than the default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_bytes: Option<u32>,
     },
     Script {
         name: ScopeName,
@@ -415,6 +500,9 @@ pub enum Scope {
     },
     Windows {
         access: WindowsAccess,
+    },
+    Context {
+        access: ContextAccess,
     },
     /// Fields of the rows of one kind that Dupin's own sources show, which the package's
     /// filters and kind actions receive. Another package's rows never reach it.
@@ -442,6 +530,7 @@ impl Scope {
             Self::Snippets => ScopeKey::Snippets,
             Self::Calendar { .. } => ScopeKey::Calendar,
             Self::Windows { access } => ScopeKey::Windows(*access),
+            Self::Context { access } => ScopeKey::Context(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
             Self::Query => ScopeKey::Query,
         }
@@ -459,21 +548,47 @@ impl Scope {
                 },
             ) => origin == o && methods.is_superset(m),
             (
-                Self::Files { name, kind, access },
+                Self::Files {
+                    name,
+                    kind,
+                    access,
+                    path,
+                },
                 Self::Files {
                     name: n,
                     kind: k,
                     access: a,
+                    path: p,
                 },
-            ) => name == n && kind == k && access.is_superset(a),
+            ) => name == n && kind == k && access.is_superset(a) && path == p,
             (
-                Self::Exec { name, args, output },
+                Self::Exec {
+                    name,
+                    args,
+                    output,
+                    program,
+                    background,
+                    ssh_agent,
+                    output_bytes,
+                },
                 Self::Exec {
                     name: n,
                     args: a,
                     output: o,
+                    program: p,
+                    background: b,
+                    ssh_agent: s,
+                    output_bytes: m,
                 },
-            ) => name == n && args == a && (*output || !o),
+            ) => {
+                name == n
+                    && args == a
+                    && (*output || !o)
+                    && program == p
+                    && (*background || !b)
+                    && (*ssh_agent || !s)
+                    && output_limit(*output_bytes) >= output_limit(*m)
+            }
             (Self::Script { name, output }, Self::Script { name: n, output: o }) => {
                 name == n && (*output || !o)
             }
@@ -510,6 +625,7 @@ impl Scope {
                 },
             ) => past_days >= p && future_days >= f,
             (Self::Windows { access }, Self::Windows { access: a }) => access == a,
+            (Self::Context { access }, Self::Context { access: a }) => access == a,
             (Self::Rows { kind, fields }, Self::Rows { kind: k, fields: f }) => {
                 kind == k && fields.is_superset(f)
             }
@@ -532,9 +648,25 @@ impl Scope {
         }
     }
 
-    /// Files and executable profiles are bound, at consent, to a path the user picks.
+    /// Files and executable profiles are bound, at consent, to a path: the one the package
+    /// declares, or one the user picks.
     pub fn needs_binding(&self) -> bool {
         matches!(self, Self::Files { .. } | Self::Exec { .. })
+    }
+
+    /// The path the package declares for a files scope or an executable profile, which the
+    /// scope is bound to without a pick.
+    pub fn declared_path(&self) -> Option<&DeclaredPath> {
+        match self {
+            Self::Files { path, .. } => path.as_ref(),
+            Self::Exec { program, .. } => program.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Whether the user must pick the path the scope is bound to.
+    pub fn needs_pick(&self) -> bool {
+        self.needs_binding() && self.declared_path().is_none()
     }
 }
 
@@ -558,7 +690,12 @@ impl fmt::Display for Scope {
             Self::Http { origin, methods } => {
                 write!(f, "{} requests to {origin}", list(methods, |m| m.as_str()))
             }
-            Self::Files { name, kind, access } => {
+            Self::Files {
+                name,
+                kind,
+                access,
+                path,
+            } => {
                 let kind = match kind {
                     FilesKind::File => "file",
                     FilesKind::Directory => "folder",
@@ -567,16 +704,38 @@ impl fmt::Display for Scope {
                     FilesAccess::Read => "read",
                     FilesAccess::List => "list",
                 });
-                write!(f, "{access} the {kind} you pick for “{name}”")
+                match path {
+                    Some(path) => write!(f, "{access} the {kind} {path}"),
+                    None => write!(f, "{access} the {kind} you pick for “{name}”"),
+                }
             }
-            Self::Exec { name, args, output } => {
-                write!(f, "run the program you pick for “{name}”")?;
+            Self::Exec {
+                name,
+                args,
+                output,
+                program,
+                background,
+                ssh_agent,
+                output_bytes,
+            } => {
+                match program {
+                    Some(program) => write!(f, "run {program}")?,
+                    None => write!(f, "run the program you pick for “{name}”")?,
+                }
                 for (index, arg) in args.iter().enumerate() {
                     f.write_str(if index == 0 { " with " } else { " " })?;
                     write!(f, "{arg:?}")?;
                 }
-                if *output {
-                    f.write_str(" and read its output")?;
+                if *ssh_agent {
+                    f.write_str(", using the keys your SSH agent holds,")?;
+                }
+                match (output, output_bytes) {
+                    (false, _) => {}
+                    (true, None) => f.write_str(" and read its output")?,
+                    (true, Some(bytes)) => write!(f, " and read up to {bytes} bytes of its output")?,
+                }
+                if *background {
+                    f.write_str(", even while you type and without an action you chose")?;
                 }
                 Ok(())
             }
@@ -622,6 +781,10 @@ impl fmt::Display for Scope {
                 WindowsAccess::Read => f.write_str("see your displays and the focused window"),
                 WindowsAccess::Arrange => f.write_str("move and resize the focused window"),
             },
+            Self::Context { access } => match access {
+                ContextAccess::Frontmost => f.write_str("see which app you were using when Dupin opened"),
+                ContextAccess::Document => f.write_str("see which file you were viewing when Dupin opened"),
+            },
             Self::Rows { kind, fields } => write!(
                 f,
                 "see the {} of {} Dupin finds, where you compose its filters or actions",
@@ -653,6 +816,7 @@ pub enum ScopeKey {
     Snippets,
     Calendar,
     Windows(WindowsAccess),
+    Context(ContextAccess),
     Rows(RowKind),
     Query,
 }
@@ -672,6 +836,7 @@ impl fmt::Display for ScopeKey {
             Self::Snippets => f.write_str("snippets"),
             Self::Calendar => f.write_str("calendar"),
             Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
+            Self::Context(access) => write!(f, "context:{}", access.as_str()),
             Self::Rows(kind) => write!(f, "rows:{}", kind.as_str()),
             Self::Query => f.write_str("query"),
         }
@@ -704,6 +869,8 @@ impl FromStr for ScopeKey {
             Some(("clipboard", "paste")) => Self::Clipboard(ClipboardAccess::Paste),
             Some(("windows", "read")) => Self::Windows(WindowsAccess::Read),
             Some(("windows", "arrange")) => Self::Windows(WindowsAccess::Arrange),
+            Some(("context", "frontmost")) => Self::Context(ContextAccess::Frontmost),
+            Some(("context", "document")) => Self::Context(ContextAccess::Document),
             Some(("rows", kind)) => Self::Rows(
                 RowKind::ALL
                     .into_iter()

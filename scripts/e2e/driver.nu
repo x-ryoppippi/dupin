@@ -83,7 +83,7 @@ export def run-suite [
 
         # Dupin is running well before its on_ready callback registers the hotkey.
         wait-for-log $log 'dupin-trace: hotkey alt+space registered'
-        snap $out launched
+        evidence $out launched
         let run = {
             (do
                 $suite
@@ -258,7 +258,7 @@ export def mentions [reply: record, name: string]: nothing -> bool {
     $reply.data? | to json --raw | str contains $'"($name)"'
 }
 
-export def snap [out: path, name: string, --app: string = $DUPIN] {
+export def evidence [out: path, name: string, --app: string = $DUPIN] {
     ad $out $'($name)-snapshot' snapshot --app $app | ignore
     let shot = ^screencapture -x ($out | path join $'($name).png') | complete
     if $shot.exit_code != 0 {

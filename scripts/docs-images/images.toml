@@ -2,8 +2,8 @@
 # each in light and dark, to docs/images/<page>/<name>-<theme>.png.
 #
 # An image is either an `extension`'s fixture (`fixture`, in its fixtures folder, rendered after
-# `step` or its last step by `dupin ext snap`), or a headless launcher `scenario` with the
-# sidecar fixtures scripts/snap.nu reads beside it, an optional `config` in place of its own, the
+# `step` or its last step by `dupin ext render`), or a headless launcher `scenario` with the
+# sidecar fixtures scripts/render.nu reads beside it, an optional `config` in place of its own, the
 # documents below in ~/Documents and the `recent` history below. A scenario with a `window` draws
 # that window, `width` points wide, instead of the panel.
 #
@@ -19,6 +19,9 @@ recent = [
 	"~/Documents/Meeting notes.md",
 	"/System/Applications/Maps.app",
 ]
+
+# What the `glass = true` clips are recorded over, so every tab on the home page shows the same.
+wallpaper = "dusk"
 
 # Folders end with a slash.
 documents = [
@@ -146,6 +149,20 @@ fixture = "notes.json"
 step = 4
 
 [[images]]
+page = "repo"
+name = "list"
+extension = "extensions/repo"
+fixture = "repos.json"
+step = 1
+
+[[images]]
+page = "repo"
+name = "search"
+extension = "extensions/repo"
+fixture = "repos.json"
+step = 3
+
+[[images]]
 page = "appearance"
 name = "ocean"
 scenario = "scripts/themes/preview.json"
@@ -213,7 +230,19 @@ width = 760
 # once with `burst = true`, for a search that would answer each prefix), presses a key (`key`,
 # with `cmd`, `shift`, `alt` or `ctrl`) or waits (`wait`, in seconds). `fixtures` names a scenario
 # whose sidecar fixtures the clip runs with, and `config` a configuration in place of the default
-# one. Every clip is embedded under the steps of its page.
+# one, and `backdrop` a backdrop shader as `config.toml` names it. Every clip is embedded under
+# the steps of its page.
+#
+# The website's clips, on page `home`, play on a dark page only (`themes = ["dark"]`), at the
+# `scale` that keeps them sharp on a Retina screen at the size the page shows them. A backdrop shader changes every pixel
+# of every frame, so they are MP4 videos over the page's black (`video = true`, with a WebP
+# poster of the last frame).
+#
+# A `glass = true` clip shows Liquid Glass, which a headless render draws as an opaque fallback,
+# so `just docs-glass` (scripts/docs-glass.nu) records it from the real app over a `wallpaper`
+# (one of its presets or an image, the manifest's `wallpaper` unless the clip names its own) and
+# lists it in docs/images/glass.json. Until then `just docs-clips` renders it headless over its
+# `backdrop` in its place, and the website says so.
 #
 # A clip never types into a Spotlight search (Files after Space, or `in`): Spotlight answers
 # from this Mac's index, whatever the scratch home holds. Files clips start from Recent items and
@@ -392,7 +421,7 @@ name = "clip"
 fixtures = "scripts/headless/extension-js.json"
 steps = [{ type = "wc" }, { key = "space" }, { type = "two words" }]
 
-# An extension's own fixture as a clip: `dupin ext snap --record` replays its steps, up to `step`,
+# An extension's own fixture as a clip: `dupin ext render --record` replays its steps, up to `step`,
 # at a pace a reader can follow, and the keys it presses are captioned from its script.
 [[clips]]
 page = "extensions"
@@ -400,3 +429,117 @@ name = "notes"
 extension = "examples/extensions/notes-js"
 fixture = "notes.json"
 step = 5
+
+# The home page's tabs, each one use of Dupin over Liquid Glass, as it opens by default.
+
+[[clips]]
+page = "home"
+name = "apps"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "files"
+# Not `glass`: the real app on the runner listed no Recent items from the scratch home's
+# history, so there was no folder to browse; this stays headless over Flow.
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ wait = 1.0 }, { key = "tab" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "in-files"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "in" }, { key = "space" }, { wait = 1.0 }]
+
+[[clips]]
+page = "home"
+name = "dictionary"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "d" }, { key = "space" }, { type = "serendipity", burst = true }, { wait = 1.0 }]
+
+[[clips]]
+page = "home"
+name = "keywords"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "?" }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "clipboard"
+# Not `glass`: the real app records copies only once macOS lets it read the clipboard in the
+# background, which a recording must not grant, so this stays headless over Flow.
+fixtures = "scripts/headless/clipboard-images.json"
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+# The Apps tab again over each backdrop shader, for the home page's backdrop switcher: one
+# recording per shader, not every tab over every shader, which would be six times the bytes to
+# show the same thing.
+
+[[clips]]
+page = "home"
+name = "apps-flow"
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-aurora"
+backdrop = "shaders/aurora.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-embers"
+backdrop = "shaders/embers.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-snow"
+backdrop = "shaders/snow.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-matrix"
+backdrop = "shaders/matrix.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]

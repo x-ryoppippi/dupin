@@ -189,15 +189,11 @@ fn pending_row(s: &Prefs, k: &Kit, index: usize, request: &ConsentRequest) -> El
     let allow = if let ConsentReason::OsAccess(permission) = request.reason {
         request_access_button(k, &format!("pending-{index}-request"), permission)
     } else {
-        Button::new(if scope.needs_binding() {
-            "Choose…"
-        } else {
-            "Allow"
-        })
-        .variant(ButtonVariant::Submit)
-        .on_press(move |s: &mut Prefs| s.allow(&id, &revision, &scope))
-        .build(k)
-        .key(format!("pending-{index}-allow"))
+        Button::new(if scope.needs_pick() { "Choose…" } else { "Allow" })
+            .variant(ButtonVariant::Submit)
+            .on_press(move |s: &mut Prefs| s.allow(&id, &revision, &scope))
+            .build(k)
+            .key(format!("pending-{index}-allow"))
     };
     let (deny_id, key) = (request.package.clone(), request.key());
     let deny = Button::new("Deny")
@@ -290,14 +286,10 @@ fn scope_row(bridge: &Bridge, k: &Kit, key: &str, extension: &Listed, entry: Sco
     {
         let scope_for_allow = scope.clone();
         controls = controls.child(
-            Button::new(if scope.needs_binding() {
-                "Choose…"
-            } else {
-                "Allow"
-            })
-            .on_press(move |s: &mut Prefs| s.allow(&id, &revision, &scope_for_allow))
-            .build(k)
-            .key(format!("{key}-allow")),
+            Button::new(if scope.needs_pick() { "Choose…" } else { "Allow" })
+                .on_press(move |s: &mut Prefs| s.allow(&id, &revision, &scope_for_allow))
+                .build(k)
+                .key(format!("{key}-allow")),
         );
     }
     if matches!(scope, Scope::Storage { .. }) {
@@ -378,7 +370,7 @@ fn glyph(scope: &Scope) -> &'static Icon {
         Scope::Calculator => &icons::CALCULATOR,
         Scope::Snippets => &icons::QUOTE,
         Scope::Calendar { .. } => &icons::CALENDAR,
-        Scope::Windows { .. } => &icons::PANEL,
+        Scope::Windows { .. } | Scope::Context { .. } => &icons::PANEL,
         Scope::Rows { .. } | Scope::Query => &icons::SEARCH,
     }
 }
@@ -433,6 +425,7 @@ impl Prefs {
     fn allow(&mut self, id: &PackageId, revision: &dupin_extension_bridge::Revision, scope: &Scope) {
         let Some(bridge) = self.access.clone() else { return };
         let binding = match scope {
+            _ if !scope.needs_pick() => None,
             Scope::Files { name, kind, .. } => {
                 let kind = match kind {
                     dupin_extension_bridge::FilesKind::File => dupin_mac::pick::Kind::File,

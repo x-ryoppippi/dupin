@@ -26,12 +26,12 @@ These need no resident instance:
 
 ```sh
 printf '%s' '{"kind":"text","title":"Hello","subtitle":"Headless fixture"}' > /tmp/dupin-view.json
-dupin snap /tmp/dupin-view.json /tmp/dupin-view.png --json
+dupin render /tmp/dupin-view.json /tmp/dupin-view.png --json
 dupin ext check examples/extensions/word-count-js --json
 dupin ext run examples/extensions/word-count-js --query 'two words' --json
 ```
 
-`dupin ext check DIR` and `dupin ext run DIR --query QUERY` load an extension folder as the launcher does and print its answer; a failure exits non-zero with a diagnostic naming the code, file, field and a fix. `dupin ext test DIR` replays the folder's fixtures and `dupin ext snap DIR FIXTURE OUTPUT.png` renders a fixture's panel (see [Testing and snapshots](./extensions.md#testing-and-snapshots)). They test a folder on its own; the launcher loads [extensions](./extensions.md) from the configuration folder. Headless rendering shows the given text/detail/pair view without executing actions or loading configuration, history or application providers.
+`dupin ext check DIR` and `dupin ext run DIR --query QUERY` load an extension folder as the launcher does and print its answer; a failure exits non-zero with a diagnostic naming the code, file, field and a fix. `dupin ext test DIR` replays the folder's fixtures and `dupin ext render DIR FIXTURE OUTPUT.png` renders a fixture's panel (see [Testing and rendering](./extensions.md#testing-and-rendering)). They test a folder on its own; the launcher loads [extensions](./extensions.md) from the configuration folder. Headless rendering shows the given text/detail/pair view without executing actions or loading configuration, history or application providers.
 
 ## The control socket
 

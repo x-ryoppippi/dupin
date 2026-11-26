@@ -34,6 +34,10 @@ pub enum Command {
     SnapshotsOpen {
         id: Option<String>,
     },
+    /// The saved content of one snapshot, as the Snapshots window shows it.
+    SnapshotsRead {
+        id: String,
+    },
     SnapshotsClose {},
     ConfigSet {
         base: Box<dupin_core::Config>,
@@ -125,6 +129,7 @@ impl Call {
             Command::ConfigSet { .. } => "config set",
             Command::SnapshotsList {} => "snapshots list",
             Command::SnapshotsOpen { .. } => "snapshots open",
+            Command::SnapshotsRead { .. } => "snapshots read",
             Command::SnapshotsClose {} => "snapshots close",
             Command::ExtensionDataDelete { .. } => "extension data delete",
             Command::Sync { .. } => "sync",
@@ -175,7 +180,9 @@ pub fn write_frame(output: &mut impl Write, value: &impl Serialize) -> io::Resul
 }
 pub fn validate(request: &Request) -> io::Result<()> {
     match &request.command {
-        Command::SnapshotsOpen { id: Some(id) } if id.is_empty() || id.len() > 128 => {
+        Command::SnapshotsOpen { id: Some(id) } | Command::SnapshotsRead { id }
+            if id.is_empty() || id.len() > 128 =>
+        {
             Err(io::Error::other("invalid snapshot id"))
         }
         Command::Open { query: Some(query) } if query.len() > 4096 => {
@@ -492,6 +499,9 @@ mod tests {
             Command::SnapshotsOpen {
                 id: Some("日本語".into()),
             },
+            Command::SnapshotsRead {
+                id: "日本語".into()
+            },
             Command::SnapshotsClose {},
         ] {
             let request = Request { id: 42, command };
@@ -513,7 +523,14 @@ mod tests {
             assert!(
                 validate(&Request {
                     id: 1,
-                    command: Command::SnapshotsOpen { id: Some(id) }
+                    command: Command::SnapshotsOpen { id: Some(id.clone()) }
+                })
+                .is_err()
+            );
+            assert!(
+                validate(&Request {
+                    id: 1,
+                    command: Command::SnapshotsRead { id }
                 })
                 .is_err()
             );
@@ -675,9 +692,10 @@ mod tests {
     fn simultaneous_stale_restarts_leave_one_live_listener() {
         let dir = std::env::temp_dir().join(format!("dupin-control-race-{}", std::process::id()));
         std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        // Left by a server that exited, as a stale socket is: one this process bound would stay
+        // listening in any child another test forks until that child execs.
+        subprocess("exit", &dir, "/unused-race");
         let path = dir.join("control.sock");
-        drop(UnixListener::bind(&path).unwrap());
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let barrier = Arc::new(std::sync::Barrier::new(4));
         let workers: Vec<_> = (0..4)
             .map(|_| {

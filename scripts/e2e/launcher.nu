@@ -1,4 +1,4 @@
-use driver.nu [DUPIN ad poll press snap]
+use driver.nu [DUPIN ad poll press evidence]
 use ../e2e-state.nu is-focused-match
 
 export def launcher-stage [out: path] {
@@ -8,7 +8,7 @@ export def launcher-stage [out: path] {
     poll $out field $focused find --app $DUPIN --role textfield --first
     # Past the backdrop's fade-in, so the screenshot shows the shader.
     sleep 500ms
-    snap $out summoned
+    evidence $out summoned
 }
 
 def close-startup-welcome [out: path] {

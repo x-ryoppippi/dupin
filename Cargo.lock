@@ -1081,6 +1081,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dupin-search-quality"
+version = "0.0.0"
+dependencies = [
+ "dupin-core",
+ "dupin-mac",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "dupin-storage"
 version = "0.0.0"
 dependencies = [

@@ -1,6 +1,7 @@
 use std/assert
 use ../docs-images.nu [
     clip-timeline
+    glass-problems
     embedded
     image-paths
     key-caption
@@ -181,4 +182,39 @@ def main [] {
         clip: true
     }
     assert equal (image-paths $clip | first) docs/images/extensions/notes-light.webp
+
+    let hero = {
+        page: home
+        name: hero
+        themes: [dark]
+        video: true
+        steps: [
+            {type: "ma"}
+        ]
+    }
+    assert equal (image-paths $hero) [
+        docs/images/home/hero-dark.mp4
+        docs/images/home/hero-dark-poster.webp
+    ]
+    let page = {
+        path: website/src/pages/Home.svelte
+        text: `<Clip src="/docs/images/home/hero-dark.mp4" poster="/docs/images/home/hero-dark-poster.webp" />`
+    }
+    assert equal (embedded $page.path $page.text) [
+        docs/images/home/hero-dark.mp4
+        docs/images/home/hero-dark-poster.webp
+    ]
+    let hero_files = image-paths $hero
+    assert equal (
+        problems {images: [], clips: [$hero]} $hero_files [$page] {|path| $path in $hero_files }
+    ) []
+
+    let glass = {
+        clips: [
+            ($hero | insert glass true)
+            ($clip | update name other)
+        ]
+    }
+    assert equal (glass-problems $glass {"home/hero": {macos: "26.3"}}) []
+    assert equal (glass-problems $glass {"extensions/other": {macos: "26.3"}}) ["glass.json lists extensions/other, which is not a `glass = true` clip"]
 }

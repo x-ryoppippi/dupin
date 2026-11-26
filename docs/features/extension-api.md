@@ -55,20 +55,20 @@ Enter runs the first action: **Open URL** when the item has a `url`, then **Copy
 <details>
 <summary>Every item field</summary>
 
-| Item field    | Limit                            | Meaning                                                                                                                                |
-| ------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `title`       | One line, 512 bytes              | Required.                                                                                                                              |
-| `subtitle`    | 2,048 bytes                      |                                                                                                                                        |
-| `id`          | 128 bytes                        | Unique among the items. Optional for `search`, where Dupin numbers items without one; required for `items`.                            |
-| `url`         | 2,048 bytes                      | An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](./extension-permissions.md#calendar): **Open URL** opens it. |
-| `text`        | 16 KiB                           | **Copy** copies it.                                                                                                                    |
-| `icon`        |                                  | An image in the package or `sf:` and an SF Symbol's name, such as `sf:star.fill`.                                                      |
-| `image`       |                                  | A stored image, by its handle, in place of `icon`; see [Images](#images).                                                              |
-| `section`     | One line, 128 bytes              | The heading the item is listed under.                                                                                                  |
-| `detail`      |                                  | `{ image, markdown, metadata }`, shown while the row is selected; see [Details](#details).                                             |
-| `actions`     | Eight in all                     | More actions, after the ones `url` and `text` add; see [Actions](#actions).                                                            |
-| `accessories` | Three, each one line of 64 bytes | `{ text }`, shown as it is, or `{ tag }`, shown as a label, at the row's end.                                                          |
-| `answer`      | One or two lines, 512 bytes      | From `search` or a [view](#views-and-forms) only: shown beside the `title` as two values, as a calculation is.                         |
+| Item field    | Limit                       | Meaning                                                                                                                                |
+| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`       | One line, 512 bytes         | Required.                                                                                                                              |
+| `subtitle`    | 2,048 bytes                 |                                                                                                                                        |
+| `id`          | 128 bytes                   | Unique among the items. Optional for `search`, where Dupin numbers items without one; required for `items`.                            |
+| `url`         | 2,048 bytes                 | An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](./extension-permissions.md#calendar): **Open URL** opens it. |
+| `text`        | 16 KiB                      | **Copy** copies it.                                                                                                                    |
+| `icon`        |                             | An image in the package or `sf:` and an SF Symbol's name, such as `sf:star.fill`.                                                      |
+| `image`       |                             | A stored image, by its handle, in place of `icon`; see [Images](#images).                                                              |
+| `section`     | One line, 128 bytes         | The heading the item is listed under.                                                                                                  |
+| `detail`      |                             | `{ image, markdown, metadata }`, shown while the row is selected; see [Details](#details).                                             |
+| `actions`     | Eight in all                | More actions, after the ones `url` and `text` add; see [Actions](#actions).                                                            |
+| `accessories` | Three                       | At the row's end; see [Accessories](#accessories).                                                                                     |
+| `answer`      | One or two lines, 512 bytes | From `search` or a [view](#views-and-forms) only: shown beside the `title` as two values, as a calculation is.                         |
 
 </details>
 
@@ -79,6 +79,39 @@ Enter runs the first action: **Open URL** when the item has a `url`, then **Copy
 - Items of a list's `sections` get their section's title as `section`.
 - An item without any action shows but does nothing; a [`push`](#views-and-forms) action opens a view of the package's own.
 - Every value is checked. An unknown field, a value of the wrong type, an empty `text` or a URL with another scheme fails the whole answer with a row that says which item and field.
+
+</details>
+
+### Accessories
+
+Up to three accessories sit at a row's end, each an object with one key:
+
+| Accessory       | Shows                                                                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ text }`      | The text as it is: one line of up to 64 bytes.                                                                                            |
+| `{ tag }`       | The text as a label in the accent colour: one line of up to 64 bytes.                                                                     |
+| `{ freshness }` | How long ago the row's data was read, from milliseconds since the epoch as `Date.now()` gives them: `12 s ago`, `5 min ago`, `2 h ago`.   |
+| `{ state }`     | `"offline"`, shown as a red **Offline** label, for a source that can't be reached, or `"stale"`, an orange **Stale** label, for old data. |
+
+<details>
+<summary>Freshness and state</summary>
+
+Dupin writes a freshness each time it draws the row, by its own clock, so a row from a catalogue Dupin holds says how old it is now rather than when `items` answered; a time ahead of the clock reads as `0 s ago`. `dupin ext render` and `dupin ext test` use the fixture's clock. The words and colours are Dupin's, the same for every package in light and dark, so a package says what state a row is in rather than how to draw it.
+
+```js
+export async function items() {
+	const read = Date.now();
+	const { ok, services } = await poll();
+	return {
+		ttl: 10,
+		items: services.map((service) => ({
+			id: service.name,
+			title: service.name,
+			accessories: [{ freshness: read }, ...(ok ? [] : [{ state: 'offline' }])],
+		})),
+	};
+}
+```
 
 </details>
 
@@ -112,7 +145,7 @@ export function items() {
 <details>
 <summary>How the catalogue is listed and ranked</summary>
 
-`items` returns an array of items, or a list with `items` or `sections` as for `search`. It runs on first use, and again only after its `ttl` or when one of its actions or event handlers invalidates it.
+`items` returns an array of items, or a list with `items` or `sections` as for `search`. It runs on first use, and again only after its `ttl` or when one of its actions or event handlers invalidates it. Once only its `ttl` has passed, Dupin keeps matching the rows it holds while it asks again in the background, in a host of its own so a slow program never holds up other packages' searches, and takes the answer unless something invalidated the catalogue meanwhile, so typing never waits for it. While the panel lists the catalogue, Dupin asks again each time the `ttl` passes, without a keystroke, and searches the current query again with what came back; once the panel hides or moves on, it waits for the next search that lists it. A catalogue with a short `ttl`, such as running processes every 2 seconds, keeps itself current while you look at it and costs nothing once you don't.
 
 Typing the keyword and Space (such as `bm`) lists the catalogue in its own order, under its sections. Typing more ranks every item by how well its title or keywords match, as apps are ranked, and puts the items you pick most often for that query first; the headings then give way to one ranked list.
 
@@ -123,11 +156,11 @@ Every catalogue item needs an `id` that stays with it as the list changes: Dupin
 <details>
 <summary>List fields and ctx</summary>
 
-| List field | Value                                                                                                                                      |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ttl`      | Seconds, 1 to 86,400. Dupin asks again on the first use after they pass. Without it, the catalogue stays until it is invalidated.          |
-| `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                           |
-| `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together. |
+| List field | Value                                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttl`      | Seconds, 1 to 86,400. Dupin asks again in the background once they pass, as above. Without it, the catalogue stays until it is invalidated. |
+| `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                            |
+| `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together.  |
 
 `ctx` is frozen:
 
@@ -169,7 +202,7 @@ A change of preferences drops the catalogue, so the next use lists it with them.
 <details>
 <summary>What items may use</summary>
 
-`items` reaches host services as `search` does. It runs while you type, never because you chose an action, so it may use what you allowed that needs no action of yours (files, GET and HEAD, the dictionary, calendars and `storage`, whose writes and deletes need none either), and anything that needs an action you chose, such as reading the clipboard, fails with `needs-activation`. A request that needs consent shows its question under the keyword.
+`items` reaches host services as `search` does. It runs while you type, never because you chose an action, so it may use what you allowed that needs no action of yours (files, GET and HEAD, the dictionary, calendars, `storage`, whose writes and deletes need none either, and programs whose profile is declared `background`), and anything that needs an action you chose, such as reading the clipboard, fails with `needs-activation`. A request that needs consent shows its question under the keyword.
 
 A catalogue belongs to the access it was read under: revoking a scope or turning the extension off drops it, allowing a scope drops it too, and either way the next use asks for it from the start with `reason` `"load"`.
 
@@ -623,7 +656,7 @@ export const actions = {
 
 ### Effects on pages
 
-An action, or a form's submit, may return `push`, `pop`, `refresh`, `replaceState` or `fieldErrors` instead of a toast, to change the page it was chosen on.
+An action, or a form's submit, may return `push`, `pop`, `refresh`, `replaceState` or `fieldErrors` instead of a toast, to change the page it was chosen on, or `enter` to hand what was chosen to another command.
 
 <details>
 <summary>Effects and edge cases</summary>
@@ -635,8 +668,19 @@ An action, or a form's submit, may return `push`, `pop`, `refresh`, `replaceStat
 | `{ type: "refresh", toast }`                  | Asks the page's view again, or searches again under the keyword.                                                                                 |
 | `{ type: "replaceState", state, toast }`      | Gives the page `state` and asks its view again.                                                                                                  |
 | `{ type: "fieldErrors", errors }`             | From a form's submit only: shows each message (one line, 256 bytes) under the field whose `id` keys it, for up to 16 fields, and keeps the form. |
+| `{ type: "enter", command, query }`           | Leaves the page for the command `command` names, with `query` (optional, one line of up to 1 KiB) typed after its keyword.                       |
 
 `toast` is optional, one line of up to 512 bytes shown once Dupin has done the rest, and `state` is at most 16 KiB of JSON nested 16 levels deep.
+
+`enter` names a command as an [alias](./keywords.md#aliases) or a shortcut does: a built-in's name, such as `calendar` or `dictionary`, or an extension's package name, such as `port`, so it reaches the command whatever keyword you gave it. It enters the command as typing its keyword and the query does, so the command searches the query as if you had typed it and you see it in the field. Any package may enter its own command; only a package that ships with Dupin may name another, since that command's package receives the text, and any other package could pass on what it read to one allowed to send it elsewhere. A command that isn't on, or that the package may not name, fails as a notice that says so.
+
+```js
+export const actions = {
+	ports({ pid }) {
+		return { type: 'enter', command: 'port', query: String(pid) };
+	},
+};
+```
 
 Each effect lands only while the page the action was chosen on is still the one on screen, so an action that ends after you moved on, or a second action of the same page after the first moved it, changes nothing; a toast still shows. An effect of any other shape, a ninth page, or `fieldErrors` anywhere but a submit, fails as a notice and changes nothing.
 
@@ -714,12 +758,12 @@ The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io
 
 The engine has modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`, and no files, network, processes, clipboard, timers or console of its own; [imports](./extension-manifest.md#modules-and-typescript) reach only its own folder and the host module `dupin`.
 
-| `dupin` export                                                                                                 | What it is                                                                           |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `apiVersion`                                                                                                   | `4`                                                                                  |
-| `DupinError`                                                                                                   | What a failed request rejects with; see [Errors](./extension-permissions.md#errors). |
-| `items`                                                                                                        | Its `invalidate()` is called from an action or event handler.                        |
-| `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows` | One object per capability, whose functions return promises.                          |
+| `dupin` export                                                                                                            | What it is                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `apiVersion`                                                                                                              | `5`                                                                                  |
+| `DupinError`                                                                                                              | What a failed request rejects with; see [Errors](./extension-permissions.md#errors). |
+| `items`                                                                                                                   | Its `invalidate()` is called from an action or event handler.                        |
+| `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows`, `context` | One object per capability, whose functions return promises.                          |
 
 Each capability works only for what the package declares and you allow, from `search`, `items`, actions and events alike. Each query, `items` call, view, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](./extension-permissions.md#security-model).
 

@@ -2,7 +2,8 @@
 
 use headless-config.nu [scenario-env panel-height headless]
 
-const MANIFEST = path self docs-images/images.toml
+export const MANIFEST = path self docs-images/images.toml
+export const GLASS = path self ../docs/images/glass.json
 const THEMES = [light dark]
 # Pages draw at twice their size, so `width` in the Markdown is half the PNG's.
 const SCALE = 2
@@ -10,11 +11,11 @@ const SCALE = 2
 # that differ, so these keep a busy one, such as scrolling emoji, near 250 KB, and text stays
 # readable on a Retina screen.
 const CLIP_SCALE = 1.25
-const CLIP_FPS = 10
+export const CLIP_FPS = 10
 # Clips render this many points tall, more than the panel ever is, and are cut to it.
 const CLIP_HEIGHT = 720
 # Room below the panel for the captions, so they never cover a row.
-const CAPTION_SPACE = 60
+export const CAPTION_SPACE = 60
 # How a clip's steps are paced, in seconds.
 const CLIP_START = 0.6
 const CLIP_TYPING = 0.12
@@ -41,7 +42,7 @@ const KEYS = {
 # docs/images/<page>/<name>-<theme>.webp, animated, with the keys they press drawn below the panel.
 #
 # Each comes from fixtures only, never from this Mac: an extension's own fixture through
-# `dupin ext snap`, or a headless launcher scenario with a scratch home holding the fixture
+# `dupin ext render`, or a headless launcher scenario with a scratch home holding the fixture
 # documents in ~/Documents, the stock apps in /System/Applications and the fixture clipboard
 # history. Without `--only`, files of the kinds rendered that the manifest no longer lists are
 # deleted.
@@ -80,7 +81,8 @@ def main [
     if $only == null {
         let expected = $files | path expand
         $kinds
-        | each {|kind| glob $"docs/images/**/*.(kind-extension $kind)" }
+        | each {|kind| kind-extensions $kind | each {|extension| glob $"docs/images/**/*.($extension)" } }
+        | flatten
         | flatten
         | where {|file| $file not-in $expected }
         | each {|file| rm $file }
@@ -88,21 +90,21 @@ def main [
     $rendered | update files {|row| $row.files | each { ls $in | get size.0 } | math sum } | rename image bytes
 }
 
-# Check that every image and clip the manifest lists exists in both themes, that docs/images
-# holds nothing else, that the Markdown embeds each in both themes and that everything the
-# Markdown embeds exists. Pixels differ from Mac to Mac (fonts, app icons, the GPU), so this
+# Check that every image and clip the manifest lists exists in each of its themes, that
+# docs/images holds nothing else, that the Markdown or the website embeds each and that
+# everything they embed exists. Pixels differ from Mac to Mac (fonts, app icons, the GPU), so this
 # checks presence rather than rendering them again.
 def "main check" []: nothing -> nothing {
     let root = $env.FILE_PWD | path dirname
     cd $root
     let problems = (
         problems (open $MANIFEST)
-        (glob docs/images/**/*.{png,webp} | each { path relative-to $root })
-        (glob docs/**/*.md | where {|doc| not ($doc | str contains /design/) } | each {|doc|
+        (glob docs/images/**/*.{png,webp,mp4} | each { path relative-to $root })
+        (glob docs/**/*.md | where {|doc| not ($doc | str contains /design/) } | append (glob website/src/**/*.{svelte,ts} | where {|file| not ($file | str ends-with .test.ts) }) | each {|doc|
             {path: ($doc | path relative-to $root), text: (open --raw $doc)}
         })
         {|path| $path | path exists }
-    )
+    ) | append (glass-problems (open $MANIFEST) (captured-glass))
     if ($problems | is-not-empty) {
         error make {
             msg: ($problems | str join "\n")
@@ -110,8 +112,24 @@ def "main check" []: nothing -> nothing {
     }
 }
 
-def kind-extension [kind: string]: nothing -> string {
-    if $kind == images { "png" } else { "webp" }
+# The extensions the files of `kind` have: clips are animated WebP, or MP4 with a WebP poster.
+def kind-extensions [kind: string]: nothing -> list<string> {
+    if $kind == images { [png] } else { [webp mp4] }
+}
+
+# The `glass = true` clips scripts/docs-glass.nu has recorded from the real app, by id, with how.
+export def captured-glass []: nothing -> record {
+    if ($GLASS | path exists) {
+        open $GLASS | get clips
+    } else {
+        {}
+    }
+}
+
+# Everything wrong with docs/images/glass.json: each clip it lists must be a `glass = true` clip.
+export def glass-problems [manifest: record, captured: record]: nothing -> list<string> {
+    let glass = manifest-entries $manifest [clips] | where {|clip| $clip.glass? | default false } | each {|clip| image-id $clip }
+    $captured | columns | where {|id| $id not-in $glass } | each {|id| $"($GLASS | path basename) lists ($id), which is not a `glass = true` clip" }
 }
 
 export def image-id [image: record]: nothing -> string {
@@ -119,7 +137,7 @@ export def image-id [image: record]: nothing -> string {
 }
 
 # The manifest's entries of `kinds`, each clip marked as one.
-def manifest-entries [manifest: record, kinds: list<string>]: nothing -> list<record> {
+export def manifest-entries [manifest: record, kinds: list<string>]: nothing -> list<record> {
     $kinds | each {|kind|
         $manifest | get --optional $kind | default [] | each {|entry|
             if $kind == clips { $entry | upsert clip true } else { $entry }
@@ -127,23 +145,52 @@ def manifest-entries [manifest: record, kinds: list<string>]: nothing -> list<re
     } | flatten
 }
 
-# The repository paths an image or clip is saved at, one for each theme.
-export def image-paths [image: record]: nothing -> list<string> {
+# The themes an image or clip is rendered in: both, unless it names `themes`.
+export def image-themes [image: record]: nothing -> list<string> {
+    $image.themes? | default $THEMES
+}
+
+# The repository path an image or clip is saved at in `theme`.
+export def theme-path [image: record, theme: string]: nothing -> string {
     let clip = ($image.clip? | default false) or $image.steps? != null
-    let extension = kind-extension (if $clip { "clips" } else { "images" })
-    $THEMES | each {|theme| $"docs/images/(image-id $image)-($theme).($extension)" }
+    let extension = if not $clip { "png" } else if ($image.video? | default false) { "mp4" } else { "webp" }
+    $"docs/images/(image-id $image)-($theme).($extension)"
+}
+
+# The still a video clip shows before it plays, and in place of it under reduced motion: its
+# last frame.
+export def poster-path [image: record, theme: string]: nothing -> string {
+    $"docs/images/(image-id $image)-($theme)-poster.webp"
+}
+
+# The repository paths an image or clip is saved at: one for each theme, and a video clip's
+# poster beside each.
+export def image-paths [image: record]: nothing -> list<string> {
+    image-themes $image | each {|theme|
+        if ($image.video? | default false) {
+            [(theme-path $image $theme) (poster-path $image $theme)]
+        } else {
+            [(theme-path $image $theme)]
+        }
+    } | flatten
 }
 
 # The images and clips a Markdown document embeds, as repository paths: each `src` or `srcset`
 # that is a relative path to a PNG or WebP, outside code blocks.
 export def embedded [doc: string, text: string]: nothing -> list<string> {
     let folder = $doc | path dirname
-    $text
-    | str replace --all --regex '(?s)```.*?```' ''
-    | parse --regex '(?:src|srcset)="(?P<url>[^"]+\.(?:png|webp))"'
+    let text = $text | str replace --all --regex '(?s)```.*?```' ''
+    let relative = $text
+    | parse --regex '(?:src|srcset|poster)="(?P<url>[^"/][^"]*\.(?:png|webp|mp4))"'
     | get url
     | where {|url| not ($url =~ '^[a-z]+:') }
     | each {|url| resolve-dots ($folder | path join $url) }
+    # The website's pages name the images at the paths the site serves them from.
+    let served = $text
+    | parse --regex `["'](?P<url>/docs/images/[^"']+\.(?:png|webp|mp4))["']`
+    | get url
+    | each { str substring 1.. }
+    $relative | append $served
 }
 
 def resolve-dots [path: string]: nothing -> string {
@@ -244,7 +291,7 @@ def render [
     {image: $id, files: $files}
 }
 
-# An extension's fixture, through `dupin ext snap`, with its theme set to each of ours.
+# An extension's fixture, through `dupin ext render`, with its theme set to each of ours.
 def render-extension [image: record, bin: path, tmp: path]: nothing -> list<string> {
     let fixture = $image.extension | path join fixtures $image.fixture
     let step = if $image.step? == null {
@@ -255,15 +302,15 @@ def render-extension [image: record, bin: path, tmp: path]: nothing -> list<stri
             ($image.step | into string)
         ]
     }
-    image-paths $image | zip $THEMES | each {|pair|
+    image-paths $image | zip (image-themes $image) | each {|pair|
         let themed = $tmp | path join $"(image-id $image | str replace --all / -)-($pair.1).json"
         open $fixture | upsert environment.theme $pair.1 | to json | save --force $themed
-        headless $bin ext snap $image.extension $themed $pair.0 ...$step
+        headless $bin ext render $image.extension $themed $pair.0 ...$step
         $pair.0
     }
 }
 
-# A headless launcher scenario, with its sidecar fixtures as scripts/snap.nu reads them. With a
+# A headless launcher scenario, with its sidecar fixtures as scripts/render.nu reads them. With a
 # `window`, that window is drawn instead of the panel, at `width` and the height of its content.
 def render-scenario [
     image: record
@@ -288,7 +335,7 @@ def render-scenario [
     } else {
         $"($image.width)x(open $tree | content-height)"
     }
-    image-paths $image | zip $THEMES | each {|pair|
+    image-paths $image | zip (image-themes $image) | each {|pair|
         with-env $environment {
             headless $bin ...$script --theme $pair.1 --snap $pair.0 --scale ($SCALE | into string) --size $size
         }
@@ -305,6 +352,10 @@ def render-clip [
     bin: path
     tmp: path
 ]: nothing -> list<string> {
+    if (image-id $clip) in (captured-glass) {
+        print --stderr $"  kept its Liquid Glass recording; `just docs-glass` records it again"
+        return (image-paths $clip)
+    }
     let name = image-id $clip | str replace --all / -
     let timeline = clip-timeline $clip.steps
     let script = $tmp | path join $"($name)-script.json"
@@ -316,34 +367,55 @@ def render-clip [
         $tmp
     )
     let run = [--script $script --realtime]
-    image-paths $clip | zip $THEMES | each {|pair|
-        let frames = $tmp | path join $"($name)-($pair.1)-frames"
+    let scale = $clip.scale? | default $CLIP_SCALE
+    let captions = if ($clip.captions? | default true) { $timeline.captions } else { null }
+    image-themes $clip | each {|theme|
+        let frames = $tmp | path join $"($name)-($theme)-frames"
         with-env $environment {
             (
-                headless $bin ...$run --theme $pair.1 --size $"680x($CLIP_HEIGHT)"
-                --scale ($CLIP_SCALE | into string) --fps ($CLIP_FPS | into string) --out $frames
+                headless $bin ...$run --theme $theme --size $"680x($CLIP_HEIGHT)"
+                --scale ($scale | into string) --fps ($CLIP_FPS | into string) --out $frames
             )
         }
         let pngs = glob ($frames | path join frame_*.png) | sort
-        finish-clip $pngs $timeline.captions $pair.0 ($tmp | path join $"($name)-captions")
-        $pair.0
-    }
+        let out = theme-path $clip $theme
+        let video = if ($clip.video? | default false) {
+            {poster: (poster-path $clip $theme), background: ($clip.background? | default "#000000")}
+        }
+        finish-clip $pngs $captions $out ($tmp | path join $"($name)-captions") $scale $video
+        [$out] | append ($video | get --optional poster | default [])
+    } | flatten
 }
 
-# Cuts `pngs`, a clip's frames at `CLIP_SCALE`, to the lowest edge the panel reaches in any
-# frame, since it grows and shrinks as results change, with room for the captions below; draws
-# the captions; and encodes them as an animated WebP at `out`.
+# Cuts `pngs`, a clip's frames at `scale`, to the lowest edge the panel reaches in any
+# frame, since it grows and shrinks as results change, with room for the captions below unless
+# `captions` is null; draws the captions; and encodes them at `out`: as an animated WebP, or with
+# `video`, over its `background` as an MP4 with its last frame as a WebP `poster`.
 def finish-clip [
     pngs: list<string>
-    captions: list<record>
+    captions
     out: path
     folder: path
+    scale: number
+    video?: record
 ]: nothing -> nothing {
     let bottom = ^magick ...$pngs -background none -layers merge -format "%@" info: | parse "{w}x{h}+{x}+{y}" | first | ($in.h | into int) + ($in.y | into int)
     let width = ^magick identify -format "%w" ($pngs | first) | into int
-    let height = $bottom + ($CAPTION_SPACE * $CLIP_SCALE | math round)
+    let space = if $captions == null {
+        0
+    } else {
+        $CAPTION_SPACE * $scale | math round
+    }
+    # H.264 takes only even sides.
+    let height = ($bottom + $space + 1) // 2 * 2
     ^magick mogrify -gravity north -background none -crop $"($width)x($bottom)+0+0" +repage -extent $"($width)x($height)" ...$pngs
-    caption $pngs $captions $folder
+    if $captions != null {
+        caption $pngs $captions $folder $scale
+    }
+    if $video != null {
+        encode-video $pngs $out $video
+        return
+    }
     # Lossy frames: lossless ones are several times larger, and the panel's soft glass hides
     # the difference. Frames that repeat the last cost nothing.
     let result = ^img2webp -loop 0 -lossy -q 75 -m 6 -d (1000 // $CLIP_FPS | into string) ...$pngs -o $out | complete
@@ -352,7 +424,24 @@ def finish-clip [
     }
 }
 
-# An extension's fixture played through `dupin ext snap --record`, up to `step` or its last
+# Encodes `pngs` over `video.background` as an H.264 MP4 at `out`, which every browser plays and
+# which takes a fraction of an animated WebP's bytes when a backdrop shader changes every pixel of
+# every frame, and saves the last frame as `video.poster`.
+export def encode-video [pngs: list<string>, out: path, video: record]: nothing -> nothing {
+    ^magick mogrify -background $video.background -flatten ...$pngs
+    let frames = $pngs | first | path dirname | path join "frame_*.png"
+    let result = (
+        ^ffmpeg -loglevel error -y -framerate ($CLIP_FPS | into string) -pattern_type glob -i $frames
+        -c:v libx264 -crf 26 -preset veryslow -tune animation -pix_fmt yuv420p -movflags +faststart -an $out
+        | complete
+    )
+    if $result.exit_code != 0 {
+        error make {msg: $"ffmpeg failed for ($out):\n($result.stderr)"}
+    }
+    ^magick ($pngs | last) -quality 85 $video.poster
+}
+
+# An extension's fixture played through `dupin ext render --record`, up to `step` or its last
 # step, as a clip: the replay's own keys, captioned from the script it records beside the
 # frames.
 def render-extension-clip [clip: record, bin: path, tmp: path]: nothing -> list<string> {
@@ -367,17 +456,17 @@ def render-extension-clip [clip: record, bin: path, tmp: path]: nothing -> list<
         ]
     }
     let scale = open $fixture | get --optional environment.window.scale | default 2
-    image-paths $clip | zip $THEMES | each {|pair|
+    image-paths $clip | zip (image-themes $clip) | each {|pair|
         let themed = $tmp | path join $"($name)-($pair.1).json"
         open $fixture | upsert environment.theme $pair.1 | to json | save --force $themed
         let frames = $tmp | path join $"($name)-($pair.1)-frames"
         let still = $tmp | path join $"($name)-($pair.1).png"
-        headless $bin ext snap $clip.extension $themed $still ...$step --record $frames
+        headless $bin ext render $clip.extension $themed $still ...$step --record $frames
         let pngs = glob ($frames | path join frame_*.png) | sort
         let points = (^magick identify -format "%w" ($pngs | first) | into int) / $scale
         ^magick mogrify -resize $"($points * $CLIP_SCALE | math round)x" ...$pngs
         let captions = script-captions (open ($frames | path join script.json)).events
-        finish-clip $pngs $captions $pair.0 ($tmp | path join $"($name)-captions")
+        finish-clip $pngs $captions $pair.0 ($tmp | path join $"($name)-captions") $CLIP_SCALE
         $pair.0
     }
 }
@@ -421,11 +510,16 @@ export def script-captions [events: list<record>]: nothing -> list<record> {
 # Draws each caption on the frames it is shown in, as a pill centred at the bottom: from its
 # time until the next caption's, or `CLIP_HOLD` seconds, whichever is sooner. One style for both
 # themes, in Inter, which `DUPIN_CAPTION_FONT` names (the dev shell sets it).
-def caption [frames: list<string>, captions: list<record>, folder: path]: nothing -> nothing {
+export def caption [
+    frames: list<string>
+    captions: list<record>
+    folder: path
+    scale: number
+]: nothing -> nothing {
     mkdir $folder
     let font = $env.DUPIN_CAPTION_FONT
     let px = {|points|
-        $points * $CLIP_SCALE | math round
+        $points * $scale | math round
     }
     let spans = $captions | enumerate | each {|entry|
         let next = $captions | get --optional ($entry.index + 1) | get --optional t | default 1e9
@@ -542,7 +636,7 @@ export def key-caption [step: record]: nothing -> string {
 #
 # Each runs in a home of its own, with its configuration in ~/.config/dupin, so the paths Settings
 # shows are the same on every Mac and in every run.
-def scratch-environment [
+export def scratch-environment [
     scenario: path
     image: record
     manifest: record
@@ -562,6 +656,14 @@ def scratch-environment [
     ) $config
     if $image.config? != null {
         cp $image.config ($config | path join dupin config.toml)
+    }
+    # `backdrop` picks an example shader as Settings does, from the `shaders` folder.
+    cp --recursive examples/shaders ($config | path join dupin shaders)
+    if $image.backdrop? != null {
+        # Parsed and written again, since a key appended to the text would land in its last table.
+        let file = $config | path join dupin config.toml
+        let settings = if ($file | path exists) { open $file } else { {} }
+        $settings | upsert backdrop $image.backdrop | to toml | save --force $file
     }
     let environment = {
         XDG_DATA_HOME: ($tmp | path join $"($name)-data")

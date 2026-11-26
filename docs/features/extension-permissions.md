@@ -9,19 +9,20 @@ An extension reaches nothing on its own. It declares the host services it wants 
 }
 ```
 
-| Capability                         | Scope names                                    | While you type   | Needs an action you chose | macOS access  |
-| ---------------------------------- | ---------------------------------------------- | ---------------- | ------------------------- | ------------- |
-| [`http`](#http)                    | `http:<origin>`                                | GET and HEAD     | Any other method          |               |
-| [`files`](#files)                  | `files:<name>`                                 | Reading, listing |                           |               |
-| [`exec`](#exec)                    | `exec:<name>`, `script:<name>`                 |                  | Running a program         |               |
-| [`storage`](#storage)              | `storage`, `storage:sync`                      | Everything       |                           |               |
-| [`dictionary`](#dictionary)        | `dictionary`                                   | Lookups          |                           |               |
-| [`calculator`](#calculator)        | `calculator`                                   | Evaluating       |                           |               |
-| [`snippets`](#snippets)            | `snippets`                                     |                  | Changing snippets         |               |
-| [`calendar`](#calendar)            | `calendar`                                     | Reading events   |                           | Calendars     |
-| [`windows`](#windows)              | `windows:read`, `windows:arrange`              | Reading          | Moving a window           | Accessibility |
-| [`clipboard`](#clipboard)          | `clipboard:read`, `:write`, `:watch`, `:paste` | Watching         | Reading, writing, pasting | Yes           |
-| [`rows`, `query`](#rows-and-query) | `rows:<kind>`, `query`                         | Filters          | Kind actions              |               |
+| Capability                         | Scope names                                    | While you type        | Needs an action you chose | macOS access  |
+| ---------------------------------- | ---------------------------------------------- | --------------------- | ------------------------- | ------------- |
+| [`http`](#http)                    | `http:<origin>`                                | GET and HEAD          | Any other method          |               |
+| [`files`](#files)                  | `files:<name>`                                 | Reading, listing      |                           |               |
+| [`exec`](#exec)                    | `exec:<name>`, `script:<name>`                 | `background` profiles | Running any other program |               |
+| [`storage`](#storage)              | `storage`, `storage:sync`                      | Everything            |                           |               |
+| [`dictionary`](#dictionary)        | `dictionary`                                   | Lookups               |                           |               |
+| [`calculator`](#calculator)        | `calculator`                                   | Evaluating            |                           |               |
+| [`snippets`](#snippets)            | `snippets`                                     |                       | Changing snippets         |               |
+| [`calendar`](#calendar)            | `calendar`                                     | Reading events        |                           | Calendars     |
+| [`windows`](#windows)              | `windows:read`, `windows:arrange`              | Reading               | Moving a window           | Accessibility |
+| [`context`](#context)              | `context:frontmost`, `context:document`        | Reading               |                           |               |
+| [`clipboard`](#clipboard)          | `clipboard:read`, `:write`, `:watch`, `:paste` | Watching              | Reading, writing, pasting | Yes           |
+| [`rows`, `query`](#rows-and-query) | `rows:<kind>`, `query`                         | Filters               | Kind actions              |               |
 
 <details>
 <summary>Every capability declared</summary>
@@ -30,7 +31,7 @@ An extension reaches nothing on its own. It declares the host services it wants 
 "capabilities": {
 	"http": [{ "origin": "https://api.github.com", "methods": ["GET"] }],
 	"files": { "notes": { "kind": "directory", "access": ["read", "list"] } },
-	"exec": { "git-status": { "args": ["status", "--short", "{path}"], "output": true }, "@script:open-in-zed": {} },
+	"exec": { "git-status": { "program": "/usr/bin/git", "args": ["-C", "{path}", "status"], "output": true, "background": true }, "@script:open-in-zed": {} },
 	"storage": { "quotaBytes": 1048576, "retentionDays": 30 },
 	"clipboard": ["read", "write", "watch", "paste"],
 	"dictionary": ["lookup"],
@@ -38,6 +39,7 @@ An extension reaches nothing on its own. It declares the host services it wants 
 	"snippets": ["write"],
 	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 },
 	"windows": ["read", "arrange"],
+	"context": ["frontmost", "document"],
 	"rows": { "app": ["title"], "file": ["path"] },
 	"query": ["read"]
 }
@@ -61,7 +63,7 @@ Dupin checks every request against the declaration, the version you allowed and 
 <summary>The rules in full</summary>
 
 - **A declaration is the most an extension can get.** Anything malformed, unknown or out of range rejects the package with a diagnostic naming the field, such as `dupin.capabilities.http[0].origin`.
-- **Each item is a scope you allow on its own**: one origin, one named folder, one profile. Its name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `rows:file` or `query`, is what errors, Settings and grant files call it.
+- **Each item is a scope you allow on its own**: one origin, one named folder, one profile. Its name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `context:document`, `rows:file` or `query`, is what errors, Settings and grant files call it.
 - **It starts off.** An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
 - **Each scope asks once.** A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer.
 - **Choices belong to a version.** A change to `package.json` or any module is another revision: one that declares a scope no wider keeps your choice, one that widens it asks again, and one that drops it forgets it.
@@ -71,7 +73,7 @@ Dupin checks every request against the declaration, the version you allowed and 
 <details>
 <summary>Allowing, denying and revoking</summary>
 
-Settings → Extensions lists the same requests as the panel, and every scope each extension declares with whether it is allowed, with **Allow**, **Revoke** and **Request Access**. A files or exec scope is allowed from Settings, where you pick the file, folder or program. Allowing runs nothing the extension asked for before; use it again. **Deny** revokes the scope until you allow it in Settings.
+Settings → Extensions lists the same requests as the panel, and every scope each extension declares with whether it is allowed, with **Allow**, **Revoke** and **Request Access**. A files or exec scope whose file, folder or program the extension doesn't name is allowed from Settings, where you pick it. Allowing runs nothing the extension asked for before; use it again. **Deny** revokes the scope until you allow it in Settings.
 
 Revoking a scope or turning an extension off takes effect at once: a request in flight finishes, but its result is dropped, the query's rows are dropped with it, and allowing again doesn't bring them back.
 
@@ -80,7 +82,7 @@ Revoking a scope or turning an extension off takes effect at once: a request in 
 <details>
 <summary>What needs an action you chose</summary>
 
-While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary, the calculator, calendars, the displays and the focused window, and its own `storage`, writes included. Any other HTTP method, a program or script, reading, writing or pasting from the clipboard, moving a window and changing your snippets need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
+While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary, the calculator, calendars, the displays and the focused window, the app and file you were using, its own `storage`, writes included, and a program whose profile you allowed to run in the background. Any other HTTP method, any other program or script, reading, writing or pasting from the clipboard, moving a window and changing your snippets need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
 
 </details>
 
@@ -186,18 +188,21 @@ Dupin sends no cookies or credentials of its own, connects only to the permit's 
 
 ## Files
 
-`"files": { "notes": { "kind": "directory", "access": ["read", "list"] } }` declares named scopes; you pick the file or folder each one is when you allow it in Settings.
+`"files": { "notes": { "kind": "directory", "access": ["read", "list"] } }` declares named scopes; you pick the file or folder each one is when you allow it in Settings, unless the scope names it with `path`.
 
 | Function                      | Returns                                             |
 | ----------------------------- | --------------------------------------------------- |
 | `files.list(scope, path?)`    | Entries with `name`, `kind`, `size` and a `handle`  |
 | `files.readText(scope, path)` | The text of a file                                  |
 | `files.read(scope, path)`     | The text, its `size` and whether it was `truncated` |
+| `files.root(scope)`           | The absolute path of the file or folder it is       |
 
 <details>
 <summary>Names, paths and an example</summary>
 
 A files scope's name is lowercase letters, digits, `-` and `_`. Paths are relative to the scope with `/`, and the [files capability](../extension-capabilities.md#files) describes how they are checked.
+
+`"path": "~/src"` names the folder or file, absolute or under your home folder, so allowing the scope binds it there without a pick, and consent shows it: **Allow _Name_ to list the folder ~/src?** While you haven't decided on such a scope and the folder doesn't exist on this Mac, a request fails with `not-found` and asks nothing, so an extension can name several likely folders and ask only about yours. `files.root(scope)` needs the scope's grant and returns where it is bound, so the extension can name what it lists to Dupin's actions, such as Reveal, and to its own programs.
 
 ```js
 import { files } from 'dupin';
@@ -214,12 +219,21 @@ export async function search(query) {
 
 ## Exec
 
-`"exec"` declares named profiles, each an argument template, or `@script:<name>` for one of your [script commands](./scripts.md). `exec.run(profile, inputs)` runs one, only in an action; you pick the program when you allow it.
+`"exec"` declares named profiles, each an argument template, or `@script:<name>` for one of your [script commands](./scripts.md). `exec.run(profile, inputs)` runs one, only in an action unless the profile declares `background`; you pick the program when you allow it, unless the profile names it with `program`.
 
 <details>
 <summary>Profiles, results and an example</summary>
 
-Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr. `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`.
+Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr, and `sshAgent: true` hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys; the extension never sees the socket or the keys. `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`. A command times out before the call that ran it would, so a slow one ends with `timedOut` and the call carries on.
+
+| Profile field | Meaning                                                                                                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `args`        | Required. The argument template.                                                                                                                                                                                                           |
+| `output`      | Asks to receive stdout and stderr.                                                                                                                                                                                                         |
+| `program`     | The program's absolute path, such as `/usr/bin/git`. Allowing the profile binds it to that program without a pick, and consent names it.                                                                                                   |
+| `background`  | The profile may run while you type, in `items` and in event handlers, not only in an action you chose. Consent says so: **…, even while you type and without an action you chose**. Declaring it later is a wider scope, which asks again. |
+| `outputBytes` | With `output`, the most of each stream it receives: 1 byte to 1 MiB, 64 KiB without it. Declaring more later asks again.                                                                                                                   |
+| `sshAgent`    | Hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys; the extension never sees the socket or the keys.                                                                                                               |
 
 ```js
 import { exec } from 'dupin';
@@ -235,7 +249,7 @@ export const actions = {
 };
 ```
 
-Programs and scripts run with your own access, without a shell, as the [exec capability](../extension-capabilities.md#exec) describes; consent shows the program and every argument, each in quotes, in full. An argument may not hold control or invisible formatting characters, which could hide or reorder what consent shows.
+Programs and scripts run with your own access, without a shell, as the [exec capability](../extension-capabilities.md#exec) describes; consent shows the program and every argument, each in quotes, in full. Declare `background` only for a profile that reads, such as `git status`, since it runs without you choosing it. An argument may not hold control or invisible formatting characters, which could hide or reorder what consent shows.
 
 </details>
 
@@ -535,6 +549,41 @@ export const actions: Actions = {
 Frames are in points, in one space for every display: the origin is the primary display's top-left corner and `y` grows downwards. The extension computes where a window goes; Dupin only reads and moves it.
 
 A frame that lies off every display is `out-of-scope`, and one that isn't finite, starts more than 1,000,000 points from the origin or is not from above 0 to 100,000 points wide and tall is `invalid`.
+
+</details>
+
+## Context
+
+`"context": ["frontmost", "document"]` lets an extension read where you were when the panel opened: `context.frontmost()` is the app that was in front, and `context.document()` the file its focused window showed. Each is a scope of its own, so a package can know you were in your editor without seeing which file you had open.
+
+```js
+const app = await context.frontmost(); // { name: "Zed", bundleId: "dev.zed.Zed", pid: 501 } or null
+const document = await context.document(); // { path: "/Users/me/dupin/README.md" } or null
+```
+
+<details>
+<summary>What each returns, and when it is null</summary>
+
+| Access      | Function              | Returns                                                                                                                         |
+| ----------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `frontmost` | `context.frontmost()` | `{ name, bundleId, pid }` of the app in front when the panel opened, or `null` when Dupin itself was; `bundleId` may be `null`. |
+| `document`  | `context.document()`  | `{ path }`, the absolute path of the local file that app's focused window showed, or `null`.                                    |
+
+Dupin notes the app as the panel opens, and reads the document the first time a package asks after that, once, so every answer holds until the panel opens again and typing never waits on the other app. Neither needs an action you chose, and neither asks macOS for anything:
+
+- The document is what the app itself reports through Accessibility, as editors such as TextEdit, Xcode and Preview do. It is `null` for an app that reports none, such as a terminal or a browser, for anything that isn't a local file, and while Dupin isn't allowed Accessibility; Dupin uses that access only if another feature, such as Window Management or Selected text, already has it, and never asks for it for this.
+- Text you had selected reaches a package as the query when you open Dupin with the [Selection hotkey](./selected-text.md), so there is no capability for it.
+
+A package can put first what belongs to where you were, such as the project holding the open file:
+
+```js
+import { context } from 'dupin';
+
+export async function search() {
+	const document = await context.document().catch(() => null);
+	return document ? [{ title: document.path.split('/').at(-1), subtitle: document.path }] : [];
+}
+```
 
 </details>
 

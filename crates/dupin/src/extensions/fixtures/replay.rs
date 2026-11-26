@@ -1,7 +1,7 @@
 //! A fixture's steps replayed as the launcher would take them: queries under the keyword or on
 //! a page a view opened, rows chosen, actions run and the effects they return, pages opened and
 //! closed, and forms filled in and submitted, with what a person would press for each step, so
-//! `snap` drives the headless launcher the same way.
+//! `render` drives the headless launcher the same way.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -609,6 +609,18 @@ impl Replayer<'_> {
             }
             Some(ActionEffect::Paste) => {
                 outcome.insert("panel".into(), "paste".into());
+            }
+            Some(ActionEffect::Enter { command, .. }) if !self.extension.may_enter(&command) => {
+                refuse(
+                    outcome,
+                    "only a package that ships with Dupin may enter another command",
+                );
+            }
+            Some(ActionEffect::Enter { command, query }) => {
+                outcome.insert(
+                    "panel".into(),
+                    json!({ "enter": { "command": command, "query": query } }),
+                );
             }
             Some(ActionEffect::Push {
                 view, title, state, ..

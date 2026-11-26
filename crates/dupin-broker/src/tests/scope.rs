@@ -44,6 +44,8 @@ fn scope_keys_round_trip_through_their_written_form() {
         "calendar",
         "windows:read",
         "windows:arrange",
+        "context:frontmost",
+        "context:document",
     ] {
         assert_eq!(key(written).to_string(), written);
     }
@@ -53,6 +55,9 @@ fn scope_keys_round_trip_through_their_written_form() {
         "files:",
         "clipboard:type",
         "windows:move",
+        "context",
+        "context:selection",
+        "context:Frontmost",
         "windows",
         "network",
         "storage:x",
@@ -88,6 +93,7 @@ fn an_approval_covers_the_same_or_a_narrower_declaration_only() {
         name: name("notes"),
         kind,
         access: access.iter().copied().collect(),
+        path: None,
     };
     assert!(
         files(FilesKind::Directory, &[FilesAccess::Read, FilesAccess::List])
@@ -102,14 +108,38 @@ fn an_approval_covers_the_same_or_a_narrower_declaration_only() {
             .covers(&files(FilesKind::Directory, &[FilesAccess::Read]))
     );
 
-    let exec = |args: &[&str], output| Scope::Exec {
+    let exec = |args: &[&str], output, ssh_agent| Scope::Exec {
         name: name("git"),
         args: args.iter().map(|arg| arg.to_string()).collect(),
         output,
+        program: None,
+        background: false,
+        ssh_agent,
+        output_bytes: None,
     };
-    assert!(exec(&["status"], true).covers(&exec(&["status"], false)));
-    assert!(!exec(&["status"], false).covers(&exec(&["status"], true)));
-    assert!(!exec(&["status"], true).covers(&exec(&["push"], true)));
+    assert!(exec(&["status"], true, false).covers(&exec(&["status"], false, false)));
+    assert!(!exec(&["status"], false, false).covers(&exec(&["status"], true, false)));
+    assert!(!exec(&["status"], true, false).covers(&exec(&["push"], true, false)));
+    assert!(exec(&["status"], false, true).covers(&exec(&["status"], false, false)));
+    assert!(
+        !exec(&["status"], false, false).covers(&exec(&["status"], false, true)),
+        "handing over the SSH agent widens the profile"
+    );
+    let bounded = |output_bytes| Scope::Exec {
+        name: name("ps"),
+        args: vec!["-ax".into()],
+        output: true,
+        program: None,
+        background: false,
+        ssh_agent: false,
+        output_bytes,
+    };
+    assert!(bounded(Some(1 << 20)).covers(&bounded(None)));
+    assert!(bounded(None).covers(&bounded(Some(1024))));
+    assert!(
+        !bounded(None).covers(&bounded(Some(1 << 20))),
+        "reading more output asks again"
+    );
 
     let script = |output| Scope::Script {
         name: name("zed"),
@@ -186,12 +216,49 @@ fn windows_scopes_need_accessibility_and_describe_themselves() {
 }
 
 #[test]
+fn context_scopes_need_no_macos_access_or_activation_and_describe_themselves() {
+    let context = caps(json!({ "context": ["frontmost", "document"] }));
+    let described: Vec<_> = context
+        .scopes()
+        .map(|scope| (scope.key().to_string(), scope.to_string(), scope.os_permission()))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            (
+                "context:frontmost".to_string(),
+                "see which app you were using when Dupin opened".to_string(),
+                None
+            ),
+            (
+                "context:document".to_string(),
+                "see which file you were viewing when Dupin opened".to_string(),
+                None
+            ),
+        ]
+    );
+    let scope = |access| Scope::Context { access };
+    assert!(scope(ContextAccess::Frontmost).covers(&scope(ContextAccess::Frontmost)));
+    assert!(
+        !scope(ContextAccess::Frontmost).covers(&scope(ContextAccess::Document)),
+        "seeing the app never lets a package see the file"
+    );
+    for access in [ContextAccess::Frontmost, ContextAccess::Document] {
+        assert!(!Request::Context(access).needs_activation(&scope(access)));
+    }
+}
+
+#[test]
 fn exec_consent_shows_where_each_argument_starts_and_ends() {
     let exec = |args: &[&str]| {
         Scope::Exec {
             name: ScopeName::new("run").unwrap(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
             output: false,
+            program: None,
+            background: false,
+            ssh_agent: false,
+            output_bytes: None,
         }
         .to_string()
     };
@@ -199,6 +266,19 @@ fn exec_consent_shows_where_each_argument_starts_and_ends() {
     assert_eq!(
         exec(&["a`, and nothing else", "--install-extension", "x"]),
         "run the program you pick for “run” with \"a`, and nothing else\" \"--install-extension\" \"x\""
+    );
+    let agent = Scope::Exec {
+        name: ScopeName::new("ssh").unwrap(),
+        args: vec!["{host}".into()],
+        output: true,
+        program: None,
+        background: false,
+        ssh_agent: true,
+        output_bytes: Some(1_048_576),
+    };
+    assert_eq!(
+        agent.to_string(),
+        "run the program you pick for “ssh” with \"{host}\", using the keys your SSH agent holds, and read up to 1048576 bytes of its output"
     );
 }
 

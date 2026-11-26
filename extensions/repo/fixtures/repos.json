@@ -1,0 +1,713 @@
+{
+	"fixture": 1,
+	"description": "ghq's repositories and those found in ~/src, each once, the ones Git was read for first, newest commit first, with their branch, changes and when they were read; the name, owner/name or a path segment finds one; Enter opens it in the editor and ⌘Enter in the terminal.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "Europe/London",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ghq": {
+				"github.com/ryoppippi/ccusage/.git/HEAD": "ref: refs/heads/main\n",
+				"github.com/x-ryoppippi/dupin/.git/HEAD": "ref: refs/heads/main\n",
+				"gitlab.com/someone/notes/.git/HEAD": "ref: refs/heads/main\n"
+			},
+			"src": {
+				"not-a-repo/README.md": "Just a folder.\n",
+				"scratch/.git/HEAD": "ref: refs/heads/main\n",
+				"scratch/node_modules/left-pad/.git/HEAD": "ref: refs/heads/main\n"
+			}
+		},
+		"exec": [
+			{
+				"profile": "ghq-list",
+				"status": 0,
+				"stdout": "/Users/dupin/ghq/github.com/ryoppippi/ccusage\n/Users/dupin/ghq/github.com/x-ryoppippi/dupin\n/Users/dupin/ghq/gitlab.com/someone/notes\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-status",
+				"args": [
+					"--no-optional-locks",
+					"-c",
+					"core.fsmonitor=false",
+					"-C",
+					"/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+					"status",
+					"--porcelain=v2",
+					"--branch"
+				],
+				"status": 0,
+				"stdout": "# branch.oid 3c798da8\n# branch.head feat/repo\n# branch.upstream origin/feat/repo\n# branch.ab +2 -0\n1 .M N... 100644 100644 100644 aaaa bbbb crates/dupin/src/main.rs\n? extensions/repo/main.ts\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-last-commit",
+				"args": [
+					"-C",
+					"/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+					"log",
+					"-1",
+					"--format=%ct"
+				],
+				"status": 0,
+				"stdout": "1795680000\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-remote",
+				"args": [
+					"-C",
+					"/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+					"config",
+					"--get",
+					"remote.origin.url"
+				],
+				"status": 0,
+				"stdout": "https://ryoppippi@github.com/x-ryoppippi/dupin.git\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-status",
+				"args": [
+					"--no-optional-locks",
+					"-c",
+					"core.fsmonitor=false",
+					"-C",
+					"/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+					"status",
+					"--porcelain=v2",
+					"--branch"
+				],
+				"status": 0,
+				"stdout": "# branch.oid 1234abcd\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -3\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-last-commit",
+				"args": [
+					"-C",
+					"/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+					"log",
+					"-1",
+					"--format=%ct"
+				],
+				"status": 0,
+				"stdout": "1795500000\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-remote",
+				"args": [
+					"-C",
+					"/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+					"config",
+					"--get",
+					"remote.origin.url"
+				],
+				"status": 0,
+				"stdout": "git@github.com:ryoppippi/ccusage.git\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-status",
+				"args": [
+					"--no-optional-locks",
+					"-c",
+					"core.fsmonitor=false",
+					"-C",
+					"/Users/dupin/ghq/gitlab.com/someone/notes",
+					"status",
+					"--porcelain=v2",
+					"--branch"
+				],
+				"status": 128,
+				"stdout": "",
+				"stderr": "fatal: not a git repository\n"
+			},
+			{
+				"profile": "git-status",
+				"args": [
+					"--no-optional-locks",
+					"-c",
+					"core.fsmonitor=false",
+					"-C",
+					"/Users/dupin/src/scratch",
+					"status",
+					"--porcelain=v2",
+					"--branch"
+				],
+				"status": 0,
+				"stdout": "# branch.oid (initial)\n# branch.head (detached)\n",
+				"stderr": ""
+			},
+			{
+				"profile": "git-last-commit",
+				"args": ["-C", "/Users/dupin/src/scratch", "log", "-1", "--format=%ct"],
+				"status": 128,
+				"stdout": "",
+				"stderr": "fatal: your current branch does not have any commits yet\n"
+			},
+			{
+				"profile": "git-remote",
+				"args": ["-C", "/Users/dupin/src/scratch", "config", "--get", "remote.origin.url"],
+				"status": 1,
+				"stdout": "",
+				"stderr": ""
+			},
+			{
+				"profile": "open-app",
+				"args": ["-b", "com.apple.Terminal", "/Users/dupin/ghq/github.com/ryoppippi/ccusage"],
+				"status": 0,
+				"stdout": "",
+				"stderr": ""
+			},
+			{
+				"profile": "open-app",
+				"args": ["-b", "com.microsoft.VSCode", "/Users/dupin/ghq/github.com/ryoppippi/ccusage"],
+				"status": 1,
+				"stdout": "",
+				"stderr": "Unable to find application with identifier com.microsoft.VSCode\n"
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "feat/repo ↑2"
+							},
+							{
+								"tag": "2 changes"
+							},
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+								"title": "Reveal in Finder"
+							},
+							{
+								"title": "Open on GitHub",
+								"url": "https://github.com/x-ryoppippi/dupin"
+							},
+							{
+								"copy": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+								"title": "Copy Path"
+							},
+							{
+								"copy": "https://github.com/x-ryoppippi/dupin.git",
+								"title": "Copy Remote URL"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/ghq/github.com/x-ryoppippi/dupin"
+								},
+								{
+									"label": "Branch",
+									"text": "feat/repo"
+								},
+								{
+									"label": "Working tree",
+									"text": "2 changed files"
+								},
+								{
+									"label": "Upstream",
+									"text": "2 ahead, 0 behind"
+								},
+								{
+									"label": "Last commit",
+									"text": "26 Nov 2026, 08:00"
+								},
+								{
+									"label": "Remote",
+									"text": "https://github.com/x-ryoppippi/dupin.git"
+								},
+								{
+									"label": "Checked",
+									"text": "26 Nov 2026, 09:00"
+								}
+							]
+						},
+						"id": "r07b423fc5da800b6",
+						"keywords": ["x-ryoppippi/dupin", "x-ryoppippi", "github.com"],
+						"subtitle": "x-ryoppippi · github.com",
+						"title": "dupin"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "main ↓3"
+							},
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+								"title": "Reveal in Finder"
+							},
+							{
+								"title": "Open on GitHub",
+								"url": "https://github.com/ryoppippi/ccusage"
+							},
+							{
+								"copy": "/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+								"title": "Copy Path"
+							},
+							{
+								"copy": "git@github.com:ryoppippi/ccusage.git",
+								"title": "Copy Remote URL"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+								},
+								{
+									"label": "Branch",
+									"text": "main"
+								},
+								{
+									"label": "Working tree",
+									"text": "Clean"
+								},
+								{
+									"label": "Upstream",
+									"text": "0 ahead, 3 behind"
+								},
+								{
+									"label": "Last commit",
+									"text": "24 Nov 2026, 06:00"
+								},
+								{
+									"label": "Remote",
+									"text": "git@github.com:ryoppippi/ccusage.git"
+								},
+								{
+									"label": "Checked",
+									"text": "26 Nov 2026, 09:00"
+								}
+							]
+						},
+						"id": "r670c05464631ab74",
+						"keywords": ["ryoppippi/ccusage", "ryoppippi", "github.com"],
+						"subtitle": "ryoppippi · github.com",
+						"title": "ccusage"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/ghq/gitlab.com/someone/notes"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/ghq/gitlab.com/someone/notes"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/ghq/gitlab.com/someone/notes",
+								"title": "Reveal in Finder"
+							},
+							{
+								"copy": "/Users/dupin/ghq/gitlab.com/someone/notes",
+								"title": "Copy Path"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/ghq/gitlab.com/someone/notes"
+								},
+								{
+									"label": "Status",
+									"text": "Git hasn’t been read for it yet"
+								}
+							]
+						},
+						"id": "r1a347246c9497040",
+						"keywords": ["someone/notes", "someone", "gitlab.com"],
+						"subtitle": "someone · gitlab.com",
+						"title": "notes"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "detached"
+							},
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/src/scratch"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/src/scratch"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/src/scratch",
+								"title": "Reveal in Finder"
+							},
+							{
+								"copy": "/Users/dupin/src/scratch",
+								"title": "Copy Path"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/src/scratch"
+								},
+								{
+									"label": "Branch",
+									"text": "Detached HEAD"
+								},
+								{
+									"label": "Working tree",
+									"text": "Clean"
+								},
+								{
+									"label": "Checked",
+									"text": "26 Nov 2026, 09:00"
+								}
+							]
+						},
+						"id": "r57bf279ff3c14e75",
+						"keywords": ["src/scratch", "src"],
+						"subtitle": "src",
+						"title": "scratch"
+					}
+				],
+				"selected": 0,
+				"storage": [
+					{
+						"repos": [
+							"/Users/dupin/ghq/github.com/x-ryoppippi/dupin",
+							"/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+							"/Users/dupin/ghq/gitlab.com/someone/notes",
+							"/Users/dupin/src/scratch"
+						],
+						"status": {
+							"/Users/dupin/ghq/github.com/ryoppippi/ccusage": {
+								"ahead": 0,
+								"at": 1795683600000,
+								"behind": 3,
+								"branch": "main",
+								"changes": 0,
+								"commit": 1795500000000,
+								"remote": "git@github.com:ryoppippi/ccusage.git"
+							},
+							"/Users/dupin/ghq/github.com/x-ryoppippi/dupin": {
+								"ahead": 2,
+								"at": 1795683600000,
+								"behind": 0,
+								"branch": "feat/repo",
+								"changes": 2,
+								"commit": 1795680000000,
+								"remote": "https://github.com/x-ryoppippi/dupin.git"
+							},
+							"/Users/dupin/src/scratch": {
+								"ahead": 0,
+								"at": 1795683600000,
+								"behind": 0,
+								"branch": null,
+								"changes": 0
+							}
+						}
+					}
+				]
+			}
+		},
+		{
+			"query": "ccusage",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "main ↓3"
+							},
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+								"title": "Reveal in Finder"
+							},
+							{
+								"title": "Open on GitHub",
+								"url": "https://github.com/ryoppippi/ccusage"
+							},
+							{
+								"copy": "/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+								"title": "Copy Path"
+							},
+							{
+								"copy": "git@github.com:ryoppippi/ccusage.git",
+								"title": "Copy Remote URL"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+								},
+								{
+									"label": "Branch",
+									"text": "main"
+								},
+								{
+									"label": "Working tree",
+									"text": "Clean"
+								},
+								{
+									"label": "Upstream",
+									"text": "0 ahead, 3 behind"
+								},
+								{
+									"label": "Last commit",
+									"text": "24 Nov 2026, 06:00"
+								},
+								{
+									"label": "Remote",
+									"text": "git@github.com:ryoppippi/ccusage.git"
+								},
+								{
+									"label": "Checked",
+									"text": "26 Nov 2026, 09:00"
+								}
+							]
+						},
+						"id": "r670c05464631ab74",
+						"keywords": ["ryoppippi/ccusage", "ryoppippi", "github.com"],
+						"subtitle": "ryoppippi · github.com",
+						"title": "ccusage"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "ryoppippi/ccusage",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "main ↓3"
+							},
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "openEditor",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+									}
+								},
+								"title": "Open in Editor"
+							},
+							{
+								"run": {
+									"action": "openTerminal",
+									"data": {
+										"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+									}
+								},
+								"title": "Open in Terminal"
+							},
+							{
+								"reveal": "/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+								"title": "Reveal in Finder"
+							},
+							{
+								"title": "Open on GitHub",
+								"url": "https://github.com/ryoppippi/ccusage"
+							},
+							{
+								"copy": "/Users/dupin/ghq/github.com/ryoppippi/ccusage",
+								"title": "Copy Path"
+							},
+							{
+								"copy": "git@github.com:ryoppippi/ccusage.git",
+								"title": "Copy Remote URL"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Path",
+									"text": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+								},
+								{
+									"label": "Branch",
+									"text": "main"
+								},
+								{
+									"label": "Working tree",
+									"text": "Clean"
+								},
+								{
+									"label": "Upstream",
+									"text": "0 ahead, 3 behind"
+								},
+								{
+									"label": "Last commit",
+									"text": "24 Nov 2026, 06:00"
+								},
+								{
+									"label": "Remote",
+									"text": "git@github.com:ryoppippi/ccusage.git"
+								},
+								{
+									"label": "Checked",
+									"text": "26 Nov 2026, 09:00"
+								}
+							]
+						},
+						"id": "r670c05464631ab74",
+						"keywords": ["ryoppippi/ccusage", "ryoppippi", "github.com"],
+						"subtitle": "ryoppippi · github.com",
+						"title": "ccusage"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Open in Terminal",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "openTerminal",
+						"data": {
+							"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+						}
+					}
+				},
+				"panel": "hide"
+			}
+		},
+		{
+			"activate": "Open in Editor",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "openEditor",
+						"data": {
+							"path": "/Users/dupin/ghq/github.com/ryoppippi/ccusage"
+						}
+					}
+				},
+				"toasts": [
+					"Couldn’t open it in Visual Studio Code; choose another in Settings → Extensions → Repositories"
+				]
+			}
+		}
+	]
+}

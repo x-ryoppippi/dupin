@@ -44,12 +44,14 @@ let
             programs.dupin = {
               enable = true;
               # Stands in for `dupin ext revision --json`, which names the package in the folder
-              # and its revision.
+              # and its revision. The stand-in bundles no folders, so a bundled one is named by
+              # its folder.
               package =
                 pkgs.writeShellScriptBin "dupin" ''
                   [ "$1 $2 $4" = "ext revision --json" ] \
                     && printf '{"package": %s, "revision": "blake3:%s"}\n' \
-                      "$(${lib.getExe pkgs.jq} .name "$3/package.json")" "$(basename "$3" | cut -c1-8)"
+                      "$(${lib.getExe pkgs.jq} .name "$3/package.json" 2>/dev/null || printf '"%s"' "$(basename "$3")")" \
+                      "$(basename "$3" | cut -c1-8)"
                 ''
                 // {
                   inherit bundledExtensions;
@@ -119,11 +121,25 @@ let
       dictionary = { };
       calculator.deny = [ "query" ];
       snippets.deny = [ "snippets" ];
+      remote = {
+        enable = true;
+        deny = [ "exec:terminate" ];
+      };
+      proc = {
+        enable = true;
+        deny = [ "exec:force-quit" ];
+      };
+      repo = {
+        enable = true;
+        grants = [ "files:ghq" ];
+        bindings."files:ghq" = "/Users/me/ghq";
+      };
     };
   };
   bundledOnly = evaluate { bundledExtensions.window-management.enable = true; };
   unbundled = evaluate { bundledExtensions.word-count.enable = true; };
   undeclared = evaluate { bundledExtensions.calendar.deny = [ "clipboard:read" ]; };
+  undeclaredGrant = evaluate { bundledExtensions.repo.grants = [ "files:nowhere" ]; };
   # A scope the broker can't read is a type error, whichever option names it.
   rejects =
     dupin:
@@ -161,7 +177,28 @@ assert
     "windows:arrange"
   ];
 assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
+assert
+  bundledExtensions.remote == [
+    "exec:files"
+    "exec:journal"
+    "exec:log-file"
+    "exec:ports"
+    "exec:processes"
+    "exec:terminal"
+    "exec:terminate"
+    "files:ssh-config"
+    "files:ssh-include"
+    "storage"
+  ];
+assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
+  "proc"
+  "port"
+  "agent"
+];
 assert bundledExtensions.dupin == [ ];
+assert
+  lib.elem "files:ghq" bundledExtensions.repo && lib.elem "exec:git-status" bundledExtensions.repo;
+assert failed undeclaredGrant;
 assert !failed bundledOnly && failed unbundled && failed undeclared;
 assert lib.hasInfix "it declares calendar"
   (lib.findFirst (a: !a.assertion) null undeclared.assertions).message;
@@ -230,6 +267,19 @@ pkgs.runCommand "dupin-home-manager-module"
         "bundled:clipboard-history".enabled = false;
         "bundled:calculator".deny = [ "query" ];
         "bundled:snippets".deny = [ "snippets" ];
+        "bundled:remote" = {
+          enabled = true;
+          deny = [ "exec:terminate" ];
+        };
+        "bundled:proc" = {
+          enabled = true;
+          deny = [ "exec:force-quit" ];
+        };
+        "bundled:repo" = {
+          enabled = true;
+          grant = [ "files:ghq" ];
+          bindings."files:ghq" = "/Users/me/ghq";
+        };
       };
     };
     bundledGrants = bundledOnly.xdg.configFile."dupin/extension-grants.toml".source;
@@ -255,6 +305,8 @@ pkgs.runCommand "dupin-home-manager-module"
     diff bundled-expected.json bundled-actual.json
     toml2json "$grants" | jq --sort-keys 'del(.packages[].revision)' > actual.json
     toml2json "$grants" | jq -e '.packages | with_entries(select(.key | startswith("bundled:") | not)) | map(.revision) | all(startswith("blake3:"))'
+    toml2json "$grants" | jq -e '.packages["bundled:repo"].revision == "blake3:repo"
+      and ([.packages | to_entries[] | select(.key != "bundled:repo" and (.key | startswith("bundled:"))) | .value.revision] | all(. == null))'
     printf '%s' "$expected" | jq --sort-keys . > expected.json
     diff expected.json actual.json
     grep -F 'more than one package is named word-count in package.json' "$clash/testBuildFailure.log"

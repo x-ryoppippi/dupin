@@ -12,11 +12,16 @@ fn every_capability_parses_into_its_scopes() {
                 name: name("notes"),
                 kind: FilesKind::Directory,
                 access: [FilesAccess::Read, FilesAccess::List].into(),
+                path: None,
             },
             Scope::Exec {
                 name: name("git-status"),
                 args: vec!["status".into(), "--short".into(), "{path}".into()],
                 output: true,
+                program: None,
+                background: false,
+                ssh_agent: false,
+                output_bytes: None,
             },
             Scope::Script {
                 name: name("open-in-zed"),
@@ -190,6 +195,57 @@ fn exec_profiles_need_well_formed_argument_templates() {
         problem(json!({ "exec": { "run": { "args": [], "output": "yes" } } })),
         ("invalid-type", "capabilities.exec.run.output".into())
     );
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "sshAgent": "yes" } } })),
+        ("invalid-type", "capabilities.exec.run.sshAgent".into())
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "@script:open": { "sshAgent": true } } })),
+        ("unknown-field", "capabilities.exec.@script:open.sshAgent".into()),
+        "a script already runs with Dupin's own environment"
+    );
+}
+
+#[test]
+fn an_exec_profile_may_ask_for_the_ssh_agent() {
+    let parsed = caps(json!({ "exec": { "ssh": { "args": ["{host}"], "sshAgent": true } } }));
+    assert_eq!(
+        parsed.scopes().cloned().collect::<Vec<_>>(),
+        [Scope::Exec {
+            name: name("ssh"),
+            args: vec!["{host}".into()],
+            output: false,
+            program: None,
+            background: false,
+            ssh_agent: true,
+            output_bytes: None,
+        }]
+    );
+}
+
+#[test]
+fn a_profile_bounds_only_output_it_reads_and_at_most_1_mib() {
+    let parsed =
+        caps(json!({ "exec": { "ps": { "args": ["-ax"], "output": true, "outputBytes": 1_048_576 } } }));
+    assert!(matches!(
+        parsed.get(&key("exec:ps")),
+        Some(Scope::Exec {
+            output_bytes: Some(1_048_576),
+            ..
+        })
+    ));
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "outputBytes": 10 } } })),
+        ("invalid-value", "capabilities.exec.run.outputBytes".into())
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "output": true, "outputBytes": 1_048_577 } } })),
+        ("out-of-range", "capabilities.exec.run.outputBytes".into())
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "output": true, "outputBytes": 0 } } })),
+        ("out-of-range", "capabilities.exec.run.outputBytes".into())
+    );
 }
 
 #[test]
@@ -292,6 +348,35 @@ fn windows_declares_read_and_arrange_only() {
 }
 
 #[test]
+fn context_declares_frontmost_and_document_only() {
+    for (declared, expected) in [
+        (
+            json!({ "context": ["selection"] }),
+            ("invalid-value", "capabilities.context[0]"),
+        ),
+        (json!({ "context": [] }), ("empty", "capabilities.context")),
+        (
+            json!({ "context": ["frontmost", "frontmost"] }),
+            ("duplicate", "capabilities.context[1]"),
+        ),
+        (
+            json!({ "context": "document" }),
+            ("invalid-type", "capabilities.context"),
+        ),
+        (
+            json!({ "context": { "frontmost": true } }),
+            ("invalid-type", "capabilities.context"),
+        ),
+    ] {
+        assert_eq!(
+            problem(declared.clone()),
+            (expected.0, expected.1.into()),
+            "{declared}"
+        );
+    }
+}
+
+#[test]
 fn every_problem_is_reported_at_once_with_hints_where_useful() {
     let diagnostics = Capabilities::parse(&json!({
         "http": [{ "origin": "http://a.example", "methods": ["GET"] }],
@@ -383,4 +468,71 @@ fn rows_name_a_kind_and_its_own_fields_and_the_query_is_read() {
         assert_eq!(key(text).to_string(), text);
     }
     assert!("rows:folder".parse::<ScopeKey>().is_err());
+}
+
+#[test]
+fn a_scope_may_name_its_folder_or_program() {
+    let parsed = caps(json!({
+        "files": { "src": { "kind": "directory", "access": ["list"], "path": "~/src" } },
+        "exec": {
+            "status": {
+                "program": "/usr/bin/git",
+                "args": ["-C", "{path}", "status"],
+                "output": true,
+                "background": true
+            }
+        }
+    }));
+    let files = parsed.get(&key("files:src")).unwrap();
+    assert_eq!(files.declared_path().map(DeclaredPath::as_str), Some("~/src"));
+    assert!(!files.needs_pick() && files.needs_binding());
+    assert_eq!(
+        files
+            .declared_path()
+            .unwrap()
+            .resolve(std::path::Path::new("/Users/me")),
+        std::path::PathBuf::from("/Users/me/src")
+    );
+    assert_eq!(files.to_string(), "list the folder ~/src");
+    let exec = parsed.get(&key("exec:status")).unwrap();
+    assert!(matches!(exec, Scope::Exec { background: true, .. }));
+    assert_eq!(
+        exec.to_string(),
+        "run /usr/bin/git with \"-C\" \"{path}\" \"status\" and read its output, even while you type and without an action you chose"
+    );
+}
+
+#[test]
+fn a_named_path_stays_where_it_says() {
+    for bad in [
+        "src",
+        "~src",
+        "~/",
+        "/",
+        "~/src/",
+        "~/a//b",
+        "~/../etc",
+        "/usr/./bin",
+        "/usr/bin/\u{202e}tig",
+        "/a\nb",
+    ] {
+        assert_eq!(
+            problem(json!({ "files": { "src": { "kind": "directory", "access": ["list"], "path": bad } } })),
+            ("invalid-value", "capabilities.files.src.path".into()),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(
+        problem(json!({ "exec": { "git": { "program": "~/bin/git", "args": [] } } })),
+        ("invalid-value", "capabilities.exec.git.program".into()),
+        "a program is named from the root"
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "git": { "program": 1, "args": [] } } })),
+        ("invalid-type", "capabilities.exec.git.program".into())
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "git": { "background": "yes", "args": [] } } })),
+        ("invalid-type", "capabilities.exec.git.background".into())
+    );
 }

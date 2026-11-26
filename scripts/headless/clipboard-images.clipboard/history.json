@@ -10,7 +10,7 @@
 	{ "text": "DUPIN_REQUIRE_EXTENSION_HOST=1 cargo test --workspace", "age": 100000 },
 	{ "text": "Purloined Letter", "age": 90000 },
 	{ "text": "https://dupin.app/download", "age": 80000 },
-	{ "text": "nu scripts/snap.nu --only clipboard", "age": 70000 },
+	{ "text": "nu scripts/render.nu --only clipboard", "age": 70000 },
 	{ "text": "max_entries = 200", "age": 60000 },
 	{ "text": "include_images = true", "age": 50000 },
 	{ "text": "Ratiocination", "age": 40000 },

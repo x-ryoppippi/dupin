@@ -302,6 +302,13 @@ impl Ui {
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
     /// has already handed the broker every declaration, which never grants anything.
     pub(super) fn install_declarations(&mut self) {
+        let me = std::sync::Mutex::new(self.me.clone());
+        crate::extensions::on_catalogue_refreshed(move |id| {
+            let id = id.clone();
+            me.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .update(move |ui, tx| ui.search_again_if_listed(&id, false, tx));
+        });
         let bridge = self.extensions.bridge.clone();
         let config = self.configuration.values.borrow().clone();
         for (_, extension) in self.extensions.packages.present() {
@@ -331,13 +338,7 @@ impl Ui {
                     // its package's `search` on this package's events.
                     Ok(handled) if handled.invalidated => {
                         let id = id_for_watch.clone();
-                        me.update(move |ui, tx| {
-                            let current = ui.session.command_id().clone();
-                            if ui.on_screen() && ui.extensions.lists_catalogue_of(&current, &id) {
-                                let effects = ui.session.refresh();
-                                ui.apply(effects, tx);
-                            }
-                        });
+                        me.update(move |ui, tx| ui.search_again_if_listed(&id, true, tx));
                     }
                     Ok(_) | Err(RunError::Cancelled) => {}
                     Err(RunError::Failed(diagnostic)) => {
@@ -345,6 +346,24 @@ impl Ui {
                     }
                 }
             });
+        }
+    }
+
+    /// Searches again when the panel shows the package's catalogue, after something other than
+    /// typing changed it. Only a search that lists the catalogue runs again: any other would run
+    /// its package's `search` for this package's change. With `over_typing` false, as for a
+    /// refresh nobody asked for, a search already running is left alone: it reads the catalogue
+    /// itself, and replacing it with the same query would only delay what was typed.
+    fn search_again_if_listed(&mut self, id: &PackageId, over_typing: bool, tx: &mut Tx) {
+        let current = self.session.command_id().clone();
+        let searching = matches!(
+            self.session.results(),
+            dupin_core::session::Results::Searching { .. }
+        );
+        if self.on_screen() && (over_typing || !searching) && self.extensions.lists_catalogue_of(&current, id)
+        {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
         }
     }
 
@@ -628,6 +647,22 @@ impl Ui {
             Some(ActionEffect::Pop { .. }) => self.session.close_page(anchor),
             Some(ActionEffect::Refresh { .. }) => self.session.refresh_page(anchor),
             Some(ActionEffect::ReplaceState { state, .. }) => self.session.replace_page_state(anchor, state),
+            Some(ActionEffect::Enter { command, .. }) if !extension.may_enter(&command) => {
+                self.show_notice(
+                    format!("{name} failed: only a package that ships with Dupin may enter another command"),
+                    tx,
+                );
+                Navigated::Done(Vec::new())
+            }
+            Some(ActionEffect::Enter { command, query }) => {
+                match crate::features::aliases::command(&command, &self.session.command_ids()) {
+                    Ok(id) => self.session.enter_command_from(anchor, &id, &query),
+                    Err(problem) => {
+                        self.show_notice(format!("{name} failed: its `enter` {problem}"), tx);
+                        Navigated::Done(Vec::new())
+                    }
+                }
+            }
             Some(ActionEffect::FieldErrors { errors }) => match self.show_field_errors(anchor, errors, tx) {
                 Navigated::NoPage => {
                     self.show_notice(

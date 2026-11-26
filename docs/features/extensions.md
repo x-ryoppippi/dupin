@@ -44,19 +44,19 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 <details>
 <summary>More on each action</summary>
 
-| Key / action                                                      | What it does                                                                                                    |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| <kbd>↩</kbd>                                                      | Runs the row's first action: **Open URL**, then **Copy**, then the extension's own actions in order.            |
-| <kbd>⌘↩</kbd>                                                     | Runs the row's alternate action; a row whose first action pastes, with no alternate, copies instead.            |
-| <kbd>Esc</kbd>, or <kbd>⌫</kbd> in an empty field                 | Closes a page the extension opened and selects the row it opened from.                                          |
-| **Deny**                                                          | Revokes the scope until you allow it in Settings.                                                               |
-| **Request Access**                                                | Asks macOS for the access a request needs, such as Calendars or Accessibility.                                  |
-| Settings → Extensions → **Extensions folder**                     | Turns on extensions you install or write; see [Turning them on](#turning-them-on).                              |
-| Settings → Extensions → an extension's switch                     | Turns that extension on or off.                                                                                 |
-| Settings → Extensions → **Allow**, **Revoke**                     | Allows or revokes one scope. A files or exec scope is allowed here, where you pick the file, folder or program. |
-| `dupin ext install`, `list`, `update`, `remove`, `sync`, `search` | Install and manage packages.                                                                                    |
-| `dupin ext eject NAME`                                            | See [Overriding a built-in](#overriding-a-built-in).                                                            |
-| `dupin ext new`, `dev`, `check`, `run`, `test`, `snap`            | See [Developing and testing extensions](./extension-testing.md).                                                |
+| Key / action                                                      | What it does                                                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| <kbd>↩</kbd>                                                      | Runs the row's first action: **Open URL**, then **Copy**, then the extension's own actions in order.                                 |
+| <kbd>⌘↩</kbd>                                                     | Runs the row's alternate action; a row whose first action pastes, with no alternate, copies instead.                                 |
+| <kbd>Esc</kbd>, or <kbd>⌫</kbd> in an empty field                 | Closes a page the extension opened and selects the row it opened from.                                                               |
+| **Deny**                                                          | Revokes the scope until you allow it in Settings.                                                                                    |
+| **Request Access**                                                | Asks macOS for the access a request needs, such as Calendars or Accessibility.                                                       |
+| Settings → Extensions → **Extensions folder**                     | Turns on extensions you install or write; see [Turning them on](#turning-them-on).                                                   |
+| Settings → Extensions → an extension's switch                     | Turns that extension on or off.                                                                                                      |
+| Settings → Extensions → **Allow**, **Revoke**                     | Allows or revokes one scope. A files or exec scope that doesn't name its file, folder or program is allowed here, where you pick it. |
+| `dupin ext install`, `list`, `update`, `remove`, `sync`, `search` | Install and manage packages.                                                                                                         |
+| `dupin ext eject NAME`                                            | See [Overriding a built-in](#overriding-a-built-in).                                                                                 |
+| `dupin ext new`, `dev`, `check`, `run`, `test`, `render`          | See [Developing and testing extensions](./extension-testing.md).                                                                     |
 
 </details>
 
@@ -84,7 +84,7 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 <details>
 <summary>More notes</summary>
 
-- Bundled extensions are on from the start, except Window Management.
+- Bundled extensions are on from the start, except Window Management, Remote, Repositories, Processes, Ports and Coding Agents.
 - An update that widens what a package asks for asks again.
 - Dupin never asks macOS for access on its own.
 - A third-party extension answers its keyword once it loads, but uses nothing it asks for until you turn it on, and each scope then needs your consent.
@@ -236,13 +236,23 @@ programs.dupin.bundledExtensions = {
   window-management.enable = true;
   calendar.deny = [ "calendar" ];
   clipboard-history.enable = false;
+  repo = {
+    enable = true;
+    grants = [ "files:ghq" "exec:git-status" ];
+    bindings = {
+      "files:ghq" = "/Users/me/ghq";
+      "exec:git-status" = "/usr/bin/git";
+    };
+  };
 };
 ```
 
-| Option   | Default | Meaning                                                                                                                                                                                                      |
-| -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enable` | `null`  | Leaves the switch to Dupin. `true` turns the package on, Window Management included, though Settings can still turn it off. `false` keeps it off, and a built-in command it answers says it isn't available. |
-| `deny`   | `[]`    | Scopes the package may never use, though it ships with them granted, such as `calendar`, `clipboard:watch` or `windows:arrange`.                                                                             |
+| Option     | Default | Meaning                                                                                                                                                                                                                 |
+| ---------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enable`   | `null`  | Leaves the switch to Dupin. `true` turns the package on, Window Management and Remote included, though Settings can still turn it off. `false` keeps it off, and a built-in command it answers says it isn't available. |
+| `deny`     | `[]`    | Scopes the package may never use, though it ships with them granted, such as `calendar`, `clipboard:watch` or `windows:arrange`.                                                                                        |
+| `grants`   | `[]`    | `files` and `exec` scopes allowed ahead of time, which a bundled package doesn't ship with, since each is bound to a path.                                                                                              |
+| `bindings` | `{}`    | The absolute path each of those grants is bound to.                                                                                                                                                                     |
 
 They go to the same `extension-grants.toml`, under `bundled:<name>` and without a revision, since a bundled package only ever runs as the sealed copy that shipped:
 
@@ -254,7 +264,7 @@ enabled = true
 deny = ["calendar"]
 ```
 
-A bundled package has no grants or bindings to declare: Dupin grants what it declares in advance, and none of them declares files or programs. A name the configured `package` doesn't bundle fails evaluation, and so does a denial of a scope that package doesn't declare; both messages list what it does bundle or declare. A built-in command still needs its own setting, such as `calendar.enabled`, to register it. A changed copy in the extensions folder is a package of its own, so none of this applies to it.
+Dupin grants what a bundled package declares in advance, except its files and programs: [Remote](./remote.md)'s are picked in Settings, and the folders and programs [Repositories](./repo.md) names are what `grants` and `bindings` allow ahead of time, and the programs Processes, Ports and Coding Agents name, such as `exec:processes`, you allow without a pick, and `deny` can name. Those entries name the revision of the package `package` ships, which Dupin computes when the configuration builds. A name the configured `package` doesn't bundle fails evaluation, and so does a denial of a scope that package doesn't declare; both messages list what it does bundle or declare. A built-in command still needs its own setting, such as `calendar.enabled`, to register it. A changed copy in the extensions folder is a package of its own, so none of this applies to it.
 
 </details>
 
@@ -262,13 +272,18 @@ A bundled package has no grants or bindings to declare: Dupin grants what it dec
 
 Some extensions ship inside Dupin and run whether or not the extensions folder is on, each with a switch in Settings → Extensions.
 
-| Extension                                   | Keyword   | What it does                                                             |
-| ------------------------------------------- | --------- | ------------------------------------------------------------------------ |
-| **Dupin**                                   | `help`    | Searches Dupin's documentation, issues, source and website.              |
-| [Emoji & Symbols](./emoji.md)               | `emoji`   | Picks an emoji or symbol by its English or Japanese name.                |
-| [Window Management](./window-management.md) | `window`  | Moves and resizes the focused window. Off until turned on.               |
-| [Web Search](./web-searches.md)             | `web`     | Lists the web searches, such as `g` for Google.                          |
-| Built-in features                           | Their own | Calculator, Calendar search, Clipboard history, Dictionary and Snippets. |
+| Extension                                   | Keyword   | What it does                                                               |
+| ------------------------------------------- | --------- | -------------------------------------------------------------------------- |
+| **Dupin**                                   | `help`    | Searches Dupin's documentation, issues, source and website.                |
+| [Emoji & Symbols](./emoji.md)               | `emoji`   | Picks an emoji or symbol by its English or Japanese name.                  |
+| [Window Management](./window-management.md) | `window`  | Moves and resizes the focused window. Off until turned on.                 |
+| [Remote](./remote.md)                       | `remote`  | Lists processes, ports, logs and files of SSH hosts. Off until turned on.  |
+| [Repositories](./repo.md)                   | `repo`    | Opens your Git repositories in an editor or terminal. Off until turned on. |
+| [Processes](./processes.md)                 | `proc`    | Lists running processes, and stops one. Off until turned on.               |
+| [Ports](./ports.md)                         | `port`    | Lists listening ports and what holds each. Off until turned on.            |
+| [Coding Agents](./coding-agents.md)         | `agent`   | Lists the coding agents running, by project. Off until turned on.          |
+| [Web Search](./web-searches.md)             | `web`     | Lists the web searches, such as `g` for Google.                            |
+| Built-in features                           | Their own | Calculator, Calendar search, Clipboard history, Dictionary and Snippets.   |
 
 <details>
 <summary>Built-in features as packages</summary>
@@ -295,7 +310,7 @@ Each build of Dupin records a hash of every file in each bundled package folder,
 <details>
 <summary>Grants and keywords</summary>
 
-A bundled extension is on until you turn it off in Settings → Extensions, except Window Management, which stays off, answering nothing, until you turn it on there or [with Nix](#declaring-them-with-nix). Dupin knows it by its `name` and a hash of its `package.json` and modules: while it runs exactly the copy that shipped, the [capability broker](../capability-broker.md) grants what it declares in advance, except files and programs you pick, and macOS still asks for its own permissions on first use ([Permissions](./permissions.md#extensions)). The broker keeps its grants and its switch under `bundled:<name>`, apart from any package in the extensions folder.
+A bundled extension is on until you turn it off in Settings → Extensions, except Window Management, Remote, Repositories, Processes, Ports and Coding Agents, which stay off, answering nothing, until you turn it on there or [with Nix](#declaring-them-with-nix). Dupin knows it by its `name` and a hash of its `package.json` and modules: while it runs exactly the copy that shipped, the [capability broker](../capability-broker.md) grants what it declares in advance, except files and programs, which are bound when you allow them, and macOS still asks for its own permissions on first use ([Permissions](./permissions.md#extensions)). The broker keeps its grants and its switch under `bundled:<name>`, apart from any package in the extensions folder.
 
 A user extension can't take a bundled extension's keyword, as it can't take a built-in command's: `dupin ext install` refuses it, and Settings lists one already in the folder as skipped and marks its row as not answering. Extensions from the folder load only once the bundled ones have been read, so one never holds a bundled keyword for a moment at launch.
 
@@ -437,17 +452,17 @@ dupin ext dev word-count        # keeps extensions/word-count current while you 
 dupin ext run word-count --query 'two words'
 ```
 
-The reference pages cover: the manifest's icons, preferences, modules and TypeScript without a build; the API's catalogues, details, images and limits; capabilities for HTTP, files, programs, storage, clipboard, calendar, windows and more; `dupin ext check`, `run`, `test` and `snap`; and building a bundle, publishing, how installs resolve and check a package, and the installed extensions list.
+The reference pages cover: the manifest's icons, preferences, modules and TypeScript without a build; the API's catalogues, details, images and limits; capabilities for HTTP, files, programs, storage, clipboard, calendar, windows and more; `dupin ext check`, `run`, `test` and `render`; and building a bundle, publishing, how installs resolve and check a package, and the installed extensions list.
 
 </details>
 
-## Testing and snapshots
+## Testing and rendering
 
-`dupin ext test` replays the fixtures in a package's `fixtures/` folder against stated expectations, with host services answered from the fixture instead of this Mac, and `dupin ext snap` renders the panel a fixture produces as a PNG:
+`dupin ext test` replays the fixtures in a package's `fixtures/` folder against stated expectations, with host services answered from the fixture instead of this Mac, and `dupin ext render` renders the panel a fixture produces as a PNG:
 
 ```sh
 dupin ext test greeter
-dupin ext snap greeter greeter/fixtures/search.json search.png
+dupin ext render greeter greeter/fixtures/search.json search.png
 ```
 
-[Developing and testing extensions](./extension-testing.md#testing-and-snapshots) has the commands, the [fixture format](./extension-testing.md#fixtures) and the [MCP tools](./mcp.md#extension-tools) that run them for an agent.
+[Developing and testing extensions](./extension-testing.md#testing-and-rendering) has the commands, the [fixture format](./extension-testing.md#fixtures) and the [MCP tools](./mcp.md#extension-tools) that run them for an agent.

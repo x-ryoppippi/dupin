@@ -480,13 +480,10 @@ fn shown(entry: &Entry, now: u64) -> (Item, Option<Arc<Detail>>) {
 
 /// How long before `now` the Unix second `then` was.
 fn ago(now: u64, then: u64) -> String {
-    let seconds = now.saturating_sub(then);
-    match seconds {
-        0..60 => "Just now".into(),
-        60..3600 => format!("{} min ago", seconds / 60),
-        3600..86_400 => format!("{} h ago", seconds / 3600),
-        _ => format!("{} d ago", seconds / 86_400),
+    if now.saturating_sub(then) < 60 {
+        return "Just now".into();
     }
+    crate::ago_ms(now.saturating_mul(1000), then.saturating_mul(1000))
 }
 
 /// Character indices of each word's first occurrence in `title`, ignoring case.
@@ -563,6 +560,7 @@ fn entry_bytes(entry: &Entry) -> usize {
             .iter()
             .map(|accessory| match accessory {
                 crate::Accessory::Text(text) | crate::Accessory::Tag(text) => text.len(),
+                crate::Accessory::Freshness(_) | crate::Accessory::State(_) => 0,
             })
             .sum::<usize>()
         + entry.file.as_ref().map_or(0, |file| file.as_os_str().len())

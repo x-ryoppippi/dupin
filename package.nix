@@ -30,6 +30,8 @@ let
     (root + /examples/extensions/notes-js)
     # The bundled extensions, which a test build finds in the source tree.
     (root + /extensions)
+    # The search-quality corpus and cases, which dupin-search-quality's test runs.
+    (root + /scripts/search-quality)
     # The collector's ping schema, which dupin-telemetry's test holds to the Rust type.
     (root + /telemetry/src/v1/ping-schema.gen.ts)
   ];

@@ -251,6 +251,7 @@ fn a_catalogue_change_the_host_rejects_names_the_package() {
             Instant::now() + QUERY_DEADLINE,
             &Call::none(),
             Role::Keyword,
+            None,
         )
         .unwrap_err();
     assert!(
@@ -471,7 +472,7 @@ fn every_part_of_a_catalogue_shares_one_deadline() {
     let deadline = Duration::from_millis(400);
     let started = Instant::now();
     let error = extension
-        .catalogue("", 10, started + deadline, &Call::none(), Role::Keyword)
+        .catalogue("", 10, started + deadline, &Call::none(), Role::Keyword, None)
         .unwrap_err();
     let elapsed = started.elapsed();
     assert!(
@@ -653,6 +654,7 @@ impl History {
                 Instant::now() + Duration::from_secs(60),
                 &call,
                 Role::Keyword,
+                None,
             )
             .unwrap();
         titles(&batches).into_iter().map(str::to_owned).collect()
@@ -794,7 +796,13 @@ fn every_part_is_asked_for_with_the_settings_it_is_handed() {
     let (first, second) = (settings(1), settings(2));
     let services = no_services();
     let never = || false;
-    let mut fetch = extension.fetch(super::host(), Instant::now() + QUERY_DEADLINE, &never, &services);
+    let mut fetch = extension.fetch(
+        super::host(),
+        super::Fetching::Resident,
+        Instant::now() + QUERY_DEADLINE,
+        &never,
+        &services,
+    );
     let mut cursor = |settings| {
         fetch(None, dupin_js_runtime::Reason::Load, settings)
             .unwrap()

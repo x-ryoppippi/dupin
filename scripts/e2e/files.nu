@@ -5,7 +5,7 @@ use driver.nu [
     mentions
     poll
     press
-    snap
+    evidence
     type-text
     wait-condition
     wait-for-log
@@ -38,13 +38,13 @@ export def file-actions-stage [out: path] {
             --exact
             --first
         )
-        snap $out file-actions-chooser
+        evidence $out file-actions-chooser
         ad $out file-actions-open click $viewer.data.match.ref_id | ignore
         let marker = $root | path join opened.json
         wait-condition 'fixture application opening the exact path' {
             ($marker | path exists) and (open $marker) == [$open_path]
         }
-        snap $out file-actions-opened
+        evidence $out file-actions-opened
         ^osascript -e 'tell application id "org.dupin.e2e.viewer" to quit'
         wait-condition 'fixture viewer quitting' { not (viewer-running) }
 
@@ -76,7 +76,7 @@ export def file-actions-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out file-actions-trash-confirm
+        evidence $out file-actions-trash-confirm
         let list = log-count $log 'dupin-trace: action-screen list'
         press $out file-actions-trash-cancel return | ignore
         wait-for-log --after $list $log 'dupin-trace: action-screen list'
@@ -84,7 +84,7 @@ export def file-actions-stage [out: path] {
         open-trash-confirmation $out file-actions-trash-review-again
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         if not ($trash_path | path exists) { error make {msg: 'Enter on Cancel removed the fixture'} }
-        snap $out file-actions-trash-cancelled
+        evidence $out file-actions-trash-cancelled
         press $out file-actions-trash-select down | ignore
         press $out file-actions-trash-confirm return | ignore
         wait-condition 'fixture moving to the Trash' {
@@ -116,10 +116,10 @@ export def file-actions-stage [out: path] {
             --exact
             --first
         ) | ignore
-        snap $out file-actions-trash-finished
+        evidence $out file-actions-trash-finished
         press $out file-actions-close escape | ignore
     } catch {|failure|
-        try { snap $out file-actions-failure }
+        try { evidence $out file-actions-failure }
         try { cp $log ($out | path join file-actions-failure.log) }
         error make $failure
     }

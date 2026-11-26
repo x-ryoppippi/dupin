@@ -7,7 +7,7 @@ use driver.nu [
     mentions
     poll
     press
-    snap
+    evidence
     wait-for-log
 ]
 use ../e2e-state.nu is-focused-query
@@ -38,7 +38,7 @@ export def cli-stage [out: path, binary: path] {
             textfield
             --first
         ) | ignore
-        snap $out cli-open
+        evidence $out cli-open
         let closed = log-count $log 'dupin-trace: panel closed '
         press $out cli-hide escape | ignore
         wait-for-log --after $closed $log 'dupin-trace: panel closed '
@@ -72,7 +72,7 @@ export def cli-stage [out: path, binary: path] {
             $DUPIN
             --include-bounds
         ) | ignore
-        snap $out cli-pick
+        evidence $out cli-pick
         press $out cli-pick-blue down return | ignore
         let selected = job recv --tag 2 --timeout 20sec
         $selected | to json | save ($out | path join cli-picked.json)
@@ -146,7 +146,7 @@ export def cli-stage [out: path, binary: path] {
             --exact
             --first
         ) | ignore
-        snap $out cli-snapshots-open
+        evidence $out cli-snapshots-open
         let closed = ^$binary snapshots close --json | from json
         if $closed != null { error make {msg: 'CLI Snapshot close returned unexpected data'} }
         (poll
@@ -191,7 +191,7 @@ export def cli-stage [out: path, binary: path] {
             history_after: (file-proof $history)
         } | to json | save ($out | path join cli-storage-proof.json)
     } catch {|failure|
-        try { snap $out cli-failure }
+        try { evidence $out cli-failure }
         error make $failure
     }
 }

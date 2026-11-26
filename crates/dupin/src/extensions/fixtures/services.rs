@@ -6,7 +6,7 @@
 //! A `files` scope is bound to a scratch folder holding the fixture's files, and `storage` to
 //! a scratch store sealed with a throwaway key, seeded with the fixture's records.
 //!
-//! The headless launcher `dupin ext snap` starts answers from the same services, so the panel
+//! The headless launcher `dupin ext render` starts answers from the same services, so the panel
 //! it renders is the one `dupin ext test` replays.
 
 use std::collections::BTreeMap;
@@ -23,7 +23,7 @@ use dupin_extension_bridge::{
     Revision, Scope,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, exec, windows};
+use dupin_host_services::{calendar, context, exec, windows};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
 use serde_json::Value;
@@ -33,6 +33,9 @@ use super::super::Extension;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 /// Under the scratch folder; the dot keeps it apart from every `files` scope's name.
 const STORAGE_DIR: &str = ".storage";
+/// The home folder a fixture's `files` scope declared under `~/` reports as its root, wherever
+/// the scratch folder holding it is.
+const FIXTURE_HOME: &str = "/Users/dupin";
 /// Bound to every executable profile; the fixture's exec service never runs it.
 const UNRUN_PROGRAM: &str = "/usr/bin/false";
 
@@ -78,6 +81,7 @@ struct State {
     stored: Mutex<Vec<Value>>,
     effects: Mutex<Effects>,
     windows: Option<windows::Service<windows::Fixture>>,
+    context: Option<context::Service<context::Fixture>>,
     /// The snippets the fixture hands the package, which its `snippets` calls change.
     snippets: Mutex<Snippets>,
     /// What watches the clipboard, by subscription, which a headless launcher hands the
@@ -103,6 +107,9 @@ impl Fixture {
             None,
             replier.services(),
         );
+        // Nothing exists here, so a declared folder the fixture leaves undecided is missing on
+        // every Mac alike.
+        bridge.set_home(Some(replier.scratch.path().join("home")));
         bridge.install(
             &extension.package,
             extension.revision.clone(),
@@ -187,6 +194,7 @@ impl Replier {
         let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::new(key))
             .with_clock(FixtureClock(now));
         let windows = replies.windows.as_ref().map(window_fixture).transpose()?;
+        let context = replies.context.as_ref().map(context_fixture).transpose()?;
         let state = Arc::new(State {
             replies: replies.clone(),
             now,
@@ -195,6 +203,7 @@ impl Replier {
             stored: Mutex::new(replies.storage.clone()),
             effects: Mutex::default(),
             windows,
+            context,
             snippets: Mutex::new(Snippets::seeded(preferences)),
             watchers: Mutex::default(),
             subscriptions: AtomicU64::default(),
@@ -214,6 +223,7 @@ impl Replier {
             snippets: shared(),
             calendar: shared(),
             windows: shared(),
+            context: shared(),
         }
     }
 
@@ -277,8 +287,8 @@ impl Replier {
                 continue;
             }
             let binding = match &entry.scope {
-                Scope::Files { name, kind, .. } => Some(
-                    materialize(
+                Scope::Files { name, kind, path, .. } => {
+                    let binding = materialize(
                         scratch.path(),
                         name.as_str(),
                         *kind,
@@ -290,8 +300,14 @@ impl Replier {
                             format!("couldn't write the fixture's files: {error}"),
                         )
                         .file(name.as_str().to_owned())
-                    })?,
-                ),
+                    })?;
+                    let shown = match path {
+                        Some(path) => path.resolve(Path::new(FIXTURE_HOME)).display().to_string(),
+                        None => format!("/fixture/{name}"),
+                    };
+                    bridge.show_root_as(binding.clone(), shown);
+                    Some(binding)
+                }
                 scope if scope.needs_binding() => Some(PathBuf::from(UNRUN_PROGRAM)),
                 _ => None,
             };
@@ -333,7 +349,7 @@ impl Replier {
     }
 }
 
-/// Hands the headless launcher `dupin ext snap` starts the fixture it renders, as JSON:
+/// Hands the headless launcher `dupin ext render` starts the fixture it renders, as JSON:
 /// `{ "fixture": <path>, "name": <package name>, "revision": <revision> }`.
 pub(in crate::extensions) const HEADLESS_FIXTURE: &str = "DUPIN_HEADLESS_EXTENSION_FIXTURE";
 
@@ -346,6 +362,35 @@ pub(in crate::extensions) struct HeadlessFixture {
     /// Each clipboard `event` step, by its index among the steps, and the seconds into the
     /// script it comes at.
     pub events: Vec<(usize, f64)>,
+}
+
+/// What a headless run that nobody handed a fixture finds in its extensions folder, such as a
+/// latency scenario's: `{ "name": <bundled package name>, "fixture": <file in that folder> }`.
+/// A file whose name starts with a dot is no extension, so the folder loads nothing else.
+const PLACED_FIXTURE: &str = ".headless-fixture.json";
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Placed {
+    name: String,
+    fixture: PathBuf,
+}
+
+/// The fixture placed in the extensions folder, for the bundled package it names at the
+/// revision this build ships.
+fn placed() -> Option<HeadlessFixture> {
+    let folder = super::super::directory()?;
+    let placed: Placed = serde_json::from_str(&std::fs::read_to_string(folder.join(PLACED_FIXTURE)).ok()?)
+        .inspect_err(|error| crate::log::warn(&format!("{PLACED_FIXTURE}: {error}")))
+        .ok()?;
+    let package = super::super::bundled::find(&super::super::bundled::directory()?, &placed.name)?;
+    let (_, revision, _) = super::super::declaration_of(&package).ok()?;
+    Some(HeadlessFixture {
+        fixture: folder.join(placed.fixture),
+        name: placed.name,
+        revision: revision.as_str().to_owned(),
+        events: Vec::new(),
+    })
 }
 
 /// The fixture a headless launcher renders: its replies answer every host request, and its
@@ -365,7 +410,7 @@ pub(in crate::extensions) struct Headless {
     played: AtomicBool,
 }
 
-/// The fixture `dupin ext snap` handed this headless launcher, if it handed one. A launcher
+/// The fixture `dupin ext render` handed this headless launcher, if it handed one. A launcher
 /// with a window never reads it.
 pub(in crate::extensions) fn headless() -> Option<&'static Headless> {
     static HEADLESS: OnceLock<Option<Headless>> = OnceLock::new();
@@ -374,10 +419,12 @@ pub(in crate::extensions) fn headless() -> Option<&'static Headless> {
     }
     HEADLESS
         .get_or_init(|| {
-            let handed: HeadlessFixture =
-                serde_json::from_str(&std::env::var(HEADLESS_FIXTURE).ok()?).ok()?;
+            let handed: HeadlessFixture = match std::env::var(HEADLESS_FIXTURE) {
+                Ok(handed) => serde_json::from_str(&handed).ok()?,
+                Err(_) => placed()?,
+            };
             Headless::open(handed)
-                .inspect_err(|diagnostic| crate::log::warn(&format!("snap fixture: {diagnostic}")))
+                .inspect_err(|diagnostic| crate::log::warn(&format!("render fixture: {diagnostic}")))
                 .ok()
         })
         .as_ref()
@@ -495,6 +542,20 @@ fn window_fixture(reply: &fixture::WindowsReply) -> Result<windows::Service<wind
     let focused = serde_json::from_value(reply.focused.clone())
         .map_err(|error| invalid("replies.windows.focused".into(), error))?;
     Ok(windows::Service::new(windows::Fixture::new(displays, focused)))
+}
+
+/// The context service a fixture's `replies.context` describes, read as the service's own
+/// shapes.
+fn context_fixture(reply: &fixture::ContextReply) -> Result<context::Service<context::Fixture>, Diagnostic> {
+    let invalid = |field: &str, error: serde_json::Error| {
+        Diagnostic::new("invalid-fixture", error.to_string()).field(format!("replies.context.{field}"))
+    };
+    Ok(context::Service::new(context::Fixture {
+        frontmost: serde_json::from_value(reply.frontmost.clone())
+            .map_err(|error| invalid("frontmost", error))?,
+        document: serde_json::from_value(reply.document.clone())
+            .map_err(|error| invalid("document", error))?,
+    }))
 }
 
 /// Each record's data, oldest first; blobs are left out.
@@ -767,6 +828,13 @@ impl Shared {
             .as_ref()
             .ok_or_else(|| missing("reading or moving windows".into()))
     }
+
+    fn context(&self) -> Result<&context::Service<context::Fixture>, Failure> {
+        self.0
+            .context
+            .as_ref()
+            .ok_or_else(|| missing("reading what you were using".into()))
+    }
 }
 
 fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
@@ -784,6 +852,16 @@ impl services::Windows for Shared {
 
     fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
         encoded(self.windows()?.set_frame(frame)?)
+    }
+}
+
+impl services::Context for Shared {
+    fn frontmost(&self) -> Result<Value, Failure> {
+        encoded(self.context()?.frontmost())
+    }
+
+    fn document(&self) -> Result<Value, Failure> {
+        encoded(self.context()?.document())
     }
 }
 

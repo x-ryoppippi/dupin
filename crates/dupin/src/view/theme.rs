@@ -11,6 +11,7 @@ pub struct ResolvedTheme {
     pub accent: Color,
     pub selected_text: Color,
     pub destructive: Color,
+    pub warning: Color,
     scale: f32,
     family: tok::Family,
 }
@@ -40,6 +41,7 @@ impl ResolvedTheme {
             accent: color(&c.accent, tok::accent(0, dark)),
             selected_text: color(&c.selected_text, Color::WHITE),
             destructive: rune::color::hex(if dark { "#FF453A" } else { "#FF3B30" }).unwrap(),
+            warning: rune::color::hex(if dark { "#FF9F0A" } else { "#C93400" }).unwrap(),
             scale: theme.font_size as f32 / 15.0,
             family: match &theme.font_family {
                 dupin_core::config::FontFamily::System => tok::Family::Sans,
