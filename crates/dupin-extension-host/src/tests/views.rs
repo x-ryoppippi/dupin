@@ -181,7 +181,17 @@ fn forging_helper_entry() {
                 diagnostic: Diagnostic::new("code", "message"),
             },
         };
-        if wire::write(&mut socket, &FromHelper::Done { id, answer }, &[]).is_err() {
+        if wire::write(
+            &mut socket,
+            &FromHelper::Done {
+                id,
+                answer,
+                answered: Vec::new(),
+            },
+            &[],
+        )
+        .is_err()
+        {
             break;
         }
     }

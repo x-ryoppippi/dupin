@@ -92,10 +92,12 @@ fn run(socket: UnixStream) -> io::Result<()> {
             deadline: Instant::now() + Duration::from_millis(deadline_ms),
             is_cancelled: Box::new(move || cancelled.load(Ordering::Relaxed) == id),
         };
+        let mut taken = Vec::new();
         let mut bridge = HelperBridge {
             id,
             writer: &mut writer,
             replies: &answered,
+            taken: &mut taken,
         };
         let mut spent = None;
         let outcome = match (call, modules) {
@@ -108,7 +110,12 @@ fn run(socket: UnixStream) -> io::Result<()> {
                 }),
                 None => {
                     let answer = Answer::Missing;
-                    wire::write(&mut writer, &FromHelper::Done { id, answer }, &[])?;
+                    let done = FromHelper::Done {
+                        id,
+                        answer,
+                        answered: Vec::new(),
+                    };
+                    wire::write(&mut writer, &done, &[])?;
                     continue;
                 }
             },
@@ -119,7 +126,12 @@ fn run(socket: UnixStream) -> io::Result<()> {
                 let bytes: usize = tail.iter().map(|part| part.len()).sum();
                 if bytes <= wire::MAX_TAIL_BYTES {
                     let answer = Answer::Compiled { modules };
-                    wire::write(&mut writer, &FromHelper::Done { id, answer }, &tail)?;
+                    let done = FromHelper::Done {
+                        id,
+                        answer,
+                        answered: Vec::new(),
+                    };
+                    wire::write(&mut writer, &done, &tail)?;
                     continue;
                 }
                 Answer::Failed {
@@ -141,7 +153,12 @@ fn run(socket: UnixStream) -> io::Result<()> {
             Err(RunError::Cancelled) => Answer::Cancelled,
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
         };
-        wire::write(&mut writer, &FromHelper::Done { id, answer }, &[])?;
+        let done = FromHelper::Done {
+            id,
+            answer,
+            answered: taken,
+        };
+        wire::write(&mut writer, &done, &[])?;
         // Freed once the answer is on its way, which is as much of a call's cost as making it.
         drop(spent);
     }
@@ -190,6 +207,8 @@ struct HelperBridge<'a> {
     id: u64,
     writer: &'a mut UnixStream,
     replies: &'a mpsc::Receiver<(u64, u32, Vec<u8>)>,
+    /// The requests whose replies the runtime took, which `done` tells Dupin.
+    taken: &'a mut Vec<u32>,
 }
 
 impl Bridge for HelperBridge<'_> {
@@ -210,6 +229,7 @@ impl Bridge for HelperBridge<'_> {
                     let json = String::from_utf8(json).unwrap_or_else(|_| {
                         r#"{"error":{"code":"host-error","message":"Dupin's reply wasn't UTF-8"}}"#.into()
                     });
+                    self.taken.push(call);
                     return Some(Reply { call, json });
                 }
                 // A reply to a run that has ended, which nothing waits for any more.

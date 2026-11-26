@@ -121,10 +121,6 @@ let
       dictionary = { };
       calculator.deny = [ "query" ];
       snippets.deny = [ "snippets" ];
-      remote = {
-        enable = true;
-        deny = [ "exec:terminate" ];
-      };
       proc = {
         enable = true;
         deny = [ "exec:force-quit" ];
@@ -177,19 +173,6 @@ assert
     "windows:arrange"
   ];
 assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
-assert
-  bundledExtensions.remote == [
-    "exec:files"
-    "exec:journal"
-    "exec:log-file"
-    "exec:ports"
-    "exec:processes"
-    "exec:terminal"
-    "exec:terminate"
-    "files:ssh-config"
-    "files:ssh-include"
-    "storage"
-  ];
 assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
   "proc"
   "port"
@@ -267,10 +250,6 @@ pkgs.runCommand "dupin-home-manager-module"
         "bundled:clipboard-history".enabled = false;
         "bundled:calculator".deny = [ "query" ];
         "bundled:snippets".deny = [ "snippets" ];
-        "bundled:remote" = {
-          enabled = true;
-          deny = [ "exec:terminate" ];
-        };
         "bundled:proc" = {
           enabled = true;
           deny = [ "exec:force-quit" ];

@@ -14,9 +14,9 @@ pub(crate) const SOURCE: &str = "apps";
 /// sets it empty, and the documentation images to `/System/Applications`.
 pub(crate) const HEADLESS_APPS: &str = "DUPIN_HEADLESS_APPS";
 
-/// The folders `HEADLESS_APPS` names, when this is a headless run and it is set.
+/// The folders `HEADLESS_APPS` names, when this is a headless run or a recording and it is set.
 pub(crate) fn headless_roots() -> Option<Vec<PathBuf>> {
-    if !rune::tooling::is_headless() {
+    if !rune::tooling::is_headless() && !crate::recording::active() {
         return None;
     }
     let list = std::env::var_os(HEADLESS_APPS)?;

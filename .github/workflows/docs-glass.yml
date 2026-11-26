@@ -13,9 +13,13 @@ on:
         type: string
         required: false
       wallpaper:
-        description: A wallpaper preset (dusk, lagoon or ember) for every clip, in place of each clip's own
+        description: A wallpaper preset (tiles, dusk, lagoon or ember) for every clip, in place of each clip's own
         type: string
         required: false
+      no_retina:
+        description: Record on the runner's 1x display, without the 2x virtual one
+        type: boolean
+        default: false
   pull_request:
     paths:
       - .github/workflows/docs-glass.yml
@@ -51,10 +55,12 @@ jobs:
         env:
           ONLY: ${{ inputs.only }}
           WALLPAPER: ${{ inputs.wallpaper }}
+          NO_RETINA: ${{ inputs.no_retina }}
         run: |
           set -- --app result/Applications/Dupin.app
           if [ -n "$ONLY" ]; then set -- "$@" --only "$ONLY"; fi
           if [ -n "$WALLPAPER" ]; then set -- "$@" --wallpaper "$WALLPAPER"; fi
+          if [ "$NO_RETINA" = true ]; then set -- "$@" --no-retina; fi
           sw_vers
           nix develop --command nu scripts/docs-glass.nu "$@"
 

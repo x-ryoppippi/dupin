@@ -9,7 +9,7 @@ export const sections = [
 		title: 'Getting started',
 		pages: ['usage.md', 'tutorial.md', 'configuration.md', 'features/keywords.md'],
 	},
-	{ title: 'About', pages: ['philosophy.md', 'name.md'] },
+	{ title: 'About', pages: ['philosophy.md', 'faq.md', 'name.md'] },
 	{
 		title: 'Built-in features',
 		intro: 'Native to Dupin and always there.',
@@ -50,7 +50,6 @@ export const sections = [
 			'features/web-searches.md',
 			'features/maps.md',
 			'features/window-management.md',
-			'features/remote.md',
 			'features/processes.md',
 			'features/ports.md',
 			'features/coding-agents.md',
@@ -66,9 +65,12 @@ export const sections = [
 			'features/extension-permissions.md',
 			'features/extension-testing.md',
 			'features/extension-distribution.md',
-			'features/cli.md',
-			'features/mcp.md',
 		],
+	},
+	{
+		title: 'Scripts and agents',
+		intro: 'Drive Dupin from a terminal, a script or an AI agent.',
+		pages: ['features/cli.md', 'features/mcp.md'],
 	},
 ] as const satisfies readonly { title: string; intro?: string; pages: readonly string[] }[];
 

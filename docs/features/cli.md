@@ -2,6 +2,14 @@
 
 The `dupin` binary inside Dupin.app is also its command-line client. With the Nix package or the home-manager module it is on `PATH`; otherwise run `/Applications/Dupin.app/Contents/MacOS/dupin`.
 
+It is how tools outside Dupin drive it: a terminal, a shell script or an AI agent opens the panel, asks you to pick, reads snapshots or changes the configuration. [Extensions](./extensions.md) are different: they run inside Dupin, sandboxed, and answer a keyword in the panel.
+
+<WaysIn>
+
+Three ways in: you use the panel; extensions run inside Dupin, sandboxed; scripts and agents drive Dupin from outside with `dupin` and `dupin mcp`.
+
+</WaysIn>
+
 ## The panel
 
 With a resident Dupin instance, `dupin open --query 'Safari'` shows the panel without activating a result; Enter does nothing for half a second after it appears, so a key meant for another app can't choose one.

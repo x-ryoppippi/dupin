@@ -237,6 +237,9 @@ const REPORT: &str = r#"
 const report = async (run) => { try { return `ok ${JSON.stringify(await run())}`; } catch (error) { return `${error.code}`; } };
 "#;
 
+/// A request made straight at a session, whose run never ends.
+const ASKED: HostRequest = HostRequest { run: 0, call: 1 };
+
 fn guest(body: &str) -> String {
     format!(
         "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context }} from 'dupin';\n{REPORT}\n{body}"
@@ -460,6 +463,7 @@ fn concurrent_writes_never_pass_the_quota_together() {
                 let call = world.bridge.call(&world.id, Trigger::Query);
                 barrier.wait();
                 let reply = call.services.call(
+                    ASKED,
                     "storage.put",
                     args.as_bytes(),
                     Instant::now() + Duration::from_secs(5),
@@ -719,6 +723,7 @@ fn hostile_requests_are_refused_before_any_service_runs() {
     let call = world.bridge.call(&world.id, Trigger::Query);
     let ask = |op: &str, args: &[u8]| -> serde_json::Value {
         serde_json::from_slice(&call.services.call(
+            ASKED,
             op,
             args,
             Instant::now() + Duration::from_secs(1),
@@ -816,6 +821,7 @@ fn a_call_opens_only_the_calendar_links_its_own_reads_returned() {
     let link = "ical://ekevent/standup-43200000?method=show&options=more";
     let read = |call: &Call| -> serde_json::Value {
         serde_json::from_slice(&call.services.call(
+            ASKED,
             "calendar.events",
             br#"{"from":0,"to":86400000}"#,
             Instant::now() + Duration::from_secs(1),
@@ -855,6 +861,7 @@ fn a_latest_first_calendar_read_reaches_the_service() {
     let call = world.bridge.call(&world.id, Trigger::Query);
     let ask = |args: &[u8]| -> serde_json::Value {
         serde_json::from_slice(&call.services.call(
+            ASKED,
             "calendar.events",
             args,
             Instant::now() + Duration::from_secs(1),
@@ -1709,4 +1716,225 @@ fn only_a_background_profile_runs_while_typing_and_never_outlives_its_call() {
         "the command times out before the call's deadline: {:?}",
         launches[0].1
     );
+}
+
+/// When a request is held back from the bridge or from its guest, relative to its run's end.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Hold {
+    /// The consent request reaches the bridge only once its run has ended.
+    UntilEnded,
+    /// The consent request is decided while its run lives, and the fast failure that ends the
+    /// run is released only then; its refusal reaches the guest only once the run has ended.
+    UntilDecided,
+}
+
+/// A call's services with `storage.usage`, which needs consent, and `clipboard.read`, which
+/// fails at once, put in the order `hold` names, so a guest that awaits both at once ends its
+/// call in a known order. No timing decides it.
+struct Ordered {
+    inner: Arc<dyn HostServices>,
+    hold: Hold,
+    state: Mutex<Order>,
+    changed: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct Order {
+    decided: bool,
+    ended: bool,
+    /// Whether the consent request has finished.
+    finished: bool,
+}
+
+impl Ordered {
+    fn new(inner: Arc<dyn HostServices>, hold: Hold) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            hold,
+            state: Mutex::default(),
+            changed: std::sync::Condvar::new(),
+        })
+    }
+
+    fn wait(&self, until: impl Fn(&Order) -> bool) -> std::sync::MutexGuard<'_, Order> {
+        let state = self.state.lock().unwrap();
+        let (state, timeout) = self
+            .changed
+            .wait_timeout_while(state, Duration::from_secs(10), |state| !until(state))
+            .unwrap();
+        assert!(
+            !timeout.timed_out(),
+            "the requests never reached the order the test sets"
+        );
+        state
+    }
+
+    fn update(&self, change: impl FnOnce(&mut Order)) {
+        change(&mut self.state.lock().unwrap());
+        self.changed.notify_all();
+    }
+}
+
+impl HostServices for Ordered {
+    fn call(
+        &self,
+        request: HostRequest,
+        op: &str,
+        args: &[u8],
+        deadline: Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Vec<u8> {
+        let call = || self.inner.call(request, op, args, deadline, cancelled);
+        match (op, self.hold) {
+            ("storage.usage", Hold::UntilEnded) => {
+                drop(self.wait(|order| order.ended));
+                let reply = call();
+                self.update(|order| order.finished = true);
+                reply
+            }
+            ("storage.usage", Hold::UntilDecided) => {
+                let reply = call();
+                self.update(|order| order.decided = true);
+                drop(self.wait(|order| order.ended));
+                self.update(|order| order.finished = true);
+                reply
+            }
+            ("clipboard.read", Hold::UntilDecided) => {
+                drop(self.wait(|order| order.decided));
+                call()
+            }
+            _ => call(),
+        }
+    }
+
+    fn ended(&self, run: u64, answered: &[u32]) {
+        self.inner.ended(run, answered);
+        self.update(|order| order.ended = true);
+    }
+}
+
+#[test]
+fn a_request_still_running_when_its_call_ends_never_leaves_a_consent_prompt() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "storage": { "quotaBytes": 1024 } }),
+        &guest(
+            "export async function search(query) {
+               if (query === 'together') await Promise.all([clipboard.readText(), storage.usage()]);
+               else { try { await storage.usage(); } catch {} }
+               return [{ title: 'done' }];
+             }",
+        ),
+    );
+    world.enable();
+    let notices = Arc::new(Mutex::new(Vec::new()));
+    world.bridge.set_listener({
+        let notices = notices.clone();
+        move |notice| notices.lock().unwrap().push(notice)
+    });
+    for hold in [Hold::UntilEnded, Hold::UntilDecided] {
+        let call = world.bridge.call(&world.id, Trigger::Query);
+        let ordered = Ordered::new(call.services.clone(), hold);
+        let services: Arc<dyn HostServices> = ordered.clone();
+        let answer = world.host.search(
+            &world.package,
+            "together",
+            10,
+            Instant::now() + Duration::from_secs(5),
+            &|| false,
+            &services,
+        );
+        let Err(RunError::Failed(diagnostic)) = answer else {
+            panic!("the undeclared request didn't end the call: {answer:?}");
+        };
+        assert!(diagnostic.message.contains("clipboard"), "{diagnostic:?}");
+        drop(ordered.wait(|order| order.finished));
+        assert!(
+            world.bridge.pending(Some(&world.id)).is_empty(),
+            "a refusal its call never saw is still asked"
+        );
+        let notified = notices.lock().unwrap().drain(..).collect::<Vec<_>>();
+        let expected = match hold {
+            Hold::UntilEnded => Vec::new(),
+            // Asked while the call ran, then withdrawn when it ended.
+            Hold::UntilDecided => vec![Notice::ConsentNeeded(world.id.clone()); 2],
+        };
+        assert_eq!(notified, expected);
+    }
+
+    // A refusal the guest took while its call ran still asks, after the call ends.
+    assert_eq!(world.first("apart"), "done");
+    let pending = world.bridge.pending(Some(&world.id));
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].key().to_string(), "storage");
+}
+
+#[test]
+fn a_question_stands_once_something_that_finished_asking_asked_it() {
+    let bridge = Bridge::new(
+        Broker::new(Base::default(), Local::default()),
+        None,
+        Services::none(),
+    );
+    let id = PackageId::new("emoji").unwrap();
+    let capabilities =
+        Capabilities::parse(&serde_json::json!({ "storage": { "quotaBytes": 1024 } })).unwrap();
+    let _ = bridge.install(&id, revision(), capabilities);
+    let usage = |call: &Call, request: HostRequest, ended: bool| {
+        let reply = call.services.call(
+            request,
+            "storage.usage",
+            b"{}",
+            Instant::now() + Duration::from_secs(1),
+            &std::sync::atomic::AtomicBool::new(ended),
+        );
+        serde_json::from_slice::<serde_json::Value>(&reply).unwrap()["error"]["code"].clone()
+    };
+    let first = HostRequest { run: 1, call: 1 };
+    let second = HostRequest { run: 2, call: 1 };
+
+    // Off: the request asks to turn the package on, until its run ends unseen.
+    let call = bridge.call(&id, Trigger::Query);
+    assert_eq!(usage(&call, first, false), "disabled");
+    assert!(bridge.asked_while_off(&id));
+    call.services.ended(first.run, &[]);
+    assert!(!bridge.asked_while_off(&id));
+    // Once its run has ended a request asks nothing and reaches no service.
+    assert_eq!(usage(&call, first, true), "cancelled");
+    assert!(!bridge.asked_while_off(&id));
+
+    // Asked by two runs: one whose guest took the refusal keeps it up after the other ends
+    // unseen, whichever ends first.
+    bridge.set_enabled(&id, true).unwrap();
+    for ends in [[(first, true), (second, false)], [(second, false), (first, true)]] {
+        let call = bridge.call(&id, Trigger::Query);
+        assert_eq!(usage(&call, first, false), "needs-consent");
+        assert_eq!(usage(&call, second, false), "needs-consent");
+        for (request, seen) in ends {
+            let answered = if seen { vec![request.call] } else { Vec::new() };
+            call.services.ended(request.run, &answered);
+        }
+        assert_eq!(bridge.pending(Some(&id)).len(), 1);
+        bridge.forget_grants(&id).unwrap();
+        bridge.set_enabled(&id, true).unwrap();
+    }
+
+    // Dupin's own refusal keeps up what a run then asks unseen, and a run's unseen refusal
+    // gives way to Dupin's own.
+    let read = Request::Storage { op: StorageOp::Read };
+    for dupin_first in [true, false] {
+        let call = bridge.call(&id, Trigger::Query);
+        if !dupin_first {
+            assert_eq!(usage(&call, first, false), "needs-consent");
+        }
+        let refused = bridge.authorize(&id, &read, Trigger::Query).unwrap_err();
+        assert_eq!(refused.code(), "needs-consent");
+        if dupin_first {
+            assert_eq!(usage(&call, first, false), "needs-consent");
+        }
+        call.services.ended(first.run, &[]);
+        assert_eq!(bridge.pending(Some(&id)).len(), 1);
+        bridge.forget_grants(&id).unwrap();
+        bridge.set_enabled(&id, true).unwrap();
+    }
 }

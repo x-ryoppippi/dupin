@@ -5,10 +5,11 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 
 use dupin_core::Config;
-use dupin_mac::{PathWatcher, watcher::canonical_root};
+use dupin_mac::watcher::canonical_root;
 
 use super::layers::Layers;
 use super::{LockedKeys, Paths};
+use crate::watch_source::{Roots, Source};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Update {
@@ -29,12 +30,18 @@ pub struct Service {
 
 impl Service {
     pub fn new(paths: Paths, callback: impl Fn(Update) + Send + 'static) -> Self {
+        Self::watching(paths, crate::watch_source::launcher(), callback)
+    }
+
+    /// A service told of changes to the settings files by `source`.
+    fn watching(paths: Paths, source: impl Source, callback: impl Fn(Update) + Send + 'static) -> Self {
         let (sender, receiver) = mpsc::channel();
         let worker_sender = sender.clone();
         let base = paths.base.clone();
+        let source = Box::new(source);
         let worker = thread::Builder::new()
             .name("dupin-config-watch".into())
-            .spawn(move || Worker::new(paths, receiver, worker_sender, callback).run())
+            .spawn(move || Worker::new(paths, receiver, worker_sender, source, callback).run())
             .expect("could not start settings worker");
 
         Service {
@@ -147,7 +154,8 @@ struct Worker<F> {
     receiver: Receiver<Job>,
     sender: Sender<Job>,
     callback: F,
-    watcher: Option<PathWatcher>,
+    source: Box<dyn Source>,
+    watcher: Option<Box<dyn Send>>,
     watcher_roots: Option<Vec<PathBuf>>,
     watch_problem: Option<String>,
     save_problem: Option<String>,
@@ -163,12 +171,19 @@ impl<F> Worker<F>
 where
     F: Fn(Update),
 {
-    fn new(paths: Paths, receiver: Receiver<Job>, sender: Sender<Job>, callback: F) -> Self {
+    fn new(
+        paths: Paths,
+        receiver: Receiver<Job>,
+        sender: Sender<Job>,
+        source: Box<dyn Source>,
+        callback: F,
+    ) -> Self {
         Worker {
             paths,
             receiver,
             sender,
             callback,
+            source,
             watcher: None,
             watcher_roots: None,
             watch_problem: None,
@@ -278,12 +293,16 @@ where
         }
 
         let sender = self.sender.clone();
-        match PathWatcher::start_shallow_with_files(
-            requested.paths.clone(),
-            files.clone().cloned().collect(),
-            move |rebuild| {
-                let _ = sender.send(Job::Changed { rebuild });
+        let watched: Vec<PathBuf> = files.clone().cloned().collect();
+        match self.source.watch(
+            &Roots::Trees {
+                shallow: requested.paths.clone(),
+                recursive: Vec::new(),
             },
+            Box::new(move || watched.clone()),
+            Box::new(move |rebuild| {
+                let _ = sender.send(Job::Changed { rebuild });
+            }),
         ) {
             Ok(watcher) => {
                 self.watcher = Some(watcher);
@@ -506,6 +525,11 @@ mod tests {
 
     use super::*;
     use crate::settings::overlay::Overlay;
+    use crate::watch_source::manual::Manual;
+
+    fn by_hand() -> Box<dyn Source> {
+        Box::new(Manual::default())
+    }
 
     static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
@@ -870,7 +894,7 @@ script = "missing.sh"
         sender.send(save_job(2, first, latest.clone())).unwrap();
         sender.send(Job::Stop).unwrap();
 
-        Worker::new(base_only(path.clone()), receiver, sender, |_| {}).run();
+        Worker::new(base_only(path.clone()), receiver, sender, by_hand(), |_| {}).run();
 
         assert_eq!(Config::parse(&fs::read_to_string(path).unwrap()).unwrap(), latest);
     }
@@ -924,9 +948,15 @@ script = "missing.sh"
         sender.send(save_job(1, base, desired.clone())).unwrap();
         sender.send(Job::Stop).unwrap();
         let (updates, update_receiver) = mpsc::channel();
-        Worker::new(base_only(path.clone()), receiver, sender, move |update| {
-            updates.send(update).unwrap();
-        })
+        Worker::new(
+            base_only(path.clone()),
+            receiver,
+            sender,
+            by_hand(),
+            move |update| {
+                updates.send(update).unwrap();
+            },
+        )
         .run();
 
         let update = update_receiver.try_recv().unwrap();
@@ -956,9 +986,15 @@ script = "missing.sh"
         sender.send(save_job(1, base, desired)).unwrap();
         sender.send(Job::Stop).unwrap();
         let (updates, update_receiver) = mpsc::channel();
-        Worker::new(base_only(path.clone()), receiver, sender, move |update| {
-            updates.send(update).unwrap();
-        })
+        Worker::new(
+            base_only(path.clone()),
+            receiver,
+            sender,
+            by_hand(),
+            move |update| {
+                updates.send(update).unwrap();
+            },
+        )
         .run();
 
         let update = update_receiver.try_recv().unwrap();
@@ -983,9 +1019,15 @@ script = "missing.sh"
         fs::write(&path, toml::to_string(&base).unwrap()).unwrap();
         let (sender, receiver) = mpsc::channel();
         let (updates, received) = mpsc::channel();
-        let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
-            updates.send(update).unwrap();
-        });
+        let mut worker = Worker::new(
+            base_only(path.clone()),
+            receiver,
+            sender,
+            by_hand(),
+            move |update| {
+                updates.send(update).unwrap();
+            },
+        );
         worker.write = |_, _| Err(io::Error::other("blocked"));
         let first = Config {
             file_limit: 50,
@@ -1032,9 +1074,15 @@ script = "missing.sh"
             fs::write(&path, toml::to_string(&base).unwrap()).unwrap();
             let (sender, receiver) = mpsc::channel();
             let (updates, received) = mpsc::channel();
-            let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
-                updates.send(update).unwrap();
-            });
+            let mut worker = Worker::new(
+                base_only(path.clone()),
+                receiver,
+                sender,
+                by_hand(),
+                move |update| {
+                    updates.send(update).unwrap();
+                },
+            );
             worker.write = |_, _| Err(io::Error::other("blocked"));
             let first = Config {
                 file_limit: 50,
@@ -1111,9 +1159,15 @@ script = "missing.sh"
         fs::write(&path, toml::to_string(&disk).unwrap()).unwrap();
         let (sender, receiver) = mpsc::channel();
         let (updates, received) = mpsc::channel();
-        let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
-            updates.send(update).unwrap();
-        });
+        let mut worker = Worker::new(
+            base_only(path.clone()),
+            receiver,
+            sender,
+            by_hand(),
+            move |update| {
+                updates.send(update).unwrap();
+            },
+        );
         worker.process_saves(vec![Save {
             revision: 1,
             base,
@@ -1318,7 +1372,8 @@ script = "missing.sh"
         let path = directory.join("config.toml");
         fs::write(&path, "file_limit = 37").unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(path.clone()), move |update| {
+        let source = Manual::default();
+        let service = Service::watching(base_only(path.clone()), source.clone(), move |update| {
             updates.send(update).unwrap()
         });
         service.activate();
@@ -1332,6 +1387,7 @@ script = "missing.sh"
             37
         );
         fs::rename(&directory, temp.path().join("moved")).unwrap();
+        source.changed(&directory);
         assert_eq!(
             receiver
                 .recv_timeout(Duration::from_secs(10))
@@ -1342,6 +1398,7 @@ script = "missing.sh"
         );
         fs::create_dir(&directory).unwrap();
         fs::write(&path, "file_limit = 58").unwrap();
+        source.changed(&path);
         assert_eq!(
             receiver
                 .recv_timeout(Duration::from_secs(10))
@@ -1352,6 +1409,7 @@ script = "missing.sh"
             58
         );
         fs::write(&path, "file_limit = 59").unwrap();
+        source.changed(&path);
         assert_eq!(
             receiver
                 .recv_timeout(Duration::from_secs(10))
@@ -1364,12 +1422,13 @@ script = "missing.sh"
     }
 
     #[test]
-    fn real_watcher_reloads_changes_and_stops_with_the_service() {
+    fn a_watched_change_reloads_and_the_watch_stops_with_the_service() {
         let temp = TempDir::new();
         let path = temp.path().join("config.toml");
         fs::write(&path, "position = \"center\"").unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(path.clone()), move |update| {
+        let source = Manual::default();
+        let service = Service::watching(base_only(path.clone()), source.clone(), move |update| {
             updates.send(update).unwrap()
         });
 
@@ -1381,6 +1440,7 @@ script = "missing.sh"
         assert_eq!(initial.result.unwrap().position, dupin_core::Position::Center);
 
         fs::write(&path, "position = \"top\"").unwrap();
+        source.changed(&path);
         let deadline = Instant::now() + Duration::from_secs(5);
         let changed = loop {
             let remaining = deadline.saturating_duration_since(Instant::now());

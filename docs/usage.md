@@ -44,6 +44,7 @@ Completed searches are remembered for the current Dupin process when you clear t
 ## Features
 
 - **Searching**: [Keywords](./features/keywords.md), [Apps](./features/apps.md), [Recent items](./features/recent-items.md), [Files](./features/files.md), [Folder browsing](./features/folder-browsing.md), [File actions](./features/file-actions.md), [Send to](./features/send-to.md), [Dictionary](./features/dictionary.md), [Web searches](./features/web-searches.md), [Maps](./features/maps.md), [Calculator](./features/calculator.md), [Calendar](./features/calendar.md), [Clipboard history](./features/clipboard.md), [Snippets](./features/snippets.md), [Emoji & Symbols](./features/emoji.md), [Snapshots](./features/snapshots.md)
-- **Commands**: [Script commands](./features/scripts.md), [Hotkeys](./features/hotkeys.md), [Search selected text](./features/selected-text.md), [Window management](./features/window-management.md), [Remote](./features/remote.md), [System commands](./features/system-commands.md)
+- **Commands**: [Script commands](./features/scripts.md), [Hotkeys](./features/hotkeys.md), [Search selected text](./features/selected-text.md), [Window management](./features/window-management.md), [System commands](./features/system-commands.md)
 - **The app**: [Settings](./features/settings.md), [Appearance](./features/appearance.md), [Permissions](./features/permissions.md), [Storage](./features/storage.md), [Sync](./features/sync.md), [Updates](./features/updates.md)
-- **Extending**: [Extensions](./features/extensions.md), [Advanced composition](./features/advanced.md), [MCP server](./features/mcp.md)
+- **Extending**: [Extensions](./features/extensions.md), [Advanced composition](./features/advanced.md)
+- **Scripts and agents**: [Command line](./features/cli.md), [MCP server](./features/mcp.md)

@@ -1,6 +1,6 @@
 # Extensions
 
-An extension is a JavaScript or TypeScript package that answers one keyword: type the keyword and Space, then a query, and Dupin shows the rows the extension returns.
+An extension is a JavaScript or TypeScript package that answers one keyword: type the keyword and Space, then a query, and Dupin shows the rows the extension returns. It runs inside Dupin, sandboxed; to drive Dupin from a terminal, a script or an AI agent, use the [command line](./cli.md) or the [MCP server](./mcp.md).
 
 ## Open it
 
@@ -84,7 +84,7 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 <details>
 <summary>More notes</summary>
 
-- Bundled extensions are on from the start, except Window Management, Remote, Repositories, Processes, Ports and Coding Agents.
+- Bundled extensions are on from the start, except Window Management, Repositories, Processes, Ports and Coding Agents.
 - An update that widens what a package asks for asks again.
 - Dupin never asks macOS for access on its own.
 - A third-party extension answers its keyword once it loads, but uses nothing it asks for until you turn it on, and each scope then needs your consent.
@@ -247,12 +247,12 @@ programs.dupin.bundledExtensions = {
 };
 ```
 
-| Option     | Default | Meaning                                                                                                                                                                                                                 |
-| ---------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enable`   | `null`  | Leaves the switch to Dupin. `true` turns the package on, Window Management and Remote included, though Settings can still turn it off. `false` keeps it off, and a built-in command it answers says it isn't available. |
-| `deny`     | `[]`    | Scopes the package may never use, though it ships with them granted, such as `calendar`, `clipboard:watch` or `windows:arrange`.                                                                                        |
-| `grants`   | `[]`    | `files` and `exec` scopes allowed ahead of time, which a bundled package doesn't ship with, since each is bound to a path.                                                                                              |
-| `bindings` | `{}`    | The absolute path each of those grants is bound to.                                                                                                                                                                     |
+| Option     | Default | Meaning                                                                                                                                                                                                      |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enable`   | `null`  | Leaves the switch to Dupin. `true` turns the package on, Window Management included, though Settings can still turn it off. `false` keeps it off, and a built-in command it answers says it isn't available. |
+| `deny`     | `[]`    | Scopes the package may never use, though it ships with them granted, such as `calendar`, `clipboard:watch` or `windows:arrange`.                                                                             |
+| `grants`   | `[]`    | `files` and `exec` scopes allowed ahead of time, which a bundled package doesn't ship with, since each is bound to a path.                                                                                   |
+| `bindings` | `{}`    | The absolute path each of those grants is bound to.                                                                                                                                                          |
 
 They go to the same `extension-grants.toml`, under `bundled:<name>` and without a revision, since a bundled package only ever runs as the sealed copy that shipped:
 
@@ -264,7 +264,7 @@ enabled = true
 deny = ["calendar"]
 ```
 
-Dupin grants what a bundled package declares in advance, except its files and programs: [Remote](./remote.md)'s are picked in Settings, and the folders and programs [Repositories](./repo.md) names are what `grants` and `bindings` allow ahead of time, and the programs Processes, Ports and Coding Agents name, such as `exec:processes`, you allow without a pick, and `deny` can name. Those entries name the revision of the package `package` ships, which Dupin computes when the configuration builds. A name the configured `package` doesn't bundle fails evaluation, and so does a denial of a scope that package doesn't declare; both messages list what it does bundle or declare. A built-in command still needs its own setting, such as `calendar.enabled`, to register it. A changed copy in the extensions folder is a package of its own, so none of this applies to it.
+Dupin grants what a bundled package declares in advance, except its files and programs: the folders and programs [Repositories](./repo.md) names are what `grants` and `bindings` allow ahead of time, and the programs Processes, Ports and Coding Agents name, such as `exec:processes`, you allow without a pick, and `deny` can name. Those entries name the revision of the package `package` ships, which Dupin computes when the configuration builds. A name the configured `package` doesn't bundle fails evaluation, and so does a denial of a scope that package doesn't declare; both messages list what it does bundle or declare. A built-in command still needs its own setting, such as `calendar.enabled`, to register it. A changed copy in the extensions folder is a package of its own, so none of this applies to it.
 
 </details>
 
@@ -272,18 +272,11 @@ Dupin grants what a bundled package declares in advance, except its files and pr
 
 Some extensions ship inside Dupin and run whether or not the extensions folder is on, each with a switch in Settings → Extensions.
 
-| Extension                                   | Keyword   | What it does                                                               |
-| ------------------------------------------- | --------- | -------------------------------------------------------------------------- |
-| **Dupin**                                   | `help`    | Searches Dupin's documentation, issues, source and website.                |
-| [Emoji & Symbols](./emoji.md)               | `emoji`   | Picks an emoji or symbol by its English or Japanese name.                  |
-| [Window Management](./window-management.md) | `window`  | Moves and resizes the focused window. Off until turned on.                 |
-| [Remote](./remote.md)                       | `remote`  | Lists processes, ports, logs and files of SSH hosts. Off until turned on.  |
-| [Repositories](./repo.md)                   | `repo`    | Opens your Git repositories in an editor or terminal. Off until turned on. |
-| [Processes](./processes.md)                 | `proc`    | Lists running processes, and stops one. Off until turned on.               |
-| [Ports](./ports.md)                         | `port`    | Lists listening ports and what holds each. Off until turned on.            |
-| [Coding Agents](./coding-agents.md)         | `agent`   | Lists the coding agents running, by project. Off until turned on.          |
-| [Web Search](./web-searches.md)             | `web`     | Lists the web searches, such as `g` for Google.                            |
-| Built-in features                           | Their own | Calculator, Calendar search, Clipboard history, Dictionary and Snippets.   |
+| Extension                                   | Keyword  | What it does                                                |
+| ------------------------------------------- | -------- | ----------------------------------------------------------- |
+| **Dupin**                                   | `help`   | Searches Dupin's documentation, issues, source and website. |
+| [Emoji & Symbols](./emoji.md)               | `emoji`  | Picks an emoji or symbol by its English or Japanese name.   |
+| [Window Management](./window-management.md) | `window` | Moves and resizes the focused window. Off until turned on.  |
 
 <details>
 <summary>Built-in features as packages</summary>
@@ -310,7 +303,7 @@ Each build of Dupin records a hash of every file in each bundled package folder,
 <details>
 <summary>Grants and keywords</summary>
 
-A bundled extension is on until you turn it off in Settings → Extensions, except Window Management, Remote, Repositories, Processes, Ports and Coding Agents, which stay off, answering nothing, until you turn it on there or [with Nix](#declaring-them-with-nix). Dupin knows it by its `name` and a hash of its `package.json` and modules: while it runs exactly the copy that shipped, the [capability broker](../capability-broker.md) grants what it declares in advance, except files and programs, which are bound when you allow them, and macOS still asks for its own permissions on first use ([Permissions](./permissions.md#extensions)). The broker keeps its grants and its switch under `bundled:<name>`, apart from any package in the extensions folder.
+A bundled extension is on until you turn it off in Settings → Extensions, except Window Management, Repositories, Processes, Ports and Coding Agents, which stay off, answering nothing, until you turn it on there or [with Nix](#declaring-them-with-nix). Dupin knows it by its `name` and a hash of its `package.json` and modules: while it runs exactly the copy that shipped, the [capability broker](../capability-broker.md) grants what it declares in advance, except files and programs, which are bound when you allow them, and macOS still asks for its own permissions on first use ([Permissions](./permissions.md#extensions)). The broker keeps its grants and its switch under `bundled:<name>`, apart from any package in the extensions folder.
 
 A user extension can't take a bundled extension's keyword, as it can't take a built-in command's: `dupin ext install` refuses it, and Settings lists one already in the folder as skipped and marks its row as not answering. Extensions from the folder load only once the bundled ones have been read, so one never holds a bundled keyword for a moment at launch.
 

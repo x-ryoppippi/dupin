@@ -43,6 +43,7 @@ mod notices;
 mod out;
 mod prefs;
 mod receivers;
+mod recording;
 mod scripts;
 mod settings;
 mod shader;
@@ -60,6 +61,7 @@ mod ui;
 mod update;
 mod view;
 mod wall_clock;
+mod watch_source;
 mod web;
 
 fn main() {

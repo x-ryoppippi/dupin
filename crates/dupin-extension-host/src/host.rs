@@ -48,14 +48,35 @@ const FOOTPRINT_ALLOWANCE: u64 = 64 * 1024 * 1024;
 /// Makes the command that starts a helper; the host connects its standard streams.
 pub type Launcher = Box<dyn Fn() -> io::Result<Command> + Send + Sync>;
 
+/// One host request: the run that made it, named uniquely in this process, and its number in
+/// that run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct HostRequest {
+    pub run: u64,
+    pub call: u32,
+}
+
 /// Dupin's host services as one call sees them. The caller builds one per call, for the package
 /// and the reason it runs (typing, a chosen action, a watched event), so the helper can't claim
 /// either.
 pub trait Services: Send + Sync {
-    /// Answers request `op` with `args`, both as the guest sent them, with JSON
+    /// Answers `request`, operation `op` with `args` as the guest sent them, with JSON
     /// `{"ok": value}` or `{"error": {"code", "message", …}}`. Runs on a thread of its own.
-    /// `cancelled` is set once the call has ended, after which the reply is dropped.
-    fn call(&self, op: &str, args: &[u8], deadline: Instant, cancelled: &AtomicBool) -> Vec<u8>;
+    /// `cancelled` is set once the run has ended, after which the reply is dropped.
+    fn call(
+        &self,
+        request: HostRequest,
+        op: &str,
+        args: &[u8],
+        deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Vec<u8>;
+    /// Run `run` has ended, however it ended, with `cancelled` set for each of its requests.
+    /// The guest took the replies to the requests numbered in `answered` and to no others, so
+    /// whatever another request of the run left for the user to answer is withdrawn.
+    fn ended(&self, run: u64, answered: &[u32]) {
+        let _ = (run, answered);
+    }
     /// Whether one of this call's replies gave the guest `url`, a link not on the web such as
     /// a calendar event's, which its rows may then open.
     fn opens(&self, url: &str) -> bool {
@@ -68,7 +89,14 @@ pub trait Services: Send + Sync {
 pub struct NoServices;
 
 impl Services for NoServices {
-    fn call(&self, _op: &str, _args: &[u8], _deadline: Instant, _cancelled: &AtomicBool) -> Vec<u8> {
+    fn call(
+        &self,
+        _request: HostRequest,
+        _op: &str,
+        _args: &[u8],
+        _deadline: Instant,
+        _cancelled: &AtomicBool,
+    ) -> Vec<u8> {
         br#"{"error":{"code":"unavailable","message":"host services are unavailable here"}}"#.to_vec()
     }
 }
@@ -982,7 +1010,15 @@ impl Helper {
         );
         loop {
             match self.replies.recv_timeout(TICK) {
-                Ok((FromHelper::Done { id: answered, answer }, tail)) if answered == id => {
+                Ok((
+                    FromHelper::Done {
+                        id: done,
+                        answer,
+                        answered,
+                    },
+                    tail,
+                )) if done == id => {
+                    requests.answered = answered;
                     return Ok((answer, tail));
                 }
                 Ok((FromHelper::Host { id: asking, call, op }, args)) if asking == id => {
@@ -1031,18 +1067,29 @@ impl Helper {
     }
 }
 
+/// Names each run for its services, uniquely across every host in the process.
+static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
+
 /// The host requests of one run: each runs on a worker thread of its own, which writes its
 /// reply to the helper the moment it has one, so a guest awaiting it never waits for the run's
-/// next check. A reply that comes after the run ends is dropped.
+/// next check. A reply that comes after the run ends is dropped, and when the run ends its
+/// services learn which replies the guest took.
 struct Requests {
     services: Arc<dyn Services>,
     deadline: Instant,
     cancelled: Arc<AtomicBool>,
+    /// The helper's id for the run.
     run: u64,
+    /// The services' name for the run.
+    token: u64,
     socket: Arc<Mutex<UnixStream>>,
     workers: Arc<Workers>,
     last: u32,
     waiting: Arc<AtomicUsize>,
+    /// The requests whose replies were written to the helper.
+    sent: Arc<Mutex<HashSet<u32>>>,
+    /// The requests whose replies the helper says the guest took, once it has answered.
+    answered: Vec<u32>,
 }
 
 impl Requests {
@@ -1058,10 +1105,13 @@ impl Requests {
             deadline,
             cancelled: Arc::default(),
             run,
+            token: NEXT_RUN.fetch_add(1, Ordering::Relaxed),
             socket,
             workers,
             last: 0,
             waiting: Arc::default(),
+            sent: Arc::default(),
+            answered: Vec::new(),
         }
     }
 
@@ -1083,8 +1133,12 @@ impl Requests {
         let cancelled = self.cancelled.clone();
         let deadline = self.deadline;
         let reply = self.reply(call);
+        let request = HostRequest {
+            run: self.token,
+            call,
+        };
         let started = self.workers.run(Box::new(move || {
-            reply.send(&services.call(&op, &args, deadline, &cancelled));
+            reply.send(&services.call(request, &op, &args, deadline, &cancelled));
         }));
         if started.is_err() {
             self.reply(call)
@@ -1100,6 +1154,7 @@ impl Requests {
             socket: self.socket.clone(),
             cancelled: self.cancelled.clone(),
             waiting: self.waiting.clone(),
+            sent: self.sent.clone(),
         }
     }
 }
@@ -1168,6 +1223,7 @@ struct Reply {
     socket: Arc<Mutex<UnixStream>>,
     cancelled: Arc<AtomicBool>,
     waiting: Arc<AtomicUsize>,
+    sent: Arc<Mutex<HashSet<u32>>>,
 }
 
 impl Reply {
@@ -1175,6 +1231,11 @@ impl Reply {
     /// channel closing.
     fn send(self, json: &[u8]) {
         if !self.cancelled.load(Ordering::Relaxed) {
+            // Noted before it is written, so any reply the guest can have taken is noted.
+            self.sent
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(self.call);
             let _ = write(
                 &self.socket,
                 &ToHelper::Reply {
@@ -1197,6 +1258,16 @@ fn write(socket: &Mutex<UnixStream>, message: &ToHelper, tail: &[&[u8]]) -> io::
 impl Drop for Requests {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Relaxed);
+        // A helper may claim to have taken only replies it was sent.
+        let answered: Vec<u32> = {
+            let sent = self.sent.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            self.answered
+                .iter()
+                .copied()
+                .filter(|call| sent.contains(call))
+                .collect()
+        };
+        self.services.ended(self.token, &answered);
     }
 }
 
