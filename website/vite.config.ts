@@ -3,7 +3,7 @@ import { oxContentCustomHost, type OxContentOptions } from '@ox-content/vite-plu
 import { svelte } from '@rsvelte/vite-plugin-svelte';
 import { cloudflareRedirect } from '@ryoppippi/vite-plugin-cloudflare-redirect';
 import path from 'node:path';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig } from 'vite';
 import { docsLinks } from './src/docs/links.ts';
 import { repo, siteName, siteUrl } from './src/site.ts';
 
@@ -12,7 +12,7 @@ const oxContentOptions = {
 	srcDir: '../docs',
 	transformers: [docsLinks(path.resolve(import.meta.dirname, '..'))],
 	search: { limit: 40 },
-	// Where `cf build` puts the Worker's static assets, which the search index is one of.
+	// Where `cf build` puts the site's static assets, which the search index is one of.
 	outDir: '.cloudflare/output/v1/workers/default/assets',
 	docs: false,
 	icons: { include: ['src/**/*.{css,ts,svelte}'] },
@@ -25,12 +25,10 @@ const oxContentOptions = {
 	},
 } satisfies OxContentOptions;
 
-const workerEnvironment = 'redirect';
-
 export default defineConfig({
 	appType: 'mpa',
 	plugins: [
-		cloudflare({ viteEnvironment: { name: workerEnvironment } }),
+		cloudflare(),
 		svelte({ configFile: false }),
 		cloudflareRedirect({
 			mode: 'generate',
@@ -44,18 +42,7 @@ export default defineConfig({
 			oxContent: oxContentOptions,
 			dev: { routeDependencies: [{ path: 'src', kind: 'directory' }] },
 			build: { transformHtml: false },
-		}).map(
-			(plugin) =>
-				({
-					...plugin,
-					applyToEnvironment(environment) {
-						return (
-							environment.name !== workerEnvironment &&
-							(plugin.applyToEnvironment?.(environment) ?? true)
-						);
-					},
-				}) satisfies Plugin,
-		),
+		}),
 	],
 	build: { rollupOptions: { input: 'index.html' } },
 	// The site reads the logo and VERSION from the repository root, one level up.

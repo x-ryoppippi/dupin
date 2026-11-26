@@ -171,6 +171,7 @@ function docDescription(source: string): string {
 const docsNav = (titles: ReadonlyMap<DocPath, string>) =>
 	sections.map((section) => ({
 		title: section.title,
+		intro: 'intro' in section ? section.intro : undefined,
 		pages: section.pages.map((page) => ({ title: titles.get(page) ?? page, href: docRoute(page) })),
 	}));
 

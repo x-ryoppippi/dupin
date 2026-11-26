@@ -387,10 +387,10 @@ just website::install # dependencies from the lockfile
 just website::dev     # local server, rendering the real pages
 just website::preview # build, then serve the result with the redirects
 just website::lint    # oxlint, type-aware and type-checked through tsrs
-just website::deploy  # build and deploy the Worker and its static assets
+just website::deploy  # build and deploy the static site
 ```
 
-Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
+Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. The site is static assets only, with no Worker code: HTTP reaches HTTPS through the `dupin.app` zone's Always Use HTTPS setting, and `dupin.app/gh` redirects to the repository through `_redirects`, declared in `website/vite.config.ts`.
 
 Icons are `icon-[set--name]` classes that ox-content turns into one self-hosted stylesheet from the `@iconify-json/*` collections installed in `website/`; add the collection before using a new set. For agents and crawlers the site also serves `/llms.txt`, a Markdown twin of each page (`/index.md`, `/download.md`), `sitemap.xml` and `robots.txt`; the Markdown is built in `website/src/markdown.ts` from the same data as the pages, and `website/public/_headers` sets their content types.
 
