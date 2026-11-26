@@ -302,7 +302,7 @@ const staticRoutes: OxContentCustomHostRoute[] = [
 					context,
 					{
 						name: 'download',
-						title: `Download ${siteName}, ${tagline}`,
+						title: `Download ${siteName}`,
 						description:
 							'Download Dupin for Apple silicon Macs: the app, Homebrew casks, or a Nix build.',
 						pathname: '/download/',
