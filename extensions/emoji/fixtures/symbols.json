@@ -1856,45 +1856,6 @@
 					{
 						"actions": [
 							{
-								"copy": "↝",
-								"title": "Copy"
-							},
-							{
-								"paste": "↝",
-								"title": "Paste"
-							}
-						],
-						"detail": {
-							"metadata": [
-								{
-									"label": "Character",
-									"text": "↝"
-								},
-								{
-									"label": "Name",
-									"text": "rightwards wave arrow"
-								},
-								{
-									"label": "日本語",
-									"text": "右向き波線矢印"
-								},
-								{
-									"label": "Code points",
-									"text": "U+219D"
-								},
-								{
-									"label": "Keywords",
-									"text": "右向き波線矢印"
-								}
-							]
-						},
-						"id": "219d",
-						"keywords": ["rightwards wave arrow", "右向き波線矢印"],
-						"title": "↝ Rightwards wave arrow"
-					},
-					{
-						"actions": [
-							{
 								"copy": "⇄",
 								"title": "Copy"
 							},
@@ -1930,6 +1891,45 @@
 						"id": "21c4",
 						"keywords": ["rightwards arrow over leftwards arrow", "右矢印左矢印"],
 						"title": "⇄ Rightwards arrow over leftwards arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↝",
+								"title": "Copy"
+							},
+							{
+								"paste": "↝",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↝"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards wave arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き波線矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+219D"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き波線矢印"
+								}
+							]
+						},
+						"id": "219d",
+						"keywords": ["rightwards wave arrow", "右向き波線矢印"],
+						"title": "↝ Rightwards wave arrow"
 					},
 					{
 						"actions": [

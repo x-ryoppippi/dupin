@@ -506,6 +506,17 @@ app = "AirDrop & Continuity"
 query = "ardi"
 times = 1
 
+# Picks of a longer name for the whole of a shorter one it starts.
+[[history.pages-creator]]
+app = "Pages Creator Studio"
+query = "pages"
+times = 100
+
+[[history.notion-calendar]]
+app = "Notion Calendar"
+query = "notion"
+times = 50
+
 # Picks for one query that point at different apps over time.
 [[history.stale-pick]]
 app = "Spark"

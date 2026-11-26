@@ -1,7 +1,11 @@
 //! Subsequence matching for short names (app names, file names), ranked the way launchers
-//! are expected to rank: a prefix beats a word start, which beats a run in the middle, which
-//! beats letters scattered across the name. A query typed whole from a word start ranks above
-//! every match that isn't, whatever the usage history adds.
+//! are expected to rank. A match falls in one of four classes, each ranked above the next by
+//! more than the usage history can add, so usage orders matches within a class but never
+//! across: the query is the whole name; the query runs unbroken from a word start; the query's
+//! runs start the name's words in order from the first (its initials, `am` for Activity
+//! Monitor); its letters are anywhere else. Initials rank by the words they skip and leave;
+//! within the other classes, a prefix beats a word start, which beats a run in the middle,
+//! which beats letters scattered across the name.
 
 /// A match of a query against a name: higher `score` ranks first, and `positions` are the
 /// character indices in the name that matched, in order.
@@ -19,11 +23,24 @@ const GAP: i32 = 3;
 const GAP_START: i32 = 6;
 /// Shorter names win ties: "Safari" over "Safari Technology Preview" for "saf".
 const LENGTH: i32 = 1;
-/// Added when the query runs unbroken from a word start ("ar" in "Ardia", "time" in
-/// "FaceTime"): more than [`crate::history::MAX_BOOST`] plus the widest gap between two
-/// matches' other scores, so usage orders such matches among themselves but never lifts a
-/// scattered one ("ar" in "Calendar", or "Apple Radio" by its initials) above them.
-pub(crate) const RUN_FROM_WORD_START: i32 = 2048;
+/// What initials lose for each word they skip: `am` skips AdGuard Mini's Guard.
+const SKIPPED_WORD: i32 = WORD_START;
+/// What initials lose for each word after their last, less than a skipped word since typing
+/// more initials reaches it: `am` leaves Audio MIDI Setup's Setup.
+const TRAILING_WORD: i32 = 4;
+/// The distance between two classes of match: more than [`crate::history::MAX_BOOST`] plus the
+/// widest gap between two matches' scores within a class, so usage orders the matches of a
+/// class among themselves but never lifts one over a better class ("ar" in "Calendar" over
+/// "Ardia"): an app the user can't see can't be picked, so a boost that hid it would only grow.
+const CLASS: i32 = 2048;
+/// The query's runs start the name's words in order from the first: "vsc" in "Visual Studio
+/// Code", "ar" in "Apple Radio".
+const INITIALS: i32 = CLASS;
+/// The query runs unbroken from a word start: "ar" in "Ardia", "time" in "FaceTime".
+const RUN_FROM_WORD_START: i32 = 2 * CLASS;
+/// The query is the whole name, ignoring case, spaces and a trailing ".app": "line" for LINE,
+/// whatever usage Linear has.
+pub(crate) const EXACT: i32 = 3 * CLASS;
 
 /// Matches `query` against `name`, ignoring case and whitespace in the query.
 /// None when the query's characters don't all appear in order.
@@ -111,7 +128,7 @@ fn search(
     // best[j]: the best score with the query so far matched and its last character at name
     // index j. A gap's cost grows linearly with its length, so the best earlier position is a
     // running maximum.
-    let n = chars.len();
+    let n = lower.len();
     let Scratch { best, next, back } = scratch;
     best.clear();
     best.resize(n, None);
@@ -136,7 +153,7 @@ fn search(
             if lower[j] != q {
                 continue;
             }
-            let bonus = MATCH + position_bonus(chars, j);
+            let bonus = MATCH + if starts_word(chars, j) { WORD_START } else { 0 };
             if i == 0 {
                 let lead = if j == 0 {
                     PREFIX
@@ -172,21 +189,113 @@ fn search(
         .enumerate()
         .filter_map(|(j, s)| s.map(|s| (j, s)))
         .max_by_key(|&(j, s)| (s, std::cmp::Reverse(j)))?;
-    let run = if runs_from_word_start(query, chars, lower) {
-        RUN_FROM_WORD_START
+    let length = LENGTH * n as i32;
+    // The whole name and its initials both begin with the name's first letter or digit, so a
+    // name that begins with another rules both out at the cost of one comparison, which a
+    // long catalogue makes for every row on every keystroke.
+    let may_lead = !chars[0].is_alphanumeric() || lower[0] == query[0];
+    let score = if may_lead && is_whole_name(query, name) {
+        EXACT + total
+    } else if runs_from_word_start(query, name) {
+        RUN_FROM_WORD_START + total
+    } else if may_lead && let Some(initials) = initials(query, name, best, next) {
+        // How far apart the initials are says nothing about how well they match ("am" is as
+        // good a match for Activity Monitor as for Apple Music); which words they start does.
+        INITIALS + initials
     } else {
-        0
+        total
     };
-    Some((j, total - LENGTH * n as i32 + run))
+    Some((j, score - length))
 }
 
-fn runs_from_word_start(query: &[char], chars: &[char], lower: &[char]) -> bool {
+/// Ignoring whitespace and a trailing ".app".
+fn is_whole_name(query: &[char], name: &Name) -> bool {
+    let lower = &name.lower;
+    let stem = match lower.strip_suffix(&['.', 'a', 'p', 'p']) {
+        Some(stem) if !stem.is_empty() => stem,
+        _ => lower,
+    };
+    stem.iter().filter(|c| !c.is_whitespace()).eq(query)
+}
+
+fn runs_from_word_start(query: &[char], name: &Name) -> bool {
+    let (chars, lower) = (&name.chars, &name.lower);
     lower.len() >= query.len()
         && (0..=lower.len() - query.len()).any(|start| {
             lower[start] == query[0]
-                && position_bonus(chars, start) == WORD_START
+                && starts_word(chars, start)
                 && lower[start..start + query.len()] == *query
         })
+}
+
+/// When the query is the name's initials, what the words it skips and leaves after its last
+/// cost, at the least: when its characters can be matched in runs that each begin a word at
+/// its first letter or digit, the first run the name's first word, and each run as long as the
+/// name and the query go on alike ("rightwards arrow" skips the squiggle in "Rightwards
+/// squiggle arrow", however its last "s" could start that word). The buffers are spare room.
+fn initials(
+    query: &[char],
+    name: &Name,
+    cost: &mut Vec<Option<i32>>,
+    next: &mut Vec<Option<i32>>,
+) -> Option<i32> {
+    let (chars, lower) = (&name.chars, &name.lower);
+    let n = lower.len();
+    let initial = |j: usize| starts_word(chars, j) && chars[j].is_alphanumeric();
+    if (0..n)
+        .find(|&j| initial(j))
+        .is_none_or(|first| lower[first] != query[0])
+    {
+        return None;
+    }
+    // cost[j]: the least the words skipped so far cost, with the query so far matched and its
+    // last character at j. With `word` the number of words started by j, a run beginning at j
+    // after a character at k skips `word(j) - word(k) - 1` words: a running minimum of
+    // `cost[k] - SKIPPED_WORD * word(k)` over the k a run may end at.
+    cost.clear();
+    cost.resize(n, None);
+    for (i, &q) in query.iter().enumerate() {
+        next.clear();
+        next.resize(n, None);
+        let mut earlier: Option<i32> = None;
+        let mut word = 0;
+        for j in 0..n {
+            if j >= 1
+                && lower[j] != q
+                && let Some(c) = cost[j - 1]
+            {
+                let lifted = c - SKIPPED_WORD * word;
+                earlier = Some(earlier.map_or(lifted, |e| e.min(lifted)));
+            }
+            let starts = initial(j);
+            word += i32::from(starts);
+            if lower[j] != q {
+                continue;
+            }
+            next[j] = if i == 0 {
+                (starts && word == 1).then_some(0)
+            } else {
+                let run = (j >= 1).then(|| cost[j - 1]).flatten();
+                let jump = earlier.filter(|_| starts).map(|e| e + SKIPPED_WORD * (word - 1));
+                match (run, jump) {
+                    (Some(run), Some(jump)) => Some(run.min(jump)),
+                    (run, jump) => run.or(jump),
+                }
+            };
+        }
+        std::mem::swap(cost, next);
+    }
+    let total = (0..n).filter(|&j| initial(j)).count() as i32;
+    let mut word = 0;
+    let mut least: Option<i32> = None;
+    for (j, c) in cost.iter().enumerate() {
+        word += i32::from(initial(j));
+        if let Some(c) = c {
+            let c = c + TRAILING_WORD * (total - word);
+            least = Some(least.map_or(c, |l| l.min(c)));
+        }
+    }
+    least.map(|cost| -cost)
 }
 
 fn is_subsequence(query: &[char], name: &[char]) -> bool {
@@ -195,19 +304,14 @@ fn is_subsequence(query: &[char], name: &[char]) -> bool {
 }
 
 /// Word starts: after a separator, or a capital after a lower-case letter ("FaceTime").
-fn position_bonus(chars: &[char], j: usize) -> i32 {
+fn starts_word(chars: &[char], j: usize) -> bool {
     if j == 0 {
-        return WORD_START;
+        return true;
     }
     let (prev, here) = (chars[j - 1], chars[j]);
-    if !prev.is_alphanumeric()
+    !prev.is_alphanumeric()
         || (prev.is_lowercase() && here.is_uppercase())
         || (!prev.is_numeric() && here.is_numeric())
-    {
-        WORD_START
-    } else {
-        0
-    }
 }
 
 #[cfg(test)]
@@ -264,29 +368,138 @@ mod tests {
         assert_eq!(rank("note", &["Notes", "No Tears Edition"])[0], "Notes");
     }
 
+    /// The class a short query's match falls in: 3 exact, 2 a run from a word start, 1
+    /// initials, 0 anything else.
+    fn class_of(query: &str, name: &str) -> i32 {
+        (score(query, name).unwrap().score + CLASS / 2).div_euclid(CLASS)
+    }
+
     #[test]
     fn a_query_typed_from_a_word_start_outranks_every_other_match_by_a_class() {
-        let strong = |query, name| score(query, name).unwrap().score >= RUN_FROM_WORD_START;
-        assert!(strong("ar", "Ardia"));
-        assert!(strong("time", "FaceTime"));
-        assert!(strong("6", "Alfred 6"));
-        assert!(!strong("ar", "Calendar"));
-        assert!(!strong("ar", "Apple Radio"));
-        assert!(!strong("vsc", "Visual Studio Code"));
+        assert_eq!(class_of("ar", "Ardia"), 2);
+        assert_eq!(class_of("time", "FaceTime"), 2);
+        assert_eq!(class_of("6", "Alfred 6"), 2);
+        assert_eq!(class_of("ar", "Calendar"), 0);
+        assert_eq!(class_of("ar", "Apple Radio"), 1);
+        assert_eq!(class_of("vsc", "Visual Studio Code"), 1);
         assert_eq!(
             rank("ar", &["Spark", "Apple Radio", "Ardia", "Calendar"]),
             ["Ardia", "Apple Radio", "Spark", "Calendar"]
         );
     }
 
-    /// The quadratic search the running maximum replaced.
+    #[test]
+    fn the_whole_name_ranks_a_class_above_a_longer_name_it_starts() {
+        assert_eq!(class_of("line", "LINE"), 3);
+        assert_eq!(class_of("safari", "Safari.app"), 3);
+        assert_eq!(class_of("system settings", "System Settings"), 3);
+        assert_eq!(class_of(".app", ".app"), 3, "a name of only .app keeps it");
+        assert_eq!(class_of("line", "Linear"), 2);
+        assert_eq!(class_of("pages", "Pages Creator Studio"), 2);
+        assert_eq!(rank("line", &["Linear", "LINE"]), ["LINE", "Linear"]);
+    }
+
+    #[test]
+    fn initials_start_the_words_in_order_from_the_first() {
+        for (query, name) in [
+            ("am", "Activity Monitor"),
+            ("btt", "BetterTouchTool"),
+            ("ipm", "iPhone Mirroring"),
+            ("vscode", "Visual Studio Code"),
+            ("sysset", "System Settings"),
+            ("kvm", ".Karabiner-VirtualHIDDevice-Manager"),
+        ] {
+            assert_eq!(class_of(query, name), 1, "{query:?} in {name:?}");
+        }
+        assert_eq!(
+            class_of("ms", "Audio MIDI Setup"),
+            0,
+            "the first word is left out"
+        );
+        assert_eq!(class_of("ms", "Microsoft Word"), 0, "the s is inside a word");
+        assert_eq!(
+            rank(
+                "am",
+                &["Games", "AdGuard Mini", "Audio MIDI Setup", "Activity Monitor"]
+            ),
+            ["Activity Monitor", "Audio MIDI Setup", "AdGuard Mini", "Games"],
+            "initials that leave a word after them, then those that skip one, follow those that start every word"
+        );
+    }
+
+    #[test]
+    fn initials_rank_by_the_words_they_start_not_how_far_apart() {
+        let am = |name| score("am", name).unwrap().score;
+        assert_eq!(
+            am("Apple Music") - am("Activity Monitor"),
+            LENGTH * 5,
+            "only the length differs"
+        );
+        assert_eq!(
+            rank(
+                "rightwards arrow",
+                &["Rightwards squiggle arrow", "Rightwards arrow bar"]
+            ),
+            ["Rightwards arrow bar", "Rightwards squiggle arrow"],
+            "a run goes on while the name does, so the last s doesn't start squiggle"
+        );
+    }
+
+    /// Every way of matching the query, for [`initials`].
+    fn naive_initials(query: &[char], name: &Name) -> Option<i32> {
+        fn walk(query: &[char], name: &Name, picked: &mut Vec<usize>, best: &mut Option<i32>) {
+            let Name { chars, lower } = name;
+            let initial = |j: usize| starts_word(chars, j) && chars[j].is_alphanumeric();
+            // For each character, how many words start at or before it.
+            let words: Vec<i32> = (0..chars.len())
+                .map(|j| (0..=j).filter(|&k| initial(k)).count() as i32)
+                .collect();
+            if picked.len() == query.len() {
+                let mut skipped = 0;
+                for (i, &j) in picked.iter().enumerate() {
+                    if i == 0 {
+                        if !initial(j) || words[j] != 1 {
+                            return;
+                        }
+                        continue;
+                    }
+                    let k = picked[i - 1];
+                    if k + 1 == j {
+                        continue;
+                    }
+                    if !initial(j) || lower[k + 1] == query[i] {
+                        return;
+                    }
+                    skipped += words[j] - words[k] - 1;
+                }
+                let trailing = words.last().unwrap() - words[*picked.last().unwrap()];
+                let value = -(SKIPPED_WORD * skipped + TRAILING_WORD * trailing);
+                *best = Some(best.map_or(value, |b| b.max(value)));
+                return;
+            }
+            let at = picked.last().map_or(0, |&k| k + 1);
+            for (j, &c) in lower.iter().enumerate().skip(at) {
+                if c == query[picked.len()] {
+                    picked.push(j);
+                    walk(query, name, picked, best);
+                    picked.pop();
+                }
+            }
+        }
+        let mut best = None;
+        walk(query, name, &mut Vec::new(), &mut best);
+        best
+    }
+
+    /// The quadratic search the running maximum replaced, and every way of matching initials.
     fn naive(query: &str, name: &str) -> Option<Match> {
         let query = Query::new(query)?.0;
-        let Name { chars, lower } = Name::new(name);
-        if !is_subsequence(&query, &lower) {
+        let folded = Name::new(name);
+        let Name { chars, lower } = &folded;
+        if !is_subsequence(&query, lower) {
             return None;
         }
-        let n = chars.len();
+        let n = lower.len();
         let mut best: Vec<Option<i32>> = vec![None; n];
         let mut from: Vec<Vec<usize>> = Vec::new();
         for (i, &q) in query.iter().enumerate() {
@@ -296,7 +509,7 @@ mod tests {
                 if lower[j] != q {
                     continue;
                 }
-                let bonus = MATCH + position_bonus(&chars, j);
+                let bonus = MATCH + if starts_word(chars, j) { WORD_START } else { 0 };
                 if i == 0 {
                     let lead = if j == 0 {
                         PREFIX
@@ -324,15 +537,20 @@ mod tests {
             best = next;
             from.push(back);
         }
-        let (mut j, mut total) = best
+        let (mut j, total) = best
             .iter()
             .enumerate()
             .filter_map(|(j, s)| s.map(|s| (j, s)))
             .max_by_key(|&(j, s)| (s, std::cmp::Reverse(j)))?;
-        total -= LENGTH * n as i32;
-        if runs_from_word_start(&query, &chars, &lower) {
-            total += RUN_FROM_WORD_START;
-        }
+        let score = if is_whole_name(&query, &folded) {
+            EXACT + total
+        } else if runs_from_word_start(&query, &folded) {
+            RUN_FROM_WORD_START + total
+        } else if let Some(initials) = naive_initials(&query, &folded) {
+            INITIALS + initials
+        } else {
+            total
+        } - LENGTH * n as i32;
         let mut positions = vec![0; query.len()];
         for i in (0..query.len()).rev() {
             positions[i] = j;
@@ -340,14 +558,11 @@ mod tests {
                 j = from[i][j];
             }
         }
-        Some(Match {
-            score: total,
-            positions,
-        })
+        Some(Match { score, positions })
     }
 
     #[test]
-    fn the_running_maximum_scores_exactly_as_the_quadratic_search() {
+    fn the_running_searches_score_exactly_as_trying_every_match() {
         let names = [
             "Safari",
             "Safari Technology Preview",
@@ -358,9 +573,18 @@ mod tests {
             "Aperçu Résumé",
             "x-ryoppippi/dupin issue 218",
             "mississippi",
+            "Activity Monitor",
+            "Audio MIDI Setup",
+            "AdGuard Mini",
+            "BetterTouchTool",
+            "iPhone Mirroring",
+            ".Karabiner-VirtualHIDDevice-Manager",
+            "AirDrop & Continuity",
+            "Rightwards squiggle arrow",
         ];
         let queries = [
-            "s", "saf", "ss", "aba", "abab", "ab", "vsc", "ré", "ssi", "ipi", "dupin 2", "aaa",
+            "s", "saf", "ss", "aba", "abab", "ab", "vsc", "ré", "ssi", "ipi", "dupin 2", "aaa", "am", "ams",
+            "agm", "btt", "ipm", "im", "kvm", "kvhm", "sys", "adc", "ac", "rsa", "rwsa",
         ];
         let mut scratch = Scratch::default();
         for name in names {

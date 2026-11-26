@@ -69,7 +69,7 @@ pub fn score(
         let words = i32::try_from(seen_words.len()).unwrap_or(i32::MAX);
         total = total
             .saturating_sub(NOISE_DEMOTION)
-            .saturating_sub(fuzzy::RUN_FROM_WORD_START.saturating_mul(words));
+            .saturating_sub(fuzzy::EXACT.saturating_mul(words));
     }
 
     positions.sort_unstable();

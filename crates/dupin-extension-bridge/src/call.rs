@@ -1194,10 +1194,6 @@ fn profile(permit: &Permit, script: bool, timeout: Duration) -> Result<exec::Pro
 
 /// The profile an `exec` scope declares, run with the program picked for it. Its placeholders
 /// become required one-line text inputs.
-pub fn exec_profile(scope: &Scope, program: &std::path::Path) -> Result<exec::Profile, exec::ExecError> {
-    timed_profile(scope, program, exec::DEFAULT_TIMEOUT)
-}
-
 fn timed_profile(
     scope: &Scope,
     program: &std::path::Path,

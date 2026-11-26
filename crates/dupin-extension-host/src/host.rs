@@ -576,6 +576,13 @@ impl Host {
         Some(helper.child.id())
     }
 
+    /// The process ID of the resident helper that runs `package`'s calls and the processor time
+    /// it has used, for tests and measurements that mean the guest's work, not the wall clock.
+    pub fn helper_processor_time(&self, package: &Compiled) -> Option<(u32, Duration)> {
+        let pid = self.helper_pid(package)?;
+        Some((pid, processor_time(pid)?))
+    }
+
     fn call(
         &self,
         domain: u64,
