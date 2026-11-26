@@ -68,12 +68,11 @@ fn fake_ssh(dir: &Path) -> PathBuf {
     path
 }
 
+/// Each input's name and value.
+type Inputs<'a> = &'a [(&'a str, &'a str)];
+
 /// The argv and the agent socket the fake program received.
-fn run(
-    scope: &Scope,
-    program: &Path,
-    inputs: &[(&str, &str)],
-) -> Result<(Vec<String>, String), exec::ExecError> {
+fn run(scope: &Scope, program: &Path, inputs: Inputs<'_>) -> Result<(Vec<String>, String), exec::ExecError> {
     let profile = exec_profile(scope, program).unwrap();
     let values = inputs
         .iter()
@@ -111,7 +110,7 @@ fn remote_runs_ssh_with_fixed_arguments_and_only_the_agent_socket_added() {
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "unset".into())
     );
-    let cases: [(&str, &[(&str, &str)], Vec<String>); 5] = [
+    let cases: [(&str, Inputs<'_>, Vec<String>); 5] = [
         (
             "processes",
             &[("host", "web1")],
