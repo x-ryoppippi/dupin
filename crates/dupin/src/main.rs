@@ -40,6 +40,7 @@ mod ui;
 mod update;
 mod view;
 mod wall_clock;
+mod watch_source;
 mod web;
 
 fn main() {

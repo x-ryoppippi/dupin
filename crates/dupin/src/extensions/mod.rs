@@ -1005,17 +1005,19 @@ pub fn watch(
     {
         deliver(catalog);
     }
-    watch_with(directory, scanner, deliver)
+    watch_with(directory, scanner, crate::watch_source::FsEvents, deliver)
 }
 
 fn watch_with(
     directory: PathBuf,
     mut scanner: Scanner,
+    source: impl crate::watch_source::Source,
     deliver: impl Fn(Catalog) + Send + 'static,
 ) -> std::io::Result<Watch> {
     Watch::start(
         directory,
         crate::catalog_watch::Depth::Trees,
+        source,
         move |directory, problem, files| {
             let catalog = scanner.update(directory, problem);
             files.extend(scanner.files());
@@ -1029,6 +1031,7 @@ fn watch_with(
 pub(crate) mod tests {
     use super::manifest::{PACKAGE_JSON, WASM_MANIFEST};
     use super::*;
+    use crate::watch_source::manual::Manual;
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::sync::mpsc;
@@ -1156,13 +1159,19 @@ pub(crate) mod tests {
         }
     }
 
-    fn observe(directory: &Path) -> (Watch, mpsc::Receiver<Catalog>) {
+    fn observe(directory: &Path) -> (Watch, Manual, mpsc::Receiver<Catalog>) {
         let (updates, received) = mpsc::channel();
-        let watcher = watch_with(directory.to_owned(), Scanner::default(), move |catalog| {
-            let _ = updates.send(catalog);
-        })
+        let source = Manual::default();
+        let watcher = watch_with(
+            directory.to_owned(),
+            Scanner::default(),
+            source.clone(),
+            move |catalog| {
+                let _ = updates.send(catalog);
+            },
+        )
         .unwrap();
-        (watcher, received)
+        (watcher, source, received)
     }
 
     fn wait_for_keyword(received: &mpsc::Receiver<Catalog>, keyword: Option<&str>) {
@@ -1204,19 +1213,18 @@ pub(crate) mod tests {
         );
         symlink(&first, &directory).unwrap();
 
-        let (watcher, received) = observe(&directory);
+        let (watcher, source, received) = observe(&directory);
         wait_for_keyword(&received, Some("first"));
 
         let replacement = root.join("replacement");
         symlink(&second, &replacement).unwrap();
         fs::rename(&replacement, &directory).unwrap();
+        source.changed(&directory);
         wait_for_keyword(&received, Some("second"));
 
-        fs::write(
-            second.join("words").join(PACKAGE_JSON),
-            package_json("words", "edited", None),
-        )
-        .unwrap();
+        let edited = second.join("words").join(PACKAGE_JSON);
+        fs::write(&edited, package_json("words", "edited", None)).unwrap();
+        source.changed(&edited);
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
     }
@@ -1240,19 +1248,18 @@ pub(crate) mod tests {
         symlink("../first", links.join("current")).unwrap();
         symlink("../links/current", directory.join("words")).unwrap();
 
-        let (watcher, received) = observe(&directory);
+        let (watcher, source, received) = observe(&directory);
         wait_for_keyword(&received, Some("first"));
 
         let replacement = links.join("replacement");
         symlink("../second", &replacement).unwrap();
         fs::rename(&replacement, links.join("current")).unwrap();
+        source.changed(&links.join("current"));
         wait_for_keyword(&received, Some("second"));
 
-        fs::write(
-            root.join("second").join(PACKAGE_JSON),
-            package_json("words", "edited", None),
-        )
-        .unwrap();
+        let edited = root.join("second").join(PACKAGE_JSON);
+        fs::write(&edited, package_json("words", "edited", None)).unwrap();
+        source.changed(&edited);
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
     }
@@ -1270,10 +1277,11 @@ pub(crate) mod tests {
             Some(SEARCH),
         );
 
-        let (watcher, received) = observe(&directory);
+        let (watcher, source, received) = observe(&directory);
         wait_for_keyword(&received, Some("first"));
 
         fs::rename(&directory, root.join("moved")).unwrap();
+        source.changed(&directory);
         wait_for_keyword(&received, None);
 
         install(
@@ -1282,13 +1290,12 @@ pub(crate) mod tests {
             &package_json("words", "replacement", None),
             Some(SEARCH),
         );
+        source.changed(&directory);
         wait_for_keyword(&received, Some("replacement"));
 
-        fs::write(
-            directory.join("words").join(PACKAGE_JSON),
-            package_json("words", "edited", None),
-        )
-        .unwrap();
+        let edited = directory.join("words").join(PACKAGE_JSON);
+        fs::write(&edited, package_json("words", "edited", None)).unwrap();
+        source.changed(&edited);
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
     }

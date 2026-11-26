@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
-use dupin_mac::{PathWatcher, watcher::canonical_root};
+use dupin_mac::watcher::canonical_root;
+
+use crate::watch_source::{Roots, Source};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Depth {
@@ -27,6 +29,7 @@ impl Watch {
     pub(crate) fn start<T>(
         directory: PathBuf,
         depth: Depth,
+        mut source: impl Source,
         mut scan: impl FnMut(&Path, Option<String>, &mut Vec<PathBuf>) -> Option<T> + Send + 'static,
         deliver: impl Fn(T) + Send + 'static,
     ) -> io::Result<Self> {
@@ -40,17 +43,27 @@ impl Watch {
                 let mut watched = None;
                 let mut root_moved = false;
                 loop {
-                    let requested = Roots::discover(&directory, depth);
+                    let requested = discover(&directory, depth);
                     let mut watch_problem = None;
                     if root_moved || watched.as_ref() != Some(&requested) {
                         let events = worker_events.clone();
-                        match requested.watch(files.clone(), move |root_moved| {
-                            let _ = events.send(Event::Changed { root_moved });
-                        }) {
+                        let files = files.clone();
+                        match source.watch(
+                            &requested,
+                            Box::new(move || {
+                                files
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                    .clone()
+                            }),
+                            Box::new(move |root_moved| {
+                                let _ = events.send(Event::Changed { root_moved });
+                            }),
+                        ) {
                             Ok(next) => {
                                 watcher.replace(next);
                                 // A link may have moved between discovery and stream startup.
-                                if Roots::discover(&directory, depth) != requested {
+                                if discover(&directory, depth) != requested {
                                     let _ = worker_events.send(Event::Changed { root_moved: false });
                                 }
                                 watched = Some(requested);
@@ -93,46 +106,26 @@ impl Drop for Watch {
     }
 }
 
-#[derive(PartialEq, Eq)]
-enum Roots {
-    Entries(PathBuf),
-    Trees(Trees),
-}
-
-impl Roots {
-    fn discover(directory: &Path, depth: Depth) -> Self {
-        match depth {
-            Depth::Entries => Self::Entries(directory.to_owned()),
-            Depth::Trees => Self::Trees(Trees::discover(directory)),
-        }
-    }
-
-    fn watch(
-        &self,
-        files: Arc<Mutex<Vec<PathBuf>>>,
-        changed: impl Fn(bool) + Send + Sync + 'static,
-    ) -> Result<PathWatcher, &'static str> {
-        match self {
-            Self::Entries(directory) => PathWatcher::start_entries(vec![directory.clone()], changed),
-            Self::Trees(roots) => PathWatcher::start_scoped(
-                roots.shallow.clone(),
-                roots.recursive.clone(),
-                move || {
-                    files
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone()
-                },
-                changed,
-            ),
-        }
+fn discover(directory: &Path, depth: Depth) -> Roots {
+    match depth {
+        Depth::Entries => Roots::Entries(directory.to_owned()),
+        Depth::Trees => Trees::discover(directory).into(),
     }
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default)]
 struct Trees {
     shallow: Vec<PathBuf>,
     recursive: Vec<PathBuf>,
+}
+
+impl From<Trees> for Roots {
+    fn from(trees: Trees) -> Self {
+        Roots::Trees {
+            shallow: trees.shallow,
+            recursive: trees.recursive,
+        }
+    }
 }
 
 impl Trees {

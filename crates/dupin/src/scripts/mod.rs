@@ -5,14 +5,17 @@ pub mod provider;
 pub mod runner;
 
 use crate::catalog_watch::{Depth, Watch};
+use crate::watch_source::{FsEvents, Source};
 
 fn watch_catalog(
     directory: std::path::PathBuf,
+    source: impl Source,
     deliver: impl Fn(catalog::Catalog) + Send + 'static,
 ) -> std::io::Result<Watch> {
     Watch::start(
         directory,
         Depth::Entries,
+        source,
         |directory, watch_problem, _| {
             let mut catalog = catalog::Catalog::scan(directory);
             if let Some(problem) = watch_problem {
@@ -29,7 +32,7 @@ fn watch_catalog(
 
 pub fn watch(panel: rune::AppHandle<crate::ui::Ui>) -> Option<Watch> {
     let directory = crate::settings::path()?.parent()?.join("scripts");
-    match watch_catalog(directory, move |catalog| {
+    match watch_catalog(directory, FsEvents, move |catalog| {
         panel.update(move |s, tx| s.scripts_catalog(catalog, tx));
     }) {
         Ok(watcher) => Some(watcher),
@@ -43,6 +46,7 @@ pub fn watch(panel: rune::AppHandle<crate::ui::Ui>) -> Option<Watch> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::watch_source::manual::Manual;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -66,7 +70,8 @@ mod tests {
         };
         write("Initial");
         let (send, received) = mpsc::channel();
-        let watcher = watch_catalog(directory.clone(), move |catalog| {
+        let source = Manual::default();
+        let watcher = watch_catalog(directory.clone(), source.clone(), move |catalog| {
             let _ = send.send(catalog);
         })
         .unwrap();
@@ -89,8 +94,10 @@ mod tests {
         std::fs::rename(&directory, root.join("old-scripts")).unwrap();
         std::fs::create_dir(&directory).unwrap();
         write("Replacement");
+        source.changed(&directory);
         wait_for("Replacement");
         write("Edited after replacement");
+        source.changed(&directory.join("fixture"));
         wait_for("Edited after replacement");
         drop(watcher);
         std::fs::remove_dir_all(root).unwrap();
