@@ -40,9 +40,14 @@ Other keys: [Keys](../usage.md#keys).
 <details>
 <summary>Ranking details</summary>
 
-A name the query starts, or that has a word the query starts (`ar` for Ardia, `time` for FaceTime), ranks above every name that only holds the query's letters further apart or inside a word (`ar` in Calendar, or in Apple Radio by its initials). Within each of those, closer matches come first, and usage moves up the apps you open most and those you opened for the same query.
+Matches rank in four tiers, best first:
 
-However often you opened a looser match, it never hides an app whose name starts with what you typed. What you opened for a query counts in full for a few days, then less as it ages, with the same age steps as how often you open an app: an app you once opened for `ar` by mistake gives way to the one you open for it now.
+1. The whole name, ignoring case, spaces and `.app` (`line` for LINE).
+2. A name the query starts, or that has a word the query starts (`ar` for Ardia, `time` for FaceTime: a capital inside a name starts a word).
+3. The name's initials, from its first word (`am` for Activity Monitor, `vsc` or `vscode` for Visual Studio Code, `ar` for Music by its other name Apple Radio).
+4. Any other name that holds the query's letters in order (`ar` in Calendar).
+
+Within a tier, closer matches come first: initials that start every word before those that skip one or stop short, and an app's own name a little before its other names. Usage moves up the apps you open most and those you opened for the same query, but only within a tier: however often you opened a looser match, it never hides a better one, such as an app whose name starts with what you typed. What you opened for a query counts in full for a few days, then less as it ages, with the same age steps as how often you open an app: an app you once opened for `ar` by mistake gives way to the one you open for it now.
 
 </details>
 

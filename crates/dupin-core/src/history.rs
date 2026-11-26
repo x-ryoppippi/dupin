@@ -38,9 +38,8 @@ const SAME_QUERY: i32 = 1000;
 /// "saf").
 const LONGER_QUERY: i32 = 200;
 /// The most the history adds to a score. The matcher keeps its classes of match further apart
-/// than this ([`crate::fuzzy::RUN_FROM_WORD_START`]), so picks and frecency never lift a
-/// scattered match over the query typed from a word start: an app the user can't see can't be
-/// picked, so a boost that hid it would only ever grow.
+/// than this ([`crate::fuzzy::CLASS`]), so picks and frecency never lift a looser match over a
+/// better one, such as a scattered match over the query typed from a word start.
 const MAX_BOOST: i32 = SAME_QUERY + 300;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

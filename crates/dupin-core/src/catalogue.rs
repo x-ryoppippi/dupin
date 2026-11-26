@@ -854,9 +854,9 @@ mod tests {
     fn keywords_match_below_an_equal_title_match_without_highlights() {
         let mut aliased = entry("aliased", "Visual Studio Code");
         aliased.keywords = vec!["editor".into()];
-        let catalogue = catalogue(vec![entry("plain", "Editorial"), aliased]);
+        let catalogue = catalogue(vec![entry("plain", "Editor"), aliased]);
         let batches = catalogue.search("editor", 10, 0);
-        assert_eq!(titles(&batches), ["Editorial", "Visual Studio Code"]);
+        assert_eq!(titles(&batches), ["Editor", "Visual Studio Code"]);
         assert!(batches[0].items[1].matched.is_empty());
     }
 
