@@ -21,6 +21,11 @@ printf '%s\n' "$@"
 - For a script with arguments, a separate argument field.
 - Its output, by its `output` mode: an inline card in the panel (`inline`), the Script Output window (`full`), or nothing unless it fails (`silent`).
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/scripts/clip-dark.webp" />
+<img alt="Typing Dupin fixture narrows the results to three script commands; ↓ selects the next one." src="../images/scripts/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 In search and the argument field:

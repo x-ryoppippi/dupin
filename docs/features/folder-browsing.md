@@ -16,6 +16,11 @@ Dupin lists a folder's contents in the panel so you can walk through it.
 <img alt="The Reports folder listed in the panel under a Reports chip, with a Filter folder field: Annual report 2026.pdf, Expense report.numbers, Quarterly report.pdf and report-notes.md." src="../images/folder-browsing/browse-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/folder-browsing/clip-dark.webp" />
+<img alt="Tab on the Reports folder lists its files; typing q filters them, and ⌫ on an empty filter returns to the search." src="../images/folder-browsing/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 | Key / action                    | What it does                                                                                    |

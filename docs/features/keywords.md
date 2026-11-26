@@ -37,6 +37,11 @@ Type a keyword and <kbd>Space</kbd>, or `?` alone to list them all.
 <img alt="The panel with “?” typed, listing commands with their keywords as tags: Calendar (cal), Clipboard History (clip, and its shortcut ⇧⌘V), Dictionary (d, define), Dupin (help), Emoji &amp; Symbols (emoji), File Contents (in), Files (Space) and web searches." src="../images/keywords/list-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/keywords/clip-dark.webp" />
+<img alt="Typing ca shows the Calendar search command tagged cal; ↓ selects it and Tab enters Calendar search." src="../images/keywords/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 | Key / action                                  | What it does                                                                                                               |

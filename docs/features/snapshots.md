@@ -18,6 +18,11 @@ Snapshots save a finished calculation, search or extension view so you can read 
 <img alt="Saved snapshots listed under a Snapshots chip, each with when it was saved, its mode and its query." src="../images/snapshots/list-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/snapshots/clip-dark.webp" />
+<img alt="Typing snap and Space lists saved snapshots; ↓ selects one and → shows its actions." src="../images/snapshots/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 In the `snap` list:

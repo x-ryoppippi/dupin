@@ -18,6 +18,11 @@ Type an extension's keyword and Space in the panel; `?` lists every keyword. Man
 <img alt="The Word Count example extension after its keyword: a Word Count chip, “two words” typed, and its answer, 2 words." src="../images/extensions/keyword-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/extensions/clip-dark.webp" />
+<img alt="Typing wc and Space enters the Word Count extension; typing two words shows 2 words." src="../images/extensions/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 | Key / action                                                         | What it does                                                               |

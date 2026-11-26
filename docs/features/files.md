@@ -13,6 +13,11 @@ Dupin searches files by name or by content through Spotlight.
 - Results as Spotlight finds them, improving as more candidates arrive, up to `file_limit` (200 by default).
 - File names rank by filename match quality, your usage and previous query choices, last-used and modified dates, and path depth; cache and build directories are demoted by the [file ranking rules](#file-ranking).
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/files/clip-dark.webp" />
+<img alt="Space on an empty query enters Files with its hint; ⌫ goes back to apps, and in then Space enters the In files search." src="../images/files/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 | Key / action                                 | What it does                            |

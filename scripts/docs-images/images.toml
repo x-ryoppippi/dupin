@@ -311,3 +311,83 @@ page = "window-management"
 name = "clip"
 fixtures = "scripts/headless/window-management.json"
 steps = [{ type = "left half" }, { key = "down" }]
+
+[[clips]]
+page = "apps"
+name = "clip"
+steps = [{ type = "mus" }, { key = "down" }, { key = "right" }]
+
+[[clips]]
+page = "keywords"
+name = "clip"
+fixtures = "scripts/headless/keywords-ca.json"
+steps = [{ type = "ca" }, { key = "down" }, { key = "tab" }]
+
+[[clips]]
+page = "files"
+name = "clip"
+steps = [
+	{ wait = 0.6 },
+	{ key = "space" },
+	{ wait = 0.6 },
+	{ key = "backspace" },
+	{ type = "in" },
+	{ key = "space" },
+]
+
+[[clips]]
+page = "recent-items"
+name = "clip"
+steps = [{ wait = 1.2 }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "folder-browsing"
+name = "clip"
+steps = [
+	{ wait = 1.2 },
+	{ key = "tab" },
+	{ key = "down" },
+	{ type = "q" },
+	{ key = "backspace" },
+	{ key = "backspace" },
+]
+
+[[clips]]
+page = "file-actions"
+name = "clip"
+steps = [
+	{ wait = 1.2 },
+	{ key = "down" },
+	{ key = "down" },
+	{ key = "k", cmd = true },
+	{ key = "down" },
+]
+
+[[clips]]
+page = "send-to"
+name = "clip"
+steps = [
+	{ type = "maps" },
+	{ key = "k", cmd = true },
+	{ key = "down" },
+	{ key = "down" },
+	{ key = "down" },
+	{ key = "enter" },
+]
+
+[[clips]]
+page = "snapshots"
+name = "clip"
+fixtures = "scripts/headless/snapshots-keyword.json"
+steps = [{ type = "snap" }, { key = "space" }, { key = "down" }, { key = "right" }]
+
+[[clips]]
+page = "scripts"
+name = "clip"
+steps = [{ type = "Dupin fixture" }, { key = "down" }]
+
+[[clips]]
+page = "extensions"
+name = "clip"
+fixtures = "scripts/headless/extension-js.json"
+steps = [{ type = "wc" }, { key = "space" }, { type = "two words" }]

@@ -12,6 +12,11 @@ Show the panel and type part of an app's name.
 - When an app matches through another of its names, that name shows before its folder.
 - Executable [script commands](./scripts.md) appear in the same list.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/apps/clip-dark.webp" />
+<img alt="Typing mus lists Music first; ↓ moves to the next app and → shows its actions." src="../images/apps/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 | Key / action                                 | What it does                                                   |

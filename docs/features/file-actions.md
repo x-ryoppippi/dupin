@@ -17,6 +17,11 @@ The action screen opens, moves, renames, copies or shares the selected file, fol
 <img alt="The action screen for Budget 2026.numbers in ~/Documents: Open, Open with…, Reveal in Finder, Quick Look, Copy name, Rename…, Move to… and Copy to…." src="../images/file-actions/actions-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/file-actions/clip-dark.webp" />
+<img alt="↓ selects Budget 2026.numbers in Recent items, and ⌘K lists its actions: Open, Open with, Reveal in Finder, Quick Look, Copy name, Rename, Move to and Copy to." src="../images/file-actions/clip-light.webp" width="680" />
+</picture>
+
 ## What you can do
 
 | Key / action                   | What it does                                                                                                                                                                                 |
