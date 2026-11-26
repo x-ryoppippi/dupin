@@ -16,7 +16,7 @@ use dupin_js_runtime::{Diagnostic, PageContext, Preferences, RunError, ViewAnswe
 use serde_json::{Map, Value, json};
 
 use super::super::provider::{DETAIL_ROW, form_of, row_item};
-use super::super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE};
+use super::super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE, Role};
 use super::{Held, Press, Replay, StepResult, fixture_host, guest_environment, query_rows, record, services};
 
 /// The most pages the launcher keeps open above the keyword's own results.
@@ -40,6 +40,23 @@ struct Drafts {
     form: Form,
     values: Vec<form::Value>,
     errors: BTreeMap<String, String>,
+    /// The field focused, by index.
+    focus: usize,
+}
+
+impl Drafts {
+    /// Shows `errors`, focusing the first field that has one, as the launcher does.
+    fn show_errors(&mut self, errors: BTreeMap<String, String>) {
+        if let Some(first) = self
+            .form
+            .fields
+            .iter()
+            .position(|field| errors.contains_key(&field.id))
+        {
+            self.focus = first;
+        }
+        self.errors = errors;
+    }
 }
 
 impl Page {
@@ -321,12 +338,17 @@ impl Replayer<'_> {
         }
     }
 
-    /// What a person presses to replace what the query field holds with `query`.
+    /// What a person presses to replace what the query field holds with `query`: under the
+    /// keyword, or in the main search for a package a built-in answering there ships as, where a
+    /// leading space can't be typed, since it opens file search.
     fn retype(&self, query: &str) -> Vec<Press> {
+        let main_search = crate::features::ported_role(&self.extension.id) == Role::MainSearch;
+        let query = if main_search { query.trim_start() } else { query };
         let mut presses = Vec::new();
         let typed = match self.pages.last() {
             Some(page) => page.query.as_str(),
             None => match &self.query {
+                None if main_search => "",
                 None => {
                     return vec![Press::Type(format!("{} {query}", self.extension.keyword))];
                 }
@@ -427,6 +449,7 @@ impl Replayer<'_> {
                         values: form.fields.iter().map(form::Field::default_value).collect(),
                         form,
                         errors: BTreeMap::new(),
+                        focus: 0,
                     },
                 });
                 Vec::new()
@@ -606,10 +629,11 @@ impl Replayer<'_> {
             Some(ActionEffect::FieldErrors { errors }) => {
                 match self.pages.last_mut().and_then(|page| page.form.as_mut()) {
                     Some(drafts) if submitting => {
-                        drafts.errors = errors
+                        let known = errors
                             .into_iter()
                             .filter(|(id, _)| drafts.form.fields.iter().any(|field| field.id == *id))
                             .collect();
+                        drafts.show_errors(known);
                     }
                     _ => refuse(outcome, "fieldErrors answers only a form's submit"),
                 }
@@ -623,8 +647,8 @@ impl Replayer<'_> {
             return Done::problem("there is no form on screen to fill in".into());
         };
         let mut presses = Vec::new();
-        // A form opens with its first field focused, and fills move through it in order.
-        let mut focus = 0;
+        // Fills move through the form in order, from the field focused.
+        let mut focus = drafts.focus;
         let count = drafts.form.fields.len();
         for (index, field) in drafts.form.fields.iter().enumerate() {
             let Some(wanted) = fields.get(&field.id) else {
@@ -701,8 +725,9 @@ impl Replayer<'_> {
         {
             return Done::problem(format!("the form has no field `{unknown}`"));
         }
-        // Back to the first field, where the next fill starts from.
+        // Back to the first field, where a form opens with its focus.
         presses.extend(std::iter::repeat_n(Press::key("Tab"), (count - focus) % count));
+        drafts.focus = 0;
         Done::pressing(presses)
     }
 
@@ -713,7 +738,7 @@ impl Replayer<'_> {
         let presses = vec![Press::command_key("Enter")];
         match drafts.form.submission(&drafts.values) {
             Err(errors) => {
-                drafts.errors = errors;
+                drafts.show_errors(errors);
                 Done::pressing(presses)
             }
             Ok(values) => {

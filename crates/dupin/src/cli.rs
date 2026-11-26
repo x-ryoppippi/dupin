@@ -610,6 +610,7 @@ pub(crate) fn snapped_json(snapped: &crate::extensions::Snapped) -> Value {
         "width": snapped.width,
         "height": snapped.height,
         "scale": snapped.scale,
+        "shown": snapped.shown,
     })
 }
 

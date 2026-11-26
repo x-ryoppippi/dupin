@@ -51,6 +51,11 @@ fn only_automatic_restart_waits_for_scripts() {
 }
 
 impl Ui {
+    /// Whether the panel is on screen: shown, or drawn by a headless run, which never summons it.
+    pub(super) fn on_screen(&self) -> bool {
+        self.shown || rune::tooling::is_headless()
+    }
+
     /// The hotkey: show the panel, or hide it when it already shows.
     pub(super) fn toggle(&mut self, tx: &mut Tx) {
         if self.picker.is_some() {

@@ -20,6 +20,7 @@ pub(super) const FEATURE: Feature = Feature {
         command: CALCULATOR,
         paste_notice: None,
         enabled: |config| config.calculator,
+        turn_on: |config| config.calculator = true,
         main_search: true,
     }),
     ..Feature::EMPTY

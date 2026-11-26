@@ -315,7 +315,7 @@ impl Ui {
                         let id = id_for_watch.clone();
                         me.update(move |ui, tx| {
                             let current = ui.session.command_id().clone();
-                            if ui.shown && ui.extensions.lists_catalogue_of(&current, &id) {
+                            if ui.on_screen() && ui.extensions.lists_catalogue_of(&current, &id) {
                                 let effects = ui.session.refresh();
                                 ui.apply(effects, tx);
                             }

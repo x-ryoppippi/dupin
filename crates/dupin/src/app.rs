@@ -211,6 +211,7 @@ pub(crate) fn run() {
             }
         })
         .on_ready(move |window| {
+            crate::extensions::headless_ready();
             let panel = window.clone();
             handle.update(move |ui, _| ui.set_panel_window(panel));
             install_quick_look(window, &handle, &quick_look);

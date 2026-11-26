@@ -8,11 +8,7 @@
 # that window, `width` points wide, instead of the panel.
 #
 # Spotlight indexes nothing in the scratch home, and on some Macs not even a fresh disk image, so
-# no image shows a Spotlight search; the files scenarios start from Recent items instead. The
-# bundled extensions render through the launcher scenarios scripts/headless already has:
-# `dupin ext snap` of a bundled package shows its keyword with no results (calendar, window
-# management) or "isn't available" (dictionary), and only the steps of a long fixture render
-# reliably.
+# no image shows a Spotlight search; the files scenarios start from Recent items instead.
 
 # What the scratch home opened before, the first most often and most recently.
 recent = [
