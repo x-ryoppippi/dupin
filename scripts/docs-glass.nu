@@ -209,6 +209,8 @@ def record-clip [
         }
         let pid = dupin-pid $binary
         wait-for $"($id)'s panel to show; see ($log)" { (^$stage panel ($pid | into string) | complete).exit_code == 0 }
+        # The window is listed a moment before the panel has faded in.
+        sleep 1sec
         # The script touches this as it starts, which is when the clip's time 0 is.
         let mark = $tmp | path join $"($name).start"
         job spawn {
