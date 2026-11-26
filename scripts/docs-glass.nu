@@ -26,6 +26,15 @@ const FRAME = {width: 680, height: 578}
 # for the glass to bend, with nothing sharp to read through the text. Positions and radii are in
 # a 64×40 grid.
 const WALLPAPERS = {
+    # Bold harlequin diamonds with crisp edges, two cells of two colours in a repeat of 2×2, so
+    # the glass has hard shapes to bend and blur behind it. Each cell is a background and a
+    # diamond, drawn 200 pixels wide: 100 points on a 2x display.
+    tiles: {
+        cells: [
+            {bg: "#2b1b8a", fg: "#ff9a2e"}
+            {bg: "#d4357f", fg: "#27c4f4"}
+        ]
+    }
     dusk: {
         base: "#1d1747"
         blobs: [
@@ -71,7 +80,8 @@ const WALLPAPERS = {
 def main [
     --app: path = "result/Applications/Dupin.app" # The app bundle to record
     --only: string # Record only the clips whose `<page>/<name>` contains this
-    --wallpaper: string # A preset (dusk, lagoon or ember) or an image, for every clip
+    --wallpaper: string # A preset (tiles, dusk, lagoon or ember) or an image, for every clip
+    --no-retina # Record on the display as it is, without a 2x virtual one, on CI
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
@@ -106,13 +116,10 @@ def main [
         }
     }
     dark-mode
-    let retina = if ($env.CI? | default "") == "true" { retina-display $stage }
+    let ci = ($env.CI? | default "") == "true"
+    let retina = if $ci and not $no_retina { retina-display $stage }
+    clear-transparency-settings $stage $ci
     print --stderr (^$stage displays)
-    print --stderr (
-        ^ffmpeg -hide_banner -f avfoundation -list_devices true -i ""
-        | complete
-        | get stderr
-    )
     let recorded = $clips | each {|clip|
         let chosen = $wallpaper | default ($clip.wallpaper? | default $manifest.wallpaper)
         record-clip $clip $manifest $binary $stage (wallpaper-image $chosen $tmp) $tmp
@@ -148,6 +155,26 @@ def retina-display [stage: path]: nothing -> any {
     null
 }
 
+# Liquid Glass shows what is behind it only when Reduce Transparency and Increase Contrast are
+# off, or it is drawn as a solid panel. A CI runner is a throwaway VM, so on it they are turned
+# off for the job; on a Mac in use they are only reported, since they are the user's.
+def clear-transparency-settings [stage: path, ci: bool] {
+    for key in [reduceTransparency increaseContrast] {
+        let value = ^defaults read com.apple.universalaccess $key | complete
+        print --stderr $"($key): ($value.stdout | str trim) ($value.stderr | str trim)"
+        if $ci {
+            ^defaults write com.apple.universalaccess $key -bool false
+        }
+    }
+    sleep 1sec
+    print --stderr (
+        ^$stage displays
+        | lines
+        | where {|line| $line starts-with reduceTransparency }
+        | str join (char nl)
+    )
+}
+
 # The panel is drawn in the system appearance, and the clips are of the dark one.
 def dark-mode [] {
     let style = ^defaults read -g AppleInterfaceStyle | complete
@@ -172,7 +199,24 @@ def wallpaper-image [name: string, tmp: path]: nothing -> string {
         return ($name | path expand)
     }
     let out = $tmp | path join $"wallpaper-($name).png"
-    if not ($out | path exists) {
+    if $preset.cells? != null and not ($out | path exists) {
+        let cells = $preset.cells | enumerate | each {|cell|
+            let file = $tmp | path join $"wallpaper-($name)-cell($cell.index).png"
+            (
+                ^magick -size 200x200 $"xc:($cell.item.bg)" -fill $cell.item.fg
+                -draw "polygon 100,12 188,100 100,188 12,100" $file
+            )
+            $file
+        }
+        let tile = $tmp | path join $"wallpaper-($name)-tile.png"
+        (
+            ^magick
+            "(" $cells.0 $cells.1 +append ")"
+            "(" $cells.1 $cells.0 +append ")"
+            -append $tile
+        )
+        ^magick -size 2880x2000 $"tile:($tile)" $out
+    } else if not ($out | path exists) {
         let blobs = $preset.blobs | each {|blob|
             [-fill $blob.colour -draw $"circle ($blob.x),($blob.y) ($blob.x + $blob.r),($blob.y)"]
         } | flatten
@@ -242,6 +286,7 @@ def record-clip [
         wait-for $"($id)'s panel to show; see ($log)" { (^$stage panel ($pid | into string) | complete).exit_code == 0 }
         # The window is listed a moment before the panel has faded in.
         sleep 1sec
+        print --stderr (^$stage windows)
         # The script touches this as it starts, which is when the clip's time 0 is.
         let mark = $tmp | path join $"($name).start"
         job spawn {

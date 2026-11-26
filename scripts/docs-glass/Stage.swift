@@ -4,7 +4,8 @@
 //   stage wallpaper <image>  covers every screen with <image> below all windows until killed
 //   stage panel <pid>        prints the frame of <pid>'s largest on-screen window, in pixels
 //   stage displays           prints each display's size in points and pixels, and its modes
-//   stage scale              prints the main display's backing scale factor
+//   stage windows            prints the on-screen windows, front to back
+//   stage scale            prints the main display's backing scale factor
 //   stage hidpi              makes a 2x virtual display the main one until killed
 //
 // The wallpaper is a window, so the desktop's own picture is never changed.
@@ -82,9 +83,22 @@ func displays() -> Never {
     for id in ids.prefix(Int(count)) {
         let current = CGDisplayCopyDisplayMode(id)
         print("display \(id) main=\(CGDisplayIsMain(id) != 0) builtin=\(CGDisplayIsBuiltin(id) != 0) points=\(CGDisplayPixelsWide(id))x\(CGDisplayPixelsHigh(id)) current=\(current?.width ?? 0)x\(current?.height ?? 0) pixels \(current?.pixelWidth ?? 0)x\(current?.pixelHeight ?? 0)")
-        for mode in modes(id) {
-            print("  mode \(mode.width)x\(mode.height) pixels \(mode.pixelWidth)x\(mode.pixelHeight) \(mode.refreshRate)Hz hidpi=\(isHiDPI(mode))")
-        }
+    }
+    let workspace = NSWorkspace.shared
+    print("reduceTransparency=\(workspace.accessibilityDisplayShouldReduceTransparency) increaseContrast=\(workspace.accessibilityDisplayShouldIncreaseContrast) reduceMotion=\(workspace.accessibilityDisplayShouldReduceMotion)")
+    exit(0)
+}
+
+func windows() -> Never {
+    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
+        fail("cannot list windows")
+    }
+    for info in list {
+        let owner = info[kCGWindowOwnerName as String] as? String ?? "?"
+        let layer = info[kCGWindowLayer as String] as? Int ?? 0
+        let alpha = info[kCGWindowAlpha as String] as? Double ?? 0
+        let bounds = (info[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
+        print("window owner=\(owner) layer=\(layer) alpha=\(alpha) bounds=\(Int(bounds.minX)),\(Int(bounds.minY)) \(Int(bounds.width))x\(Int(bounds.height))")
     }
     exit(0)
 }
@@ -160,6 +174,8 @@ case ("wallpaper", let path?):
     wallpaper(path)
 case ("displays", nil):
     displays()
+case ("windows", nil):
+    windows()
 case ("hidpi", nil):
     hidpi()
 case ("scale", nil):

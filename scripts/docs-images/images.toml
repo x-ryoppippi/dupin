@@ -21,7 +21,7 @@ recent = [
 ]
 
 # What the `glass = true` clips are recorded over, so every tab on the home page shows the same.
-wallpaper = "dusk"
+wallpaper = "tiles"
 
 # Folders end with a slash.
 documents = [
