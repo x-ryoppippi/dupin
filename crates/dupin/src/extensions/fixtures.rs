@@ -217,7 +217,13 @@ impl<'a> Held<'a> {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<Row>, RunError> {
         let deadline = Instant::now() + QUERY_DEADLINE;
-        let mut fetch = self.extension.fetch(host, deadline, cancelled, &call.services);
+        let mut fetch = self.extension.fetch(
+            host,
+            super::Fetching::Resident,
+            deadline,
+            cancelled,
+            &call.services,
+        );
         let asking = Asking {
             preferences,
             generation: call.generation,

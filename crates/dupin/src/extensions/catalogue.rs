@@ -211,14 +211,15 @@ impl Cached {
     /// Asks the package again for the catalogue [`Cached::stale`] said is stale, without
     /// holding it while the package answers, and applies the answer only if nothing changed the
     /// catalogue meanwhile, such as an invalidation, new preferences or lost authority, which
-    /// ask again on their own. A failure drops the catalogue, as it does for a search.
+    /// ask again on their own. A failure drops the catalogue, as it does for a search. Reports
+    /// whether the catalogue changed, so what lists it can search again.
     pub fn refresh_stale(
         &self,
         preferences: &Arc<Preferences>,
         generation: Option<Generation>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
-    ) {
+    ) -> bool {
         struct Release<'a>(&'a Shared);
         impl Drop for Release<'_> {
             fn drop(&mut self) {
@@ -262,7 +263,7 @@ impl Cached {
                 .as_ref()
                 .is_some_and(|held| Arc::ptr_eq(held, preferences));
         if !unchanged {
-            return;
+            return false;
         }
         let applied = fetched.and_then(|()| {
             pages
@@ -279,6 +280,13 @@ impl Cached {
         drop(state);
         drop(release);
         self.keep_within_budget();
+        true
+    }
+
+    /// When the rows held outlive their `ttl`, if they do and Dupin holds rows.
+    pub fn expires(&self) -> Option<Instant> {
+        let state = self.shared.lock();
+        state.expires.filter(|_| state.due.is_none())
     }
 
     fn fresh<T: Default>(

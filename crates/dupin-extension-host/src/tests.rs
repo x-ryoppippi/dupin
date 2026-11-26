@@ -558,6 +558,37 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
     );
 }
 
+#[test]
+fn a_catalogue_asked_for_alone_never_waits_for_a_running_search() {
+    skip_inside_a_sandbox!();
+    let host = Arc::new(host());
+    let source = r#"export function search() { for (;;) {} }
+                    export function items(ctx) { return [{ id: 'a', title: ctx.reason }]; }"#;
+    let busy = compile(&host, &[(DEFAULT_ENTRY, source)]).unwrap();
+    let running = {
+        let (host, busy) = (host.clone(), busy.clone());
+        std::thread::spawn(move || search(&host, &busy, "", Duration::from_secs(3)))
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    let page = host
+        .items_alone(
+            &busy,
+            None,
+            Reason::Expired,
+            &crate::Preferences::encode(&serde_json::json!({})),
+            Instant::now() + Duration::from_secs(1),
+            &|| false,
+            &none(),
+        )
+        .expect("answered beside the running search");
+    assert!(!running.is_finished(), "the search was still running");
+    let PageChange::Reset { rows } = page.change else {
+        panic!("{:?}", page.change);
+    };
+    assert_eq!(rows[0].title, "expired");
+    assert_eq!(failed(running.join().unwrap()).code, "deadline");
+}
+
 const ROGUE_ENV: &str = "DUPIN_EXTENSION_HOST_ROGUE";
 
 /// Not a test: a compromised helper. It answers each call, then forges an answer to the next

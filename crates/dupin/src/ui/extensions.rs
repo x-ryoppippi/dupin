@@ -302,6 +302,13 @@ impl Ui {
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
     /// has already handed the broker every declaration, which never grants anything.
     pub(super) fn install_declarations(&mut self) {
+        let me = std::sync::Mutex::new(self.me.clone());
+        crate::extensions::on_catalogue_refreshed(move |id| {
+            let id = id.clone();
+            me.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .update(move |ui, tx| ui.search_again_if_listed(&id, tx));
+        });
         let bridge = self.extensions.bridge.clone();
         let config = self.configuration.values.borrow().clone();
         for (_, extension) in self.extensions.packages.present() {
@@ -331,13 +338,7 @@ impl Ui {
                     // its package's `search` on this package's events.
                     Ok(handled) if handled.invalidated => {
                         let id = id_for_watch.clone();
-                        me.update(move |ui, tx| {
-                            let current = ui.session.command_id().clone();
-                            if ui.on_screen() && ui.extensions.lists_catalogue_of(&current, &id) {
-                                let effects = ui.session.refresh();
-                                ui.apply(effects, tx);
-                            }
-                        });
+                        me.update(move |ui, tx| ui.search_again_if_listed(&id, tx));
                     }
                     Ok(_) | Err(RunError::Cancelled) => {}
                     Err(RunError::Failed(diagnostic)) => {
@@ -345,6 +346,17 @@ impl Ui {
                     }
                 }
             });
+        }
+    }
+
+    /// Searches again when the panel shows the package's catalogue, after something other than
+    /// typing changed it. Only a search that lists the catalogue runs again: any other would run
+    /// its package's `search` for this package's change.
+    fn search_again_if_listed(&mut self, id: &PackageId, tx: &mut Tx) {
+        let current = self.session.command_id().clone();
+        if self.on_screen() && self.extensions.lists_catalogue_of(&current, id) {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
         }
     }
 

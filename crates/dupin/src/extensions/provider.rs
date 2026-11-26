@@ -404,6 +404,21 @@ pub(crate) fn hand_over_kinds(kinds: Kinds) {
     let _ = KINDS.set(kinds);
 }
 
+type Refreshed = Box<dyn Fn(&PackageId) + Send + Sync>;
+static REFRESHED: OnceLock<Refreshed> = OnceLock::new();
+
+/// What the launcher does once a package's catalogue changed or outlived its `ttl` without a
+/// keystroke: search again if the panel still lists it. Outside the launcher nobody does.
+pub(crate) fn on_catalogue_refreshed(refreshed: impl Fn(&PackageId) + Send + Sync + 'static) {
+    let _ = REFRESHED.set(Box::new(refreshed));
+}
+
+pub(super) fn catalogue_refreshed(package: &PackageId) {
+    if let Some(refreshed) = REFRESHED.get() {
+        refreshed(package);
+    }
+}
+
 fn kinds() -> &'static Kinds {
     KINDS.get().unwrap_or(&UNCONFIGURED)
 }
