@@ -217,8 +217,11 @@ fn is_whole_name(query: &[char], name: &Name) -> bool {
 fn runs_from_word_start(query: &[char], name: &Name) -> bool {
     let (chars, lower) = (&name.chars, &name.lower);
     lower.len() >= query.len()
-        && (0..=lower.len() - query.len())
-            .any(|start| lower[start..start + query.len()] == *query && starts_word(chars, start))
+        && (0..=lower.len() - query.len()).any(|start| {
+            lower[start] == query[0]
+                && starts_word(chars, start)
+                && lower[start..start + query.len()] == *query
+        })
 }
 
 /// When the query is the name's initials, what the words it skips and leaves after its last
