@@ -34,6 +34,7 @@ mod symbols;
 mod sync;
 mod sync_cli;
 mod synced;
+mod telemetry;
 mod trace;
 mod ui;
 mod update;

@@ -86,6 +86,13 @@ impl Ui {
         self.query.focused = true;
         if !self.shown {
             self.place_panel();
+            if self.notice().is_none()
+                && let Some(notice) =
+                    crate::telemetry::get().and_then(crate::telemetry::Telemetry::take_notice)
+            {
+                // Hiding the panel clears it.
+                self.notices.persistent(notice.to_owned(), None);
+            }
         }
         self.shown = true;
         self.shown_at = tx.clock();

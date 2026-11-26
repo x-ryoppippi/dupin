@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--record DIR] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin sync status|now|off [--json]\ndupin sync on|join [--folder DIR] [--passphrase-stdin] [--json]\ndupin sync remove-device ID [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--record DIR] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin sync status|now|off [--json]\ndupin sync on|join [--folder DIR] [--passphrase-stdin] [--json]\ndupin sync remove-device ID [--json]\ndupin telemetry [status|enable|disable] [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 /// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
 fn ext_help() -> String {
     HELP.lines()
@@ -47,6 +47,8 @@ enum Action {
     /// Ask the running launcher's sync service, reading the passphrase from stdin first when
     /// asked to.
     Sync(crate::control::SyncAction, bool),
+    /// Report the running launcher's usage ping, after turning it on or off when given.
+    Telemetry(Option<bool>),
 }
 
 /// Why a command failed: a plain message, or a diagnostic about an extension package.
@@ -219,6 +221,9 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "run", folder, "--query", query] if !folder.starts_with('-') => {
             Ok(Action::ExtRun(folder.to_string(), query.to_string()))
         }
+        ["telemetry"] | ["telemetry", "status"] => Ok(Action::Telemetry(None)),
+        ["telemetry", "enable"] => Ok(Action::Telemetry(Some(true))),
+        ["telemetry", "disable"] => Ok(Action::Telemetry(Some(false))),
         ["sync", "status"] => Ok(Action::Sync(crate::control::SyncAction::Status {}, false)),
         ["sync", "now"] => Ok(Action::Sync(crate::control::SyncAction::Now {}, false)),
         ["sync", "off"] => Ok(Action::Sync(crate::control::SyncAction::Off {}, false)),
@@ -650,10 +655,51 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             crate::sync_cli::print(&reply);
             Ok(Value::Null)
         }
+        Action::Telemetry(change) => {
+            if let Some(on) = change {
+                set_telemetry(on)?;
+            }
+            let status = exchange(Command::TelemetryStatus {})?;
+            if json {
+                return Ok(status);
+            }
+            crate::out::outln!("{}", describe_telemetry(&status));
+            Ok(Value::Null)
+        }
         Action::Mcp(workspace) => crate::mcp::run(workspace.map(std::path::PathBuf::from))
             .map(|()| Value::Null)
             .map_err(|e| e.to_string().into()),
     }
+}
+
+/// Saves `telemetry` through the running launcher, as Settings' switch does, so a key Nix manages
+/// stays locked and the launcher applies the change as it saves it.
+fn set_telemetry(on: bool) -> Result<(), String> {
+    let base: dupin_core::Config =
+        serde_json::from_value(exchange(Command::ConfigGet {})?).map_err(|_| "invalid configuration")?;
+    if base.telemetry == on {
+        return Ok(());
+    }
+    let desired = dupin_core::Config {
+        telemetry: on,
+        ..base.clone()
+    };
+    exchange(Command::ConfigSet {
+        base: Box::new(base),
+        desired: Box::new(desired),
+    })
+    .map(drop)
+}
+
+fn describe_telemetry(status: &Value) -> String {
+    let state = status["off"]
+        .as_str()
+        .unwrap_or("On, one anonymous usage ping a day");
+    format!(
+        "Telemetry: {state}.\nSetting: telemetry = {}\nLearn more: {}",
+        status["setting"],
+        crate::telemetry::DOCS_URL
+    )
 }
 
 pub(crate) fn snapped_json(snapped: &crate::extensions::Snapped) -> Value {
@@ -887,6 +933,35 @@ mod tests {
         ] {
             assert!(parse(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
         }
+    }
+
+    #[test]
+    fn telemetry_arguments() {
+        let parsed = |args: &[&str]| parse(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>());
+        assert_eq!(parsed(&["telemetry"]), Ok(Action::Telemetry(None)));
+        assert_eq!(
+            parsed(&["telemetry", "status", "--json"]),
+            Ok(Action::Telemetry(None))
+        );
+        assert_eq!(
+            parsed(&["telemetry", "enable"]),
+            Ok(Action::Telemetry(Some(true)))
+        );
+        assert_eq!(
+            parsed(&["telemetry", "disable"]),
+            Ok(Action::Telemetry(Some(false)))
+        );
+        assert!(parsed(&["telemetry", "off"]).is_err());
+        assert!(HELP.contains("dupin telemetry [status|enable|disable] [--json]"));
+    }
+
+    #[test]
+    fn telemetry_status_says_what_turned_it_off() {
+        let off =
+            serde_json::json!({"sending": false, "setting": true, "off": "Off because DO_NOT_TRACK is set"});
+        assert!(describe_telemetry(&off).starts_with("Telemetry: Off because DO_NOT_TRACK is set.\n"));
+        let on = serde_json::json!({"sending": true, "setting": true, "off": null});
+        assert!(describe_telemetry(&on).contains("Setting: telemetry = true"));
     }
     #[test]
     fn extension_folders_check_and_run_with_diagnostics() {

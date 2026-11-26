@@ -14,7 +14,7 @@ def main [
     --channel: string # "stable" or "nightly"
     --identity: string = "Developer ID Application" # A codesign identity, or "-" for ad-hoc
     --notarize
-    --app: path # A built Dupin.app; built with `nix build .#dupin` when absent
+    --app: path # A built Dupin.app; built with `nix build .#dupin-release` when absent
     --out: path = "dist"
 ]: nothing -> record {
     let root = $env.FILE_PWD | path dirname
@@ -38,7 +38,8 @@ def main [
     }
 
     let built = if $app != null { $app } else {
-        ^nix build .#dupin --no-link --print-out-paths | str trim | path join Applications/Dupin.app
+        # The one build with the telemetry collector's address compiled in (docs/features/telemetry.md).
+        ^nix build .#dupin-release --no-link --print-out-paths | str trim | path join Applications/Dupin.app
     }
     rm --recursive --force $out
     mkdir $out

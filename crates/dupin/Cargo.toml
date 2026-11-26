@@ -30,6 +30,8 @@ dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }
 dupin-storage = { workspace = true }
 dupin-sync = { workspace = true }
+# The ping's wire format, without the schema the collector builds from it.
+dupin-telemetry = { path = "../dupin-telemetry", default-features = false }
 zeroize = "1.8"
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }

@@ -8,7 +8,7 @@ use rune::{El, el, row, text};
 use rune_kit::{Button, ButtonVariant, Keybind, Kit};
 
 use super::controls::{DESCRIPTION, ROW_PX, card, note, setting, value_button};
-use super::general::{hotkey_setting, login_setting};
+use super::general::{hotkey_setting, login_setting, telemetry_setting};
 use super::{GUTTER, Page, Prefs, permissions};
 use crate::icons;
 
@@ -73,7 +73,7 @@ fn intro(k: &Kit, words: &str) -> El {
 }
 
 fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let mut rows = vec![hotkey_setting(s, k), login_setting(s, k)];
+    let mut rows = vec![hotkey_setting(s, k), login_setting(s, k), telemetry_setting(s, k)];
     if permissions::available() {
         let review = value_button(k, "welcome-permissions", "Review", &icons::SHIELD)
             .on_press(|s: &mut Prefs| s.show(Page::Permissions));

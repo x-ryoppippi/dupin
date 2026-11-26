@@ -909,6 +909,7 @@ dependencies = [
  "dupin-plugin-protocol",
  "dupin-storage",
  "dupin-sync",
+ "dupin-telemetry",
  "fend-core",
  "libc",
  "naga",

@@ -12,6 +12,7 @@ mod hotkeys;
 mod panel;
 mod snippets;
 mod sync;
+mod telemetry;
 mod theme;
 mod updates;
 mod web;
@@ -75,6 +76,9 @@ pub struct Config {
     /// Whether a signed release build installs its channel's updates by itself. Builds
     /// without an update feed (Nix, `cargo run`) never update.
     pub auto_update: bool,
+    /// Whether a signed release build sends the anonymous daily usage ping. Builds without the
+    /// collector's address (Nix, `cargo run`) never send it.
+    pub telemetry: bool,
     pub system_automation: bool,
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
@@ -117,6 +121,7 @@ impl Default for Config {
             position: Position::default(),
             input_source: InputSource::default(),
             auto_update: updates::DEFAULT_ENABLED,
+            telemetry: telemetry::DEFAULT_ENABLED,
             system_automation: false,
             backdrop: Backdrop::default(),
             extensions: extensions::DEFAULT_ENABLED,
@@ -138,7 +143,7 @@ impl Config {
 
 /// The top-level keys whose value is the same choice on every Mac, which sync carries
 /// (docs/design/sync.md#settings). Any other key is device-local: hotkeys, display choices, keys
-/// whose enabling asks for access on this Mac, updates, snippets (kept apart from settings) and
+/// whose enabling asks for access on this Mac, updates and telemetry, snippets (kept apart from settings) and
 /// any key added later, so a new key never syncs by accident.
 const SHARED_KEYS: &[&str] = &[
     "show_recent",
@@ -216,6 +221,7 @@ mod tests {
             "extensions",
             "clipboard",
             "auto_update",
+            "telemetry",
             "snippets",
             "a key added later",
         ] {

@@ -161,6 +161,13 @@ pub(crate) fn run() {
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let current_config = Rc::new(RefCell::new(config.clone()));
     let welcome = prefs::welcome::first_run();
+    if !headless {
+        let telemetry = crate::telemetry::start(config.telemetry);
+        // The welcome opens now, and says what the ping sends.
+        if welcome {
+            telemetry.notice_shown();
+        }
+    }
     let prefs = prefs.init({
         let calendar_access = calendar_access.clone();
         let locked_keys = locked_keys.clone();

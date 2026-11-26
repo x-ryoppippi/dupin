@@ -66,6 +66,8 @@ pub enum Command {
     ExtensionGrantsList {
         packages: Vec<String>,
     },
+    /// Whether the running launcher sends the usage ping, and if not, why.
+    TelemetryStatus {},
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
@@ -131,6 +133,7 @@ impl Call {
             Command::ExtensionLockSet { .. } => "extension lock set",
             Command::ExtensionGrantsForget { .. } => "extension grants forget",
             Command::ExtensionGrantsList { .. } => "extension grants list",
+            Command::TelemetryStatus {} => "telemetry status",
         };
         crate::trace::control(kind, result.is_ok());
         let _ = self.reply.try_send(Reply {

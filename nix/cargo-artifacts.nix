@@ -145,6 +145,20 @@ let
       doRemapPathPrefix = false;
     }
   );
+  # The binary scripts/package-app.nu signs: the same build with the telemetry collector's address
+  # compiled in, which no other build carries, so only a release can send the usage ping
+  # (docs/features/telemetry.md). Only the dupin crate reads it, so the dependencies are shared.
+  releaseBinary = craneLib.buildPackage (
+    releaseArgs
+    // {
+      cargoArtifacts = releaseArtifacts;
+      dontStrip = true;
+      doRemapPathPrefix = false;
+      env = releaseArgs.env // {
+        DUPIN_TELEMETRY_ENDPOINT = "https://telemetry.dupin.app/v1/ping";
+      };
+    }
+  );
   # Headless-capable, for scripts/latency.nu; never shipped.
   latencyBinary = craneLib.buildPackage (
     latencyArgs
@@ -161,36 +175,41 @@ let
       '';
     }
   );
+  # Dupin.app around a release binary.
+  app =
+    binary: passthru:
+    pkgs.stdenv.mkDerivation (
+      packagingArgs
+      // {
+        inherit (commonArgs) pname version;
+        inherit passthru;
+        src = bundleSrc;
+        dontConfigure = true;
+        dontBuild = true;
+        installPhase = ''
+          runHook preInstall
+          mkdir -p "$out/bin"
+          install -m755 ${binary}/bin/dupin "$out/bin/dupin"
+          runHook postInstall
+        '';
+      }
+    );
 in
-pkgs.stdenv.mkDerivation (
-  packagingArgs
-  // {
-    inherit (commonArgs) pname version;
-    src = bundleSrc;
-    dontConfigure = true;
-    dontBuild = true;
-    installPhase = ''
-      runHook preInstall
-      mkdir -p "$out/bin"
-      install -m755 ${cargoBinary}/bin/dupin "$out/bin/dupin"
-      runHook postInstall
-    '';
-    passthru = {
-      inherit
-        commonArgs
-        packagingArgs
-        releaseArtifacts
-        debugArtifacts
-        lintAndTest
-        hawkArtifacts
-        hawk
-        cargoVendorDir
-        cargoBinary
-        latencyBinary
-        ;
-      inherit (commonArgs) cargoDeps;
-      inherit (native) bundledExtensions thirdPartyNotices;
-      baseline = native;
-    };
-  }
-)
+app cargoBinary {
+  inherit
+    commonArgs
+    packagingArgs
+    releaseArtifacts
+    debugArtifacts
+    lintAndTest
+    hawkArtifacts
+    hawk
+    cargoVendorDir
+    cargoBinary
+    latencyBinary
+    ;
+  inherit (commonArgs) cargoDeps;
+  inherit (native) bundledExtensions thirdPartyNotices;
+  baseline = native;
+  release = app releaseBinary { };
+}

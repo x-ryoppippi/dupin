@@ -142,6 +142,11 @@ impl Ui {
                     call.finish(result);
                 });
             }
+            Command::TelemetryStatus {} => {
+                call.finish(Ok(crate::telemetry::status(
+                    self.configuration.values.borrow().telemetry,
+                )));
+            }
             Command::ConfigGet {} => call.finish(
                 serde_json::to_value(&*self.configuration.values.borrow())
                     .map_err(|_| "could not encode settings".into()),

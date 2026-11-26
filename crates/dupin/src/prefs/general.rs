@@ -1,8 +1,8 @@
 use dupin_core::config::HotkeyTarget;
 use dupin_core::{DisplaySelection, InputSource, Position};
 use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
-use rune::{El, Shortcut, ShortcutError, Tx, col, text};
-use rune_kit::{Button, Kit, ShortcutRecorder, Switch, shortcut_error_message};
+use rune::{El, Shortcut, ShortcutError, Tx, col, row, text};
+use rune_kit::{Button, ButtonVariant, Kit, ShortcutRecorder, Switch, shortcut_error_message};
 
 use super::Prefs;
 use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button};
@@ -22,6 +22,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         input_source_setting(s, k),
         login_setting(s, k),
         automation_setting(s, k),
+        telemetry_setting(s, k),
         relaunch_setting(k),
     ];
     let mut body = vec![card(k, hair, rows)];
@@ -366,6 +367,44 @@ fn automation_setting(s: &Prefs, k: &Kit) -> El {
         "System Command Automation",
         Some("Show system commands that may ask for macOS Automation when confirmed"),
         automation,
+        s.lock_note(locked),
+    )
+}
+
+/// The usage ping's row, on General and in the welcome: what it sends, a link to the details and
+/// the switch that turns it off.
+pub(super) fn telemetry_setting(s: &Prefs, k: &Kit) -> El {
+    use crate::telemetry::{DOCS_URL, Off, SENT};
+    let locked = s.locked("telemetry");
+    let enabled = s.config.telemetry;
+    let off = crate::telemetry::off(enabled);
+    let by_env = matches!(off, Some(Off::Env(_)));
+    let switch = Switch::new(enabled && !by_env)
+        .label("Anonymous usage ping")
+        .hide_label()
+        .disabled(locked || by_env)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.telemetry = !enabled))
+        .build(k)
+        .key("telemetry");
+    let details = Button::new("Details")
+        .variant(ButtonVariant::Ghost)
+        .on_press(|_: &mut Prefs| {
+            std::thread::spawn(|| {
+                _ = dupin_mac::workspace::run(&dupin_mac::workspace::Action::OpenUrl(DOCS_URL.into()));
+            });
+        })
+        .build(k)
+        .key("telemetry-details");
+    let detail = match off {
+        Some(off @ (Off::Env(_) | Off::Unofficial | Off::Unsigned)) => format!("{SENT} {}.", off.describe()),
+        Some(Off::Setting) | None => SENT.to_owned(),
+    };
+    setting_with_lock(
+        k,
+        &icons::INFO,
+        "Anonymous usage ping",
+        Some(&detail),
+        row().gap(8.0).center_y().child(details).child(switch),
         s.lock_note(locked),
     )
 }

@@ -38,6 +38,8 @@
           rolldown
           ;
         dupin-latency = dupin.latencyBinary;
+        # What scripts/package-app.nu signs: the one build that can send the usage ping.
+        dupin-release = dupin.release;
         default = dupin;
       };
     };

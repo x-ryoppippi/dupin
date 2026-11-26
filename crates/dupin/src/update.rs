@@ -101,11 +101,7 @@ impl Installed {
         let build = dupin_mac::bundle::info_string("CFBundleVersion")
             .and_then(|v| v.parse().ok())
             .ok_or("CFBundleVersion is not a build number")?;
-        let requirement = designated_requirement(&bundle)?;
-        // An ad-hoc signature's requirement is its own hash, which no other build satisfies.
-        if !requirement.contains("anchor apple generic") {
-            return Err(format!("{} is not signed with a Developer ID", bundle.display()));
-        }
+        let requirement = developer_id_requirement(&bundle)?;
         Ok(Some(Installed {
             method: Method::of(&bundle, writable),
             bundle,
@@ -612,6 +608,17 @@ fn info_value(bundle: &Path, key: &str) -> Result<String, String> {
             .arg(bundle.join("Contents/Info.plist")),
     )?;
     Ok(value.trim().to_owned())
+}
+
+/// `bundle`'s designated requirement, when it is signed with a Developer ID: what marks an
+/// official release, which alone updates itself and sends the telemetry ping.
+pub(crate) fn developer_id_requirement(bundle: &Path) -> Result<String, String> {
+    let requirement = designated_requirement(bundle)?;
+    // An ad-hoc signature's requirement is its own hash, which no other build satisfies.
+    if !requirement.contains("anchor apple generic") {
+        return Err(format!("{} is not signed with a Developer ID", bundle.display()));
+    }
+    Ok(requirement)
 }
 
 fn designated_requirement(bundle: &Path) -> Result<String, String> {
