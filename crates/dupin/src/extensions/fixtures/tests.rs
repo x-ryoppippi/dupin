@@ -396,7 +396,7 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
 
 /// Clipboard history as an `items()` catalogue: it lists what storage holds, and each copy the
 /// watch delivers is stored and appended to the catalogue Dupin holds. It is the recipe in
-/// docs/features/extensions.md, listing 3 records where that lists 200, so a fixture fills a
+/// docs/features/extension-api.md, listing 3 records where that lists 200, so a fixture fills a
 /// page with a few.
 const CLIPS: &str = "import { storage, items as catalogue } from 'dupin';\n\
      const row = (record) => ({ id: record.id, title: record.data.text, text: record.data.text });\n\
