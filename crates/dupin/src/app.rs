@@ -5,8 +5,7 @@ use std::sync::Arc;
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
 
 use crate::{
-    backdrop, control, hotkey, latency, log, prefs, scripts, settings, snapshots, store, trace, ui, update,
-    view,
+    backdrop, control, hotkey, latency, log, prefs, scripts, settings, snapshots, trace, ui, update, view,
 };
 
 /// The panel with nothing below the field: the window's first size, before it fits its content.
@@ -26,7 +25,6 @@ pub(crate) fn run() {
     }
     let paths = settings::Paths::discover();
     let (config, locked_keys, config_problem) = settings::load(&paths);
-    let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
     let fonts: &'static [&'static [u8]] = match dupin_mac::font::system_ui_font() {
         Some(font) => Box::leak(Box::new([font])),
@@ -79,7 +77,10 @@ pub(crate) fn run() {
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
     .windowless()
-    .on_window(|_| trace::settings("created"))
+    .on_window(|window| {
+        remember_frame(window, "Dupin Settings");
+        trace::settings("created");
+    })
     .on_ready(|_| trace::settings("ready"))
     .on_focus(|s, focused, _| {
         if focused {
@@ -115,6 +116,7 @@ pub(crate) fn run() {
         )
     })
     .windowless()
+    .on_window(|window| remember_frame(window, "Dupin Snapshots"))
     .on_close(snapshots::Snapshots::closed);
     let snapshots_handle = snapshots.handle();
     let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -137,6 +139,7 @@ pub(crate) fn run() {
     })
     .windowless()
     .srgb_blend(true)
+    .on_window(|window| remember_frame(window, "Dupin Script Output"))
     .on_close(scripts::output::Output::closed);
     let scripts_handle = scripts.handle();
     let scripts = scripts.init({
@@ -201,7 +204,7 @@ pub(crate) fn run() {
                     },
                     updater,
                     configuration,
-                    history,
+                    dupin_core::History::default(),
                     calendar_access,
                     quick_look,
                     running,
@@ -238,7 +241,7 @@ pub(crate) fn run() {
             .into();
         let prefs: rune::AnyWindowSpec = WindowSpec::from_app("prefs", prefs)
             .options(WindowOptions {
-                resizable: false,
+                min_size: Some(prefs::MIN_SIZE),
                 ..Default::default()
             })
             .into();
@@ -256,6 +259,23 @@ pub(crate) fn run() {
             .into();
         [panel, prefs, snapshots, scripts]
     });
+}
+
+/// Open the window where the user last left it, at the size they left it, across launches.
+fn remember_frame(window: &rune::WindowHandle, name: &str) {
+    if rune::tooling::is_headless() {
+        return;
+    }
+    use rune::raw_window_handle::RawWindowHandle;
+    let saved = window.with_raw_handle(|handle| match handle.as_raw() {
+        // SAFETY: Rune lends this NSView only for the duration of `with_raw_handle`, on the
+        // main thread, and AppKit copies the name.
+        RawWindowHandle::AppKit(appkit) => unsafe { dupin_mac::window::autosave_frame(appkit.ns_view, name) },
+        _ => false,
+    });
+    if !matches!(saved, Ok(true)) {
+        log::warn(&format!("couldn't remember where the {name} window was left"));
+    }
 }
 
 fn install_quick_look(

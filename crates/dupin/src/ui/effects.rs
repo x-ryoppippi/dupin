@@ -43,7 +43,7 @@ impl Ui {
                     path,
                     folder,
                 } => self.transfer_file(transfer, path, folder),
-                Effect::SaveHistory => self.saver.save(&self.session.history()),
+                Effect::SaveHistory => self.sync.save_usage(self.session.own_history()),
                 Effect::Run(action) => match action {
                     Action::RunScript(command) => self.start_script(command, tx),
                     Action::ConfiguredScript { script, argument } => {
@@ -62,6 +62,7 @@ impl Ui {
                     Action::OpenPreferences => self.prepare_settings(),
                     Action::OpenSnapshots(id) => self.prepare_snapshots(id),
                     Action::ResumeSnapshot(id) => self.snapshots.update(move |s, _| s.resume_id(&id)),
+                    Action::App(command) => self.run_app_command(command, tx),
                     Action::System(command) => {
                         let run = self.system_runner;
                         let enabled = self.configuration.values.borrow().system_automation;

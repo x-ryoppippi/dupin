@@ -97,6 +97,8 @@ struct Opened {
 }
 
 impl PackageStorage {
+    /// `storage` may be shared with the host's other users of it, such as sync, so the device's
+    /// clock and ID stay one per process.
     pub fn new(storage: impl Into<Arc<dupin_storage::Storage>>) -> Self {
         Self {
             storage: storage.into(),

@@ -165,6 +165,22 @@ impl Status {
         }
     }
 
+    /// What "Update Dupin" tells the user this status means, `version` being the running build's.
+    pub fn outcome(&self, version: &str) -> String {
+        match self {
+            Status::Off => "Updates are off for this copy of Dupin.".into(),
+            Status::Idle => "Dupin hasn't checked for updates yet.".into(),
+            Status::Checking => "Dupin is already checking for updates.".into(),
+            Status::Downloading => "Dupin is downloading an update.".into(),
+            Status::Current => format!("Dupin {version} is up to date."),
+            Status::Failed(e) => format!("Couldn't update Dupin. {}", e.lines().next().unwrap_or_default()),
+            Status::Ready(new) => format!("Dupin {new} is ready. It installs when the launcher closes."),
+            Status::Download { url } => {
+                format!("Dupin can't replace itself here. Download the update from {url}")
+            }
+        }
+    }
+
     /// Whether "Check for Updates" can start a check now.
     pub fn can_check(&self) -> bool {
         matches!(
@@ -200,6 +216,9 @@ struct Inner {
     /// The bundles were swapped. A second swap would exchange them back, so nothing stages or
     /// swaps again in this process.
     applied: bool,
+    /// Checks that have ended, whatever they found. A caller that asked for one waits for this
+    /// to move rather than for a status it might never see.
+    finished: u64,
 }
 
 impl Updater {
@@ -228,6 +247,7 @@ impl Updater {
                     },
                     staged: None,
                     applied: false,
+                    finished: 0,
                 }),
                 wake: Mutex::new(false),
                 signal: Condvar::new(),
@@ -275,6 +295,24 @@ impl Updater {
         if enabled && !was {
             self.check_now();
         }
+    }
+
+    /// Ask for a check and wait for it to end; its outcome is then `status()`. `None` when none
+    /// was started, or it didn't end within `limit`.
+    pub fn check_and_wait(&self, limit: Duration) -> Option<Status> {
+        if !self.status().can_check() {
+            return None;
+        }
+        let before = self.shared.lock().finished;
+        self.check_now();
+        let deadline = std::time::Instant::now() + limit;
+        while std::time::Instant::now() < deadline {
+            if self.shared.lock().finished > before {
+                return Some(self.status());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        None
     }
 
     pub fn check_now(&self) {
@@ -330,6 +368,11 @@ impl Updater {
         inner.applied = true;
         Some(staged)
     }
+}
+
+/// Whether this build updates itself, so "Update Dupin" has something to do.
+pub fn offered() -> bool {
+    has_feed() && !off_by_env()
 }
 
 /// Whether this build has a channel to update from at all.
@@ -394,6 +437,7 @@ fn run(shared: &Shared, installed: &Installed, panel: &AppHandle<Ui>) {
                     shared.set_status(Status::Failed(e));
                 }
             }
+            shared.lock().finished += 1;
         }
         asked = shared.wait(INTERVAL);
     }
@@ -603,6 +647,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_status_says_what_update_dupin_found() {
+        let said = |status: Status| status.outcome("1.0");
+        assert_eq!(said(Status::Current), "Dupin 1.0 is up to date.");
+        assert_eq!(
+            said(Status::Failed("offline\nmore".into())),
+            "Couldn't update Dupin. offline"
+        );
+        assert!(said(Status::Ready("1.1".into())).starts_with("Dupin 1.1 is ready"));
+        assert!(
+            said(Status::Download {
+                url: "https://example.com/d".into()
+            })
+            .ends_with("https://example.com/d")
+        );
+        assert!(said(Status::Downloading).contains("downloading"));
+        assert!(said(Status::Off).contains("off"));
+    }
+
+    #[test]
     fn reads_the_feed() {
         let feed = Feed::parse(
             r#"{"version":"0.2.0","build":42,"url":"https://example.com/Dupin.zip","sha256":"ab"}"#,
@@ -714,6 +777,7 @@ mod tests {
                     status: Status::Ready(staged.version.clone()),
                     staged: Some(staged),
                     applied: false,
+                    finished: 0,
                 }),
                 wake: Mutex::new(false),
                 signal: Condvar::new(),

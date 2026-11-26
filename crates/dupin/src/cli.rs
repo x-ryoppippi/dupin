@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin sync status|now|off [--json]\ndupin sync on|join [--folder DIR] [--passphrase-stdin] [--json]\ndupin sync remove-device ID [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 /// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
 fn ext_help() -> String {
     HELP.lines()
@@ -44,6 +44,9 @@ enum Action {
     /// List the GitHub repositories tagged `dupin-extension` that match the words.
     ExtSearch(Option<String>),
     Mcp(Option<String>),
+    /// Ask the running launcher's sync service, reading the passphrase from stdin first when
+    /// asked to.
+    Sync(crate::control::SyncAction, bool),
 }
 
 /// Why a command failed: a plain message, or a diagnostic about an extension package.
@@ -97,8 +100,13 @@ fn parse(args: &[String]) -> Result<Action, String> {
     let workspace: Option<String> = parser
         .opt_value_from_str("--workspace")
         .map_err(|_| "--workspace takes a folder".to_owned())?;
+    let folder: Option<String> = parser
+        .opt_value_from_str("--folder")
+        .map_err(|_| "--folder takes a folder".to_owned())?;
+    let passphrase_stdin = parser.contains("--passphrase-stdin");
     let build_flags = typescript || bundled || options.sourcemap;
-    let other_flags = update || step.is_some() || workspace.is_some();
+    let sync_flags = folder.is_some() || passphrase_stdin;
+    let other_flags = update || step.is_some() || workspace.is_some() || sync_flags;
     let rest = parser.finish();
     let args: Vec<_> = rest
         .iter()
@@ -139,7 +147,25 @@ fn parse(args: &[String]) -> Result<Action, String> {
                 step,
             ))
         }
-        ["mcp"] if !json && !build_flags && !update && step.is_none() => Ok(Action::Mcp(workspace)),
+        ["mcp"] if !json && !build_flags && !update && step.is_none() && !sync_flags => {
+            Ok(Action::Mcp(workspace))
+        }
+        ["sync", verb @ ("on" | "join")]
+            if !build_flags && !update && step.is_none() && workspace.is_none() =>
+        {
+            use crate::control::SyncAction;
+            let action = match *verb {
+                "on" => SyncAction::On {
+                    folder,
+                    passphrase: None,
+                },
+                _ => SyncAction::Join {
+                    folder,
+                    passphrase: None,
+                },
+            };
+            Ok(Action::Sync(action, passphrase_stdin))
+        }
         _ if build_flags || other_flags => Err("invalid arguments; use dupin --help".into()),
         ["--help" | "-h"] => Ok(Action::Help),
         ["ext", "--help" | "-h" | "help"] => Ok(Action::ExtHelp),
@@ -185,6 +211,15 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "run", folder, "--query", query] if !folder.starts_with('-') => {
             Ok(Action::ExtRun(folder.to_string(), query.to_string()))
         }
+        ["sync", "status"] => Ok(Action::Sync(crate::control::SyncAction::Status {}, false)),
+        ["sync", "now"] => Ok(Action::Sync(crate::control::SyncAction::Now {}, false)),
+        ["sync", "off"] => Ok(Action::Sync(crate::control::SyncAction::Off {}, false)),
+        ["sync", "remove-device", device] if device.len() == 32 => Ok(Action::Sync(
+            crate::control::SyncAction::RemoveDevice {
+                device: device.to_string(),
+            },
+            false,
+        )),
         _ => Err("invalid arguments; use dupin --help".into()),
     }
 }
@@ -595,6 +630,15 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             copy.watch(std::time::Duration::from_millis(250), &|| true, &mut |outcome| {
                 report_dev(outcome, json)
             });
+            Ok(Value::Null)
+        }
+        Action::Sync(action, passphrase_stdin) => {
+            let action = crate::sync_cli::with_passphrase(action, passphrase_stdin)?;
+            let reply = exchange(Command::Sync { action })?;
+            if json {
+                return Ok(reply);
+            }
+            crate::sync_cli::print(&reply);
             Ok(Value::Null)
         }
         Action::Mcp(workspace) => crate::mcp::run(workspace.map(std::path::PathBuf::from))

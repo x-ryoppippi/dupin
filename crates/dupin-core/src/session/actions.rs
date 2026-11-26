@@ -85,10 +85,12 @@ impl Session {
         let mut effects = vec![Effect::Run(action.action)];
         if picked {
             if item.record_usage {
+                let now = (self.clock)();
+                self.own.record(&item.id, &self.search.query, now);
                 self.history
                     .write()
                     .unwrap()
-                    .record(&item.id, &self.search.query, (self.clock)());
+                    .record(&item.id, &self.search.query, now);
                 effects.push(Effect::SaveHistory);
             }
             self.remember_query(true);

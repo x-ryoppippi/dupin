@@ -2,11 +2,13 @@ import { repo } from '../site.ts';
 
 // The pages of docs/ the site publishes, by section, as paths relative to docs/. Pages for
 // people working on Dupin itself (development, architecture, design) stay on GitHub, and links
-// to them go there.
+// to them go there. What is native and what is a bundled extension follows the built-ins table
+// in docs/design/extension-platform.md.
 export const sections = [
 	{ title: 'Getting started', pages: ['usage.md', 'configuration.md', 'features/keywords.md'] },
 	{
-		title: 'Searching',
+		title: 'Built-in features',
+		intro: 'Native to Dupin and always there.',
 		pages: [
 			'features/apps.md',
 			'features/recent-items.md',
@@ -14,43 +16,42 @@ export const sections = [
 			'features/folder-browsing.md',
 			'features/file-actions.md',
 			'features/send-to.md',
-			'features/dictionary.md',
-			'features/web-searches.md',
-			'features/maps.md',
-			'features/calculator.md',
-			'features/calendar.md',
-			'features/clipboard.md',
-			'features/snippets.md',
-			'features/emoji.md',
 			'features/snapshots.md',
-		],
-	},
-	{
-		title: 'Commands',
-		pages: [
 			'features/scripts.md',
 			'features/hotkeys.md',
 			'features/selected-text.md',
-			'features/window-management.md',
 			'features/system-commands.md',
-		],
-	},
-	{
-		title: 'The app',
-		pages: [
 			'features/settings.md',
 			'features/appearance.md',
 			'features/permissions.md',
 			'features/storage.md',
+			'features/sync.md',
 			'features/updates.md',
+			'features/advanced.md',
 		],
 	},
 	{
-		title: 'Extending',
-		pages: ['features/extensions.md', 'features/advanced.md', 'features/mcp.md'],
+		title: 'Bundled extensions',
+		intro: 'Shipped with Dupin as extensions, each one yours to eject and change.',
+		pages: [
+			'features/calculator.md',
+			'features/calendar.md',
+			'features/clipboard.md',
+			'features/dictionary.md',
+			'features/emoji.md',
+			'features/snippets.md',
+			'features/web-searches.md',
+			'features/maps.md',
+			'features/window-management.md',
+		],
+	},
+	{
+		title: 'Your own extensions',
+		intro: 'Write, install and test extensions of your own.',
+		pages: ['features/extensions.md', 'features/mcp.md'],
 	},
 	{ title: 'About', pages: ['name.md'] },
-] as const satisfies readonly { title: string; pages: readonly string[] }[];
+] as const satisfies readonly { title: string; intro?: string; pages: readonly string[] }[];
 
 export type DocPath = (typeof sections)[number]['pages'][number];
 

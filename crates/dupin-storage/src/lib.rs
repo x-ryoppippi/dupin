@@ -14,13 +14,13 @@ mod secret;
 mod store;
 mod sweeper;
 
-pub use device::DeviceId;
+pub use device::{DeviceId, Stamp};
 pub use error::Error;
 pub use fs::scratch_process;
 pub use key::{DataKey, FileKey, KeyProvider, MemoryKey};
 pub use store::{
-    BlobHandle, BlobRef, Clock, Cursor, Limits, NewRecord, OpenReport, Page, Record, RecordId, Storage,
-    Store, SystemClock, Usage,
+    BlobHandle, BlobRef, Clock, Cursor, Imported, Limits, NewRecord, OpenReport, Page, Record, RecordId,
+    Storage, Store, SystemClock, Usage, VaultKey, Version,
 };
 pub use sweeper::Sweeper;
 

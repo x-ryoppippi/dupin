@@ -113,6 +113,10 @@ impl Ui {
                     call.finish(result.map(|()| serde_json::Value::Null));
                 });
             }
+            Command::Sync { action } => {
+                let action = action.clone();
+                self.sync.control(action, call);
+            }
             Command::ConfigOverlay {} => {
                 std::thread::spawn(move || {
                     let source = match crate::settings::overlay::shared() {
@@ -120,6 +124,22 @@ impl Ui {
                         None => Ok(None),
                     };
                     call.finish(source.map(serde_json::Value::from));
+                });
+            }
+            Command::ExtensionLockGet {} | Command::ExtensionLockSet { .. } => {
+                std::thread::spawn(move || {
+                    let result = crate::extensions::installed::answer(
+                        crate::extensions::installed::shared(),
+                        &call.request.command,
+                    );
+                    call.finish(result);
+                });
+            }
+            Command::ExtensionGrantsForget { .. } | Command::ExtensionGrantsList { .. } => {
+                let bridge = self.extensions.bridge.clone();
+                std::thread::spawn(move || {
+                    let result = crate::extensions::grants::answer(&bridge, &call.request.command);
+                    call.finish(result);
                 });
             }
             Command::ConfigGet {} => call.finish(

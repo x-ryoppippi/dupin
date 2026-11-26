@@ -67,9 +67,9 @@ pub struct Stamp {
     pub device: DeviceId,
 }
 
-const COUNTER_BITS: u32 = 16;
+pub(crate) const COUNTER_BITS: u32 = 16;
 
-fn hlc_from_millis(millis: u64) -> u64 {
+pub(crate) fn hlc_from_millis(millis: u64) -> u64 {
     millis
         .checked_shl(COUNTER_BITS)
         .filter(|hlc| hlc >> COUNTER_BITS == millis)
@@ -186,9 +186,55 @@ impl Device {
         self.lock().device_id
     }
 
-    #[cfg(test)]
-    fn previous_id(&self) -> Option<DeviceId> {
+    pub fn previous_id(&self) -> Option<DeviceId> {
         self.lock().previous_device_id
+    }
+
+    pub fn hlc(&self) -> u64 {
+        self.lock().hlc
+    }
+
+    /// Mints a new ID and remembers the current one as the previous.
+    pub fn remint(&self) -> Result<DeviceId, Error> {
+        let mut state = self.lock();
+        let next = StateFile {
+            left_at: state.left_at.clone(),
+            newer: state.newer.clone(),
+            ..StateFile::fresh(state.hardware.clone(), Some(state.device_id), state.hlc)?
+        };
+        write(&self.path, &self.keys, &next)?;
+        *state = next;
+        Ok(state.device_id)
+    }
+
+    /// Moves the clock back to the wall clock when it runs more than `max_drift` ahead of it.
+    pub fn reset_if_ahead(&self, now_millis: u64, max_drift: std::time::Duration) -> Result<bool, Error> {
+        let drift = u64::try_from(max_drift.as_millis()).unwrap_or(u64::MAX);
+        let mut state = self.lock();
+        if state.hlc <= hlc_from_millis(now_millis.saturating_add(drift)) {
+            return Ok(false);
+        }
+        let mut next = state.clone();
+        next.hlc = hlc_from_millis(now_millis);
+        write(&self.path, &self.keys, &next)?;
+        *state = next;
+        Ok(true)
+    }
+
+    pub fn left_at(&self, namespace: &str) -> Option<Stamp> {
+        self.lock().left_at.get(namespace).copied()
+    }
+
+    pub fn set_left_at(&self, namespace: &str, stamp: Option<Stamp>) -> Result<(), Error> {
+        let mut state = self.lock();
+        let mut next = state.clone();
+        match stamp {
+            Some(stamp) => next.left_at.insert(namespace.to_owned(), stamp),
+            None => next.left_at.remove(namespace),
+        };
+        write(&self.path, &self.keys, &next)?;
+        *state = next;
+        Ok(())
     }
 
     /// A stamp for a local write: later than every stamp this device has written or seen,

@@ -11,6 +11,7 @@ mod files;
 mod hotkeys;
 mod panel;
 mod snippets;
+mod sync;
 mod theme;
 mod updates;
 mod web;
@@ -26,6 +27,7 @@ pub use clipboard::{Clipboard, Retention};
 pub use hotkeys::HotkeyTarget;
 pub use panel::{DisplaySelection, InputSource, Position};
 pub use snippets::Snippet;
+pub use sync::Sync;
 pub use theme::{Backdrop, Colors, FontFamily, Theme};
 pub use web::WebSearch;
 
@@ -81,6 +83,9 @@ pub struct Config {
     pub theme: Theme,
     pub calendar: Calendar,
     pub clipboard: Clipboard,
+    /// This Mac's sync folder and switches, device-local.
+    #[serde(skip_serializing_if = "Sync::is_empty")]
+    pub sync: Sync,
     /// Shorthands typed in the main search, by what is typed.
     #[serde(skip_serializing_if = "Aliases::is_empty")]
     pub aliases: Aliases,
@@ -117,6 +122,7 @@ impl Default for Config {
             theme: Theme::default(),
             calendar: Calendar::default(),
             clipboard: Clipboard::default(),
+            sync: Sync::default(),
             aliases: Aliases::default(),
             advanced: Advanced::default(),
         }

@@ -93,6 +93,75 @@ impl History {
         serde_json::to_string(self).expect("history serializes")
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Several devices' logs as one: counts add, visits are the union of the latest ten, each
+    /// query keeps its latest pick, and the 500 items most frecent at `now` are kept.
+    pub fn merged<'a>(parts: impl IntoIterator<Item = &'a History>, now: u64) -> History {
+        let mut merged = History::default();
+        for part in parts {
+            for (id, entry) in &part.items {
+                let into = merged.items.entry(id.clone()).or_default();
+                into.count = into.count.saturating_add(entry.count);
+                into.visits.extend_from_slice(&entry.visits);
+                for (query, &at) in &entry.queries {
+                    let into = into.queries.entry(query.clone()).or_default();
+                    *into = (*into).max(at);
+                }
+            }
+        }
+        for entry in merged.items.values_mut() {
+            entry.visits.sort_unstable();
+            let excess = entry.visits.len().saturating_sub(VISITS_KEPT);
+            entry.visits.drain(..excess);
+            if entry.queries.len() > QUERIES_KEPT {
+                let mut queries: Vec<(String, u64)> = entry.queries.drain().collect();
+                queries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+                queries.truncate(QUERIES_KEPT);
+                entry.queries = queries.into_iter().collect();
+            }
+        }
+        if merged.items.len() > ITEMS_KEPT {
+            let mut ranked: Vec<(String, f64)> = merged
+                .items
+                .iter()
+                .map(|(id, entry)| (id.clone(), entry.frecency(now)))
+                .collect();
+            ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+            for (id, _) in ranked.drain(ITEMS_KEPT..) {
+                merged.items.remove(&id);
+            }
+        }
+        merged
+    }
+
+    /// The same history with each item ID rewritten by `rewrite`, which drops an item by
+    /// returning `None`: how paths under the home folder become portable between Macs.
+    pub fn map_ids(&self, rewrite: impl Fn(&str) -> Option<String>) -> History {
+        let mut mapped = History::default();
+        let mut collided = Vec::new();
+        for (id, entry) in &self.items {
+            let Some(id) = rewrite(id) else {
+                continue;
+            };
+            match mapped.items.entry(id) {
+                std::collections::hash_map::Entry::Occupied(taken) => collided.push(History {
+                    items: HashMap::from([(taken.key().clone(), entry.clone())]),
+                }),
+                std::collections::hash_map::Entry::Vacant(free) => {
+                    free.insert(entry.clone());
+                }
+            }
+        }
+        if collided.is_empty() {
+            return mapped;
+        }
+        // Rewriting never adds items, so no item is dropped for the limit whatever `now` is.
+        History::merged(std::iter::once(&mapped).chain(&collided), 0)
+    }
+
     /// Return up to `limit` item ids ordered by frecency at `now`.
     pub(crate) fn ranked_ids(&self, limit: usize, now: u64) -> Vec<String> {
         let mut ranked: Vec<_> = self
@@ -469,6 +538,57 @@ mod tests {
         assert_eq!(entry.queries.len(), QUERIES_KEPT);
         assert!(!entry.queries.contains_key("q9"), "the stalest pick goes first");
         assert!(entry.queries.contains_key("q10"));
+    }
+
+    #[test]
+    fn merging_devices_adds_counts_and_keeps_the_latest_visits() {
+        let mut a = History::default();
+        let mut b = History::default();
+        for i in 0..8 {
+            a.record("shared", "sha", NOW - 100 + i);
+            b.record("shared", "shared", NOW - 50 + i);
+        }
+        a.record("only-a", "", NOW);
+        let merged = History::merged([&a, &b], NOW);
+        let shared = &merged.items["shared"];
+        assert_eq!(shared.count, 16);
+        assert_eq!(shared.visits.len(), VISITS_KEPT);
+        assert_eq!(shared.visits.last(), Some(&(NOW - 43)));
+        assert!(shared.visits.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(shared.queries["sha"], NOW - 93, "a query keeps its latest pick");
+        assert_eq!(shared.queries["shared"], NOW - 43);
+        assert!(merged.items.contains_key("only-a"));
+        assert_eq!(History::merged([&a], NOW), a, "one log merges to itself");
+    }
+
+    #[test]
+    fn merging_keeps_the_most_frecent_items() {
+        let mut a = History::default();
+        let mut b = History::default();
+        for i in 0..ITEMS_KEPT {
+            a.record(&format!("old-{i}"), "", NOW - 300 * DAY);
+            b.record(&format!("new-{i}"), "", NOW);
+        }
+        let merged = History::merged([&a, &b], NOW);
+        assert_eq!(merged.items.len(), ITEMS_KEPT);
+        assert!(merged.items.keys().all(|id| id.starts_with("new-")));
+    }
+
+    #[test]
+    fn ids_can_be_rewritten_or_dropped() {
+        let mut history = History::default();
+        history.record("/Users/me/a.txt", "a", NOW);
+        history.record("/Users/me/b.txt", "b", NOW);
+        history.record("/Applications/Safari.app", "s", NOW);
+        let portable = history.map_ids(|id| match id.strip_prefix("/Users/me/") {
+            Some(rest) => Some(format!("~/{rest}")),
+            None => Some(id.to_owned()),
+        });
+        assert!(portable.items.contains_key("~/a.txt"));
+        assert!(portable.items.contains_key("/Applications/Safari.app"));
+        let collapsed = history.map_ids(|id| id.ends_with(".txt").then(|| "same".to_owned()));
+        assert_eq!(collapsed.items.len(), 1);
+        assert_eq!(collapsed.items["same"].count, 2);
     }
 
     #[test]

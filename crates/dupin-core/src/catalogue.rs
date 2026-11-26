@@ -634,7 +634,7 @@ fn action_bytes(action: &Action) -> usize {
         }
         Action::OpenSnapshots(id) => id.as_ref().map_or(0, String::len),
         Action::ResumeSnapshot(id) => id.len(),
-        Action::System(_) | Action::RequestClipboardAccess | Action::OpenPreferences => 0,
+        Action::System(_) | Action::App(_) | Action::RequestClipboardAccess | Action::OpenPreferences => 0,
     }
 }
 

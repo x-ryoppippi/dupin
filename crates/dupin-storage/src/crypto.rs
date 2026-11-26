@@ -141,6 +141,7 @@ fn cipher(key: &[u8; KEY_LEN]) -> XChaCha20Poly1305 {
 /// The keys of one namespace under one key source.
 pub struct NamespaceKeys {
     source: KeySource,
+    namespace_id: [u8; ID_LEN],
     sealer: Sealer,
     blob_mac: Zeroizing<[u8; KEY_LEN]>,
     blob_nonce: Zeroizing<[u8; KEY_LEN]>,
@@ -156,6 +157,7 @@ impl NamespaceKeys {
         let namespace_id = expand::<ID_LEN>(&hkdf, &derive("namespace-id"));
         Self {
             source,
+            namespace_id: *namespace_id,
             sealer: Sealer {
                 cipher: cipher(&expand::<KEY_LEN>(&hkdf, &derive("seal"))),
                 common: vec![source.tag().to_vec(), namespace_id.to_vec()],
@@ -168,6 +170,10 @@ impl NamespaceKeys {
 
     pub fn source(&self) -> KeySource {
         self.source
+    }
+
+    pub fn namespace_id(&self) -> &[u8; ID_LEN] {
+        &self.namespace_id
     }
 
     pub fn aad(&self, kind: &str, parts: &[&[u8]]) -> Vec<u8> {

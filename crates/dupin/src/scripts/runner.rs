@@ -1006,6 +1006,19 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
         }
+
+        /// Waits until `file` holds a whole line: the shell creates a redirect's file before
+        /// the command writes to it, so existing alone doesn't mean it was written.
+        fn wait_for_line(&self, file: &str) {
+            let started = Instant::now();
+            while !fs::read_to_string(self.0.join(file)).is_ok_and(|text| text.ends_with('\n')) {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "{file} was not written"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
     }
 
     impl Drop for Fixture {
@@ -1390,7 +1403,7 @@ mod tests {
         let run = launch(fixture.0.join("run"), &[]);
         let completion = thread::scope(|scope| {
             scope.spawn(|| {
-                fixture.wait_for("leader");
+                fixture.wait_for_line("leader");
                 cancel.store(true, Ordering::Release);
             });
             exec::Spawn::spawn(&runner, &run, &cancel).unwrap()
@@ -1409,7 +1422,7 @@ mod tests {
         let run = launch(fixture.0.join("run"), &[]);
         let result = thread::scope(|scope| {
             scope.spawn(|| {
-                fixture.wait_for("leader");
+                fixture.wait_for_line("leader");
                 runner.kill_all_now();
             });
             spawn(&runner, &run)

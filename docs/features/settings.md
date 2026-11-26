@@ -22,7 +22,7 @@ Settings saves to `config.toml` when it is writable. With a read-only file, the 
 
 The first launch opens Settings with a short welcome: choose the hotkey, turn on launch at login, and see which keys switch modes. ⌘Space is Spotlight's shortcut too; to give it to Dupin, turn off Show Spotlight search in System Settings → Keyboard → Keyboard Shortcuts → Spotlight, or choose another hotkey. When another app holds the chord you press, Dupin names it.
 
-The welcome appears once. It is skipped when `history.json` already exists in `~/Library/Application Support/Dupin`, as it does for anyone who used Dupin before. **Show Welcome** in the Settings sidebar brings it back.
+The welcome appears once. It is skipped for anyone who used Dupin before: when its usage history exists in [encrypted storage](./storage.md#built-in-namespaces), or an older `history.json` in `~/Library/Application Support/Dupin` that Dupin has yet to move there. Its last step mentions [Settings → Sync](./sync.md) without asking anything about it. **Show Welcome** in the Settings sidebar brings it back.
 
 ## Launch at login
 

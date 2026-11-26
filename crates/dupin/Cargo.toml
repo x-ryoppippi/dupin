@@ -29,6 +29,8 @@ dupin-extension-install = { path = "../dupin-extension-install" }
 dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }
 dupin-storage = { workspace = true }
+dupin-sync = { workspace = true }
+zeroize = "1.8"
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 libc = { workspace = true }

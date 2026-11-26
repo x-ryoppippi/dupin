@@ -44,9 +44,48 @@ pub enum Command {
     ExtensionDataDelete {
         package: String,
     },
+    /// Turns sync on or off, joins a vault, or reports its status.
+    Sync {
+        action: SyncAction,
+    },
     /// What Settings saved over a read-only config.toml, as TOML, which the running launcher
     /// holds open.
     ConfigOverlay {},
+    /// The installed extensions list, which the running launcher holds open.
+    ExtensionLockGet {},
+    /// Replaces the installed extensions list the running launcher holds open.
+    ExtensionLockSet {
+        lock: Box<dupin_extension_install::Lock>,
+    },
+    /// Forgets the grants of a package `dupin ext` removed or installed afresh, which the
+    /// running launcher holds open.
+    ExtensionGrantsForget {
+        package: String,
+    },
+    /// The scopes the running launcher grants each package, for `dupin ext list`.
+    ExtensionGrantsList {
+        packages: Vec<String>,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SyncAction {
+    Status {},
+    /// Runs a full pass now.
+    Now {},
+    /// Creates a vault in the folder. Without a passphrase one is generated and returned once.
+    On {
+        folder: Option<String>,
+        passphrase: Option<String>,
+    },
+    Join {
+        folder: Option<String>,
+        passphrase: Option<String>,
+    },
+    Off {},
+    RemoveDevice {
+        device: String,
+    },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,7 +125,12 @@ impl Call {
             Command::SnapshotsOpen { .. } => "snapshots open",
             Command::SnapshotsClose {} => "snapshots close",
             Command::ExtensionDataDelete { .. } => "extension data delete",
+            Command::Sync { .. } => "sync",
             Command::ConfigOverlay {} => "config overlay",
+            Command::ExtensionLockGet {} => "extension lock get",
+            Command::ExtensionLockSet { .. } => "extension lock set",
+            Command::ExtensionGrantsForget { .. } => "extension grants forget",
+            Command::ExtensionGrantsList { .. } => "extension grants list",
         };
         crate::trace::control(kind, result.is_ok());
         let _ = self.reply.try_send(Reply {
@@ -137,11 +181,37 @@ pub fn validate(request: &Request) -> io::Result<()> {
         Command::Pick { values } if values.is_empty() || values.len() > 1000 => {
             Err(io::Error::other("pick requires 1..1000 values"))
         }
-        Command::ExtensionDataDelete { package }
+        Command::ExtensionDataDelete { package } | Command::ExtensionGrantsForget { package }
             if dupin_broker::PackageId::new(package.as_str()).is_err() =>
         {
             Err(io::Error::other("invalid package ID"))
         }
+        Command::ExtensionGrantsList { packages }
+            if packages.len() > dupin_extension_install::MAX_PACKAGES
+                || packages
+                    .iter()
+                    .any(|package| dupin_broker::PackageId::new(package.as_str()).is_err()) =>
+        {
+            Err(io::Error::other(format!(
+                "grants list requires at most {} valid package IDs",
+                dupin_extension_install::MAX_PACKAGES
+            )))
+        }
+        Command::ExtensionLockSet { lock } => lock
+            .validate()
+            .map_err(|error| io::Error::other(error.to_string())),
+        Command::Sync {
+            action: SyncAction::On { folder, passphrase } | SyncAction::Join { folder, passphrase },
+        } if folder
+            .as_ref()
+            .is_some_and(|folder| folder.is_empty() || folder.len() > 4096)
+            || passphrase.as_ref().is_some_and(|text| text.len() > 1024) =>
+        {
+            Err(io::Error::other("invalid sync folder or passphrase"))
+        }
+        Command::Sync {
+            action: SyncAction::RemoveDevice { device },
+        } if device.len() != 32 => Err(io::Error::other("invalid device ID")),
         _ => Ok(()),
     }
 }
@@ -447,6 +517,61 @@ mod tests {
         }
     }
     use super::*;
+    #[test]
+    fn extension_messages_name_valid_packages_and_stay_bounded() {
+        let check = |command| validate(&Request { id: 1, command });
+        assert!(
+            check(Command::ExtensionGrantsForget {
+                package: "notes".into()
+            })
+            .is_ok()
+        );
+        assert!(
+            check(Command::ExtensionGrantsForget {
+                package: String::new()
+            })
+            .is_err()
+        );
+        assert!(
+            check(Command::ExtensionGrantsList {
+                packages: vec!["notes".into(), "bundled:clipboard".into()]
+            })
+            .is_ok()
+        );
+        assert!(
+            check(Command::ExtensionGrantsList {
+                packages: vec!["x".into(); dupin_extension_install::MAX_PACKAGES + 1]
+            })
+            .is_err()
+        );
+        assert!(
+            check(Command::ExtensionGrantsList {
+                packages: vec!["a\nb".into()]
+            })
+            .is_err()
+        );
+        let mut lock = dupin_extension_install::Lock::new();
+        assert!(
+            check(Command::ExtensionLockSet {
+                lock: Box::new(lock.clone())
+            })
+            .is_ok()
+        );
+        let entry = serde_json::from_value(serde_json::json!({
+            "source": "/x", "content_hash": "blake3:00", "installed_at": "2026-01-01T00:00:00Z",
+            "version": "1", "keyword": "x"
+        }))
+        .unwrap();
+        lock.packages.insert("../escape".into(), entry);
+        assert!(check(Command::ExtensionLockSet { lock: Box::new(lock) }).is_err());
+        let newer = serde_json::from_value(serde_json::json!({ "version": 2 })).unwrap();
+        assert!(
+            check(Command::ExtensionLockSet {
+                lock: Box::new(newer)
+            })
+            .is_err()
+        );
+    }
     fn subprocess(mode: &str, dir: &std::path::Path, tmp: &str) {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "control::tests::disposable_process", "--nocapture"])

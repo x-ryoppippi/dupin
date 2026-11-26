@@ -256,6 +256,32 @@ impl Ui {
         self.restart(Restart::Requested, tx);
     }
 
+    pub(super) fn run_app_command(&mut self, command: dupin_core::AppCommand, tx: &mut Tx) {
+        use crate::update::Status;
+        if command == dupin_core::AppCommand::Relaunch {
+            return self.relaunch(tx);
+        }
+        let status = self.updater.status();
+        if matches!(status, Status::Ready(_)) {
+            return self.relaunch(tx);
+        }
+        let version = self.updater.version().to_owned();
+        if !status.can_check() {
+            return self.show_notice(status.outcome(&version), tx);
+        }
+        // The check ends on the updater's own thread; wait for it off this one.
+        let updater = self.updater.clone();
+        let me = self.me.clone();
+        std::thread::spawn(move || {
+            let outcome = match updater.check_and_wait(std::time::Duration::from_secs(10 * 60)) {
+                Some(Status::Ready(_)) => return me.update(|ui, tx| ui.relaunch(tx)),
+                Some(status) => status.outcome(&version),
+                None => "Dupin couldn't finish checking for updates.".into(),
+            };
+            me.update(move |ui, tx| ui.show_notice(outcome, tx));
+        });
+    }
+
     pub fn resume_restart(&mut self, tx: &mut Tx) {
         if let Some(request) = self.relaunch.take() {
             self.restart(request, tx);

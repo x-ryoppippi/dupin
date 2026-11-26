@@ -23,6 +23,26 @@ pub unsafe fn is_key_window(ns_view: NonNull<c_void>) -> bool {
     view_is_key(view)
 }
 
+/// Move and size the view's window to the frame AppKit saved under `name`, if it saved one, and
+/// save it there again whenever it moves or resizes. False when the window has no such name.
+///
+/// # Safety
+///
+/// `ns_view` must point to a live AppKit `NSView` on the main thread.
+pub unsafe fn autosave_frame(ns_view: NonNull<c_void>, name: &str) -> bool {
+    let Some(_main) = MainThreadMarker::new() else {
+        return false;
+    };
+    // SAFETY: The caller guarantees a live NSView for this borrow.
+    let view = unsafe { ns_view.cast::<NSView>().as_ref() };
+    let Some(window) = view.window() else {
+        return false;
+    };
+    let name = NSString::from_str(name);
+    window.setFrameUsingName(&name);
+    window.setFrameAutosaveName(&name)
+}
+
 pub(crate) fn view_is_key(view: &NSView) -> bool {
     view.window().is_some_and(|window| window.isKeyWindow())
 }

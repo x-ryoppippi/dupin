@@ -26,4 +26,8 @@ extend-exclude = [
 	# Unicode and CLDR data, and the fixtures that list it, in its own spelling.
 	"extensions/emoji/catalogue.ts",
 	"extensions/emoji/fixtures/*.json",
+	# Word lists for passphrases, as published.
+	"crates/dupin-sync/data/*.txt",
+	# Licence texts, verbatim, typos included.
+	"packaging/licences/CC-BY-3.0-US.txt",
 ]

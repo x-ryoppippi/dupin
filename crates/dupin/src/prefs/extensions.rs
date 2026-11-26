@@ -533,7 +533,7 @@ fn os_access_to_request(bridge: &Bridge, id: &PackageId) -> Vec<OsPermission> {
     permissions
 }
 
-fn pick(kind: dupin_mac::pick::Kind, message: &str) -> Option<std::path::PathBuf> {
+pub(super) fn pick(kind: dupin_mac::pick::Kind, message: &str) -> Option<std::path::PathBuf> {
     if cfg!(test) || rune::tooling::is_headless() {
         return None;
     }

@@ -11,10 +11,14 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::crypto::{ID_LEN, KEY_TAG_LEN, KeySource, NONCE_LEN, NamespaceKeys, StateKeys, TAG_LEN, VERSION};
-use crate::device::{Device, DeviceId, Stamp, hardware_hash};
+use crate::device::{COUNTER_BITS, Device, DeviceId, Stamp, hardware_hash};
 use crate::fs::{Staged, create_private_dir, remove_if_exists, sync_dir};
 use crate::key::{DataKey, KeyProvider};
 use crate::{Error, MAX_BLOBS_PER_RECORD, MAX_PAGE, hex, secret, unhex, validate_namespace};
+
+mod sync;
+
+pub use sync::{Imported, Version};
 
 const RECORD_MAGIC: &[u8; 4] = b"DUPR";
 const BLOB_MAGIC: &[u8; 4] = b"DUPB";
@@ -67,6 +71,9 @@ impl Limits {
     const MAX_ENTRIES: usize = 100_000;
     pub const MAX_ITEM_BYTES: u64 = 512 * 1024 * 1024;
     pub const MAX_TOTAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+    /// The item limit of a namespace that syncs, so one large item can't stall a consumer
+    /// sync tool.
+    pub const MAX_SYNC_ITEM_BYTES: u64 = 64 * 1024 * 1024;
 
     fn validate(&self) -> Result<(), Error> {
         if !(1..=Self::MAX_ENTRIES).contains(&self.max_entries) {
@@ -299,9 +306,13 @@ struct Header {
     clear_before: Option<Stamp>,
     body_len: u64,
     blobs: Vec<BlobRef>,
+    /// The owner's logical key, for an upserted record, so a re-seal under another key source
+    /// can derive the record's ID there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Meta {
     stamp: Stamp,
     created_at: u64,
@@ -333,6 +344,58 @@ impl Paths {
     }
 }
 
+/// One epoch of a sync vault's key: a namespace opened with [`Storage::open_synced`] is sealed
+/// under keys derived from it, so its files can be copied to a synced folder as they are.
+#[derive(Clone)]
+pub struct VaultKey {
+    id: [u8; ID_LEN],
+    epoch: u32,
+    key: DataKey,
+}
+
+impl VaultKey {
+    pub fn new(id: [u8; ID_LEN], epoch: u32, key: DataKey) -> Result<Self, Error> {
+        if epoch == 0 {
+            return Err(Error::Key("a vault key epoch starts at 1".into()));
+        }
+        Ok(Self { id, epoch, key })
+    }
+
+    pub fn id(&self) -> [u8; ID_LEN] {
+        self.id
+    }
+
+    pub fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
+    pub fn key(&self) -> &DataKey {
+        &self.key
+    }
+
+    /// The name a synced folder knows `namespace` by under this key, as
+    /// [`Store::namespace_id`] gives for a namespace open under it.
+    pub fn namespace_id(&self, namespace: &str) -> String {
+        hex(NamespaceKeys::derive(&self.key, self.source(), namespace).namespace_id())
+    }
+
+    fn source(&self) -> KeySource {
+        KeySource::Vault {
+            id: self.id,
+            epoch: self.epoch,
+        }
+    }
+}
+
+impl fmt::Debug for VaultKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VaultKey")
+            .field("id", &hex(&self.id))
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The root of all namespaces, usually `<data dir>/storage`. Asks its key provider once, and
 /// keeps the device's state in `storage.state` beside the root.
 pub struct Storage {
@@ -342,6 +405,8 @@ pub struct Storage {
     clock: Arc<dyn Clock>,
     hardware: Option<String>,
     device: Mutex<Option<Arc<Device>>>,
+    /// Vault keys this Mac holds, whose files any open re-seals under the key it opens with.
+    vaults: Mutex<Vec<VaultKey>>,
 }
 
 impl Storage {
@@ -353,6 +418,7 @@ impl Storage {
             clock: Arc::new(SystemClock),
             hardware: None,
             device: Mutex::new(None),
+            vaults: Mutex::new(Vec::new()),
         }
     }
 
@@ -367,6 +433,22 @@ impl Storage {
     pub fn with_hardware_id(mut self, identity: &[u8]) -> Self {
         self.hardware = Some(hardware_hash(identity));
         self
+    }
+
+    /// Lets every later open re-seal files sealed under `key` instead of skipping them: a
+    /// namespace that stops syncing comes back under the device key, and one that moves to
+    /// another vault or epoch moves under that key.
+    pub fn hold_vault_key(&self, key: VaultKey) {
+        let mut vaults = self.vaults.lock().unwrap_or_else(|poison| poison.into_inner());
+        vaults.retain(|held| held.source() != key.source());
+        vaults.push(key);
+    }
+
+    fn held_vaults(&self) -> Vec<VaultKey> {
+        self.vaults
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
     }
 
     fn data_key(&self) -> Result<DataKey, Error> {
@@ -396,6 +478,7 @@ impl Storage {
         if let Some(device) = &*device {
             return Ok(device.clone());
         }
+        create_private_dir(&self.dir)?;
         let loaded = Arc::new(Device::load(
             self.state_path(),
             StateKeys::derive(data_key),
@@ -404,6 +487,43 @@ impl Storage {
         )?);
         *device = Some(loaded.clone());
         Ok(loaded)
+    }
+
+    /// This device's ID, loading `storage.state` if no namespace has yet.
+    pub fn device_id(&self) -> Result<DeviceId, Error> {
+        Ok(self.device(&self.data_key()?)?.id())
+    }
+
+    /// Gives this device a new ID and remembers the old one, for a data directory that turns
+    /// out to be writing as another machine. Open stores stamp later writes with the new ID.
+    pub fn remint_device_id(&self) -> Result<DeviceId, Error> {
+        self.device(&self.data_key()?)?.remint()
+    }
+
+    /// The device ID this one replaced, if it was reminted.
+    pub fn previous_device_id(&self) -> Result<Option<DeviceId>, Error> {
+        Ok(self.device(&self.data_key()?)?.previous_id())
+    }
+
+    /// The last hybrid logical clock value this device used or observed.
+    pub fn clock_hlc(&self) -> Result<u64, Error> {
+        Ok(self.device(&self.data_key()?)?.hlc())
+    }
+
+    /// Moves the device clock back to the wall clock when it is more than `max_drift` ahead,
+    /// because the wall clock was wrong and has been corrected; returns whether it did.
+    pub fn reset_clock_if_ahead(&self, max_drift: Duration) -> Result<bool, Error> {
+        let now = unix_millis(self.clock.now());
+        self.device(&self.data_key()?)?.reset_if_ahead(now, max_drift)
+    }
+
+    /// The stamp this device left syncing `namespace` at, if it did.
+    pub fn left_at(&self, namespace: &str) -> Result<Option<Stamp>, Error> {
+        Ok(self.device(&self.data_key()?)?.left_at(namespace))
+    }
+
+    pub fn set_left_at(&self, namespace: &str, stamp: Option<Stamp>) -> Result<(), Error> {
+        self.device(&self.data_key()?)?.set_left_at(namespace, stamp)
     }
 
     /// A namespace's key check also passes when the namespace is new, so it can't prove the
@@ -431,9 +551,28 @@ impl Storage {
         Ok(proved || !unjudged)
     }
 
-    /// Opens a namespace, repairs what an interrupted write left behind and applies `limits`.
-    /// Only one `Store` per namespace may be open at a time; share it with an `Arc`.
+    /// Opens a namespace that stays on this device, sealed under the data key, repairs what an
+    /// interrupted write left behind and applies `limits`. Files sealed under a vault key this
+    /// storage holds are re-sealed under the data key. Only one `Store` per namespace may be
+    /// open at a time; share it with an `Arc`.
     pub fn open(&self, namespace: &str, limits: Limits) -> Result<Store, Error> {
+        self.open_as(namespace, limits, None)
+    }
+
+    /// Opens a namespace that syncs, sealed under `vault`. Files sealed under the data key or
+    /// another vault key this storage holds are re-sealed under it. Deleting keeps tombstones,
+    /// a record whose blob has not arrived is kept as pending, and the item limit is at most
+    /// [`Limits::MAX_SYNC_ITEM_BYTES`].
+    pub fn open_synced(&self, namespace: &str, limits: Limits, vault: &VaultKey) -> Result<Store, Error> {
+        if limits.max_item_bytes > Limits::MAX_SYNC_ITEM_BYTES {
+            return Err(Error::InvalidLimits(
+                "max_item_bytes of a synced namespace can't exceed 64 MiB",
+            ));
+        }
+        self.open_as(namespace, limits, Some(vault))
+    }
+
+    fn open_as(&self, namespace: &str, limits: Limits, vault: Option<&VaultKey>) -> Result<Store, Error> {
         validate_namespace(namespace)?;
         limits.validate()?;
         let dir = self.dir.join(namespace);
@@ -444,7 +583,20 @@ impl Storage {
         }
         let lock = lock_namespace(&dir)?;
         let data_key = self.data_key()?;
-        let keys = NamespaceKeys::derive(&data_key, KeySource::Device, namespace);
+        let keys = match vault {
+            Some(vault) => NamespaceKeys::derive(&vault.key, vault.source(), namespace),
+            None => NamespaceKeys::derive(&data_key, KeySource::Device, namespace),
+        };
+        let synced = vault.is_some();
+        let mut others: Vec<NamespaceKeys> = self
+            .held_vaults()
+            .iter()
+            .filter(|held| held.source() != keys.source())
+            .map(|held| NamespaceKeys::derive(&held.key, held.source(), namespace))
+            .collect();
+        if synced {
+            others.push(NamespaceKeys::derive(&data_key, KeySource::Device, namespace));
+        }
         let mut report = OpenReport {
             abandoned_writes: clear_dir(&paths.tmp)?,
             ..OpenReport::default()
@@ -452,6 +604,7 @@ impl Storage {
 
         let mut found = Vec::new();
         let mut unreadable = Vec::new();
+        let mut foreign = Vec::new();
         for entry in fs::read_dir(&paths.records)? {
             let path = entry?.path();
             let id = path
@@ -465,7 +618,12 @@ impl Storage {
             };
             match read_header(&keys, &path, &id) {
                 Ok(Some(meta)) => found.push((id, meta)),
-                Ok(None) => report.skipped_records += 1,
+                Ok(None) => match file_source(RECORD_MAGIC, &path)? {
+                    Some(source) if others.iter().any(|other| other.source() == source) => {
+                        foreign.push((id, path, source));
+                    }
+                    _ => report.skipped_records += 1,
+                },
                 Err(Error::Corrupt(_)) => unreadable.push(path),
                 Err(error) => return Err(error),
             }
@@ -477,23 +635,44 @@ impl Storage {
         if write_check {
             write_key_check(&keys, &check)?;
         }
-        if let Some(newest) = found.iter().map(|(_, meta)| meta.stamp.hlc).max() {
-            device.observe(newest)?;
-        }
 
         report.corrupt_records += unreadable.len();
         for path in unreadable {
             remove_if_exists(&path)?;
         }
 
+        if !foreign.is_empty() {
+            let reseal = Reseal {
+                keys: &keys,
+                paths: &paths,
+            };
+            report.skipped_records += reseal.run(&others, foreign, &mut found)?;
+            if !matches!(read_key_check(&keys, &check)?, KeyCheck::Opens) {
+                write_key_check(&keys, &check)?;
+            }
+        }
+        if let Some(newest) = found.iter().map(|(_, meta)| meta.stamp.hlc).max() {
+            device.observe(newest)?;
+        }
+
         // A clear or delete that stopped part way finishes now, the cleared records before
-        // the marker and tombstones that stand for them.
+        // the marker and, where the namespace doesn't sync, tombstones that stand for them.
         let clear_before = found.iter().filter_map(|(_, meta)| meta.clear_before).max();
         let (gone, live): (Vec<_>, Vec<_>) = found
             .into_iter()
             .partition(|(_, meta)| meta.deleted || clear_before.is_some_and(|before| meta.stamp < before));
         let (markers, cleared): (Vec<_>, Vec<_>) = gone.into_iter().partition(|(_, meta)| meta.deleted);
-        for (id, _) in cleared.iter().chain(&markers) {
+        let mut dead = HashMap::new();
+        for (id, meta) in markers {
+            let superseded =
+                clear_before.is_some_and(|before| meta.stamp < before) && meta.clear_before.is_none();
+            if synced && !superseded {
+                dead.insert(id, meta);
+            } else {
+                remove_if_exists(&paths.records.join(id.file_name()))?;
+            }
+        }
+        for (id, _) in &cleared {
             remove_if_exists(&paths.records.join(id.file_name()))?;
         }
 
@@ -529,16 +708,26 @@ impl Storage {
         // A skipped record's blobs can't be told apart from this key's, so while any record is
         // skipped no blob found now is ever removed, even once no record here uses it.
         let kept = match report.skipped_records {
-            0 => HashSet::new(),
+            0 => {
+                stray_blobs.extend(
+                    skipped_blobs
+                        .iter()
+                        .map(|handle| paths.blobs.join(handle.file_name())),
+                );
+                HashSet::new()
+            }
             _ => blobs.keys().copied().chain(skipped_blobs).collect(),
         };
         let mut state = State {
             limits,
+            synced,
             records: HashMap::new(),
             order: BTreeSet::new(),
             blobs,
             kept,
             total: 0,
+            dead,
+            pending: HashMap::new(),
         };
         for (id, meta) in live {
             let intact = meta.blobs.iter().all(|blob| {
@@ -547,15 +736,12 @@ impl Storage {
                     .get(&blob.handle)
                     .is_some_and(|entry| entry.len == blob.len)
             });
-            if !intact {
+            if !intact && !synced {
                 report.corrupt_records += 1;
                 remove_if_exists(&paths.records.join(id.file_name()))?;
                 continue;
             }
-            for blob in &meta.blobs {
-                state.blobs.get_mut(&blob.handle).expect("checked above").refs += 1;
-            }
-            state.insert(id, meta);
+            state.add_live(id, meta);
         }
 
         let State { blobs, kept, .. } = &mut state;
@@ -614,6 +800,110 @@ impl Storage {
         fs::remove_dir_all(&dir)?;
         sync_dir(&self.dir)?;
         Ok(())
+    }
+}
+
+/// Moves records sealed under another key this Mac holds under the namespace's own key. A
+/// record keeps its stamp; an upserted one moves to the ID its logical key has under the new
+/// key. Nothing that fails to open is deleted: it stays, skipped, for a later open.
+struct Reseal<'a> {
+    keys: &'a NamespaceKeys,
+    paths: &'a Paths,
+}
+
+impl Reseal<'_> {
+    /// Returns how many records were left in place.
+    fn run(
+        &self,
+        others: &[NamespaceKeys],
+        foreign: Vec<(RecordId, PathBuf, KeySource)>,
+        found: &mut Vec<(RecordId, Meta)>,
+    ) -> Result<usize, Error> {
+        let mut left = 0;
+        let mut finished: HashMap<KeySource, bool> = HashMap::new();
+        for (id, path, source) in foreign {
+            let from = others
+                .iter()
+                .find(|other| other.source() == source)
+                .expect("only held sources are collected");
+            let moved = self.move_one(from, &id, &path, found)?;
+            if !moved {
+                left += 1;
+            }
+            let all = finished.entry(source).or_insert(true);
+            *all &= moved;
+        }
+        // Blobs under a source whose every record moved belong to no one now.
+        for entry in fs::read_dir(&self.paths.blobs)? {
+            let path = entry?.path();
+            if let Some(source) = file_source(BLOB_MAGIC, &path)?
+                && finished.get(&source) == Some(&true)
+            {
+                remove_if_exists(&path)?;
+            }
+        }
+        Ok(left)
+    }
+
+    fn move_one(
+        &self,
+        from: &NamespaceKeys,
+        id: &RecordId,
+        path: &Path,
+        found: &mut Vec<(RecordId, Meta)>,
+    ) -> Result<bool, Error> {
+        let Ok(bytes) = fs::read(path) else {
+            return Ok(false);
+        };
+        let Ok(opened) = open_record(from, id, &bytes) else {
+            return Ok(false);
+        };
+        let mut blobs = Vec::with_capacity(opened.header.blobs.len());
+        for blob in &opened.header.blobs {
+            let blob_path = self.paths.blobs.join(blob.handle.file_name());
+            let Some(plain) = fs::read(&blob_path)
+                .ok()
+                .and_then(|bytes| open_blob(from, &blob.handle, &bytes).ok())
+            else {
+                return Ok(false);
+            };
+            blobs.push(plain);
+        }
+        let target = match (&opened.header.key, *id == RecordId::CLEAR_MARKER) {
+            (Some(key), false) => RecordId(self.keys.key_id(key)),
+            _ => *id,
+        };
+        let existing = found.iter().position(|(found_id, _)| *found_id == target);
+        if existing.is_some_and(|index| found[index].1.stamp >= opened.header.stamp) {
+            remove_if_exists(path)?;
+            return Ok(true);
+        }
+        let mut refs = Vec::with_capacity(blobs.len());
+        for plain in &blobs {
+            let handle = BlobHandle(self.keys.blob_handle(plain));
+            let dest = self.paths.blobs.join(handle.file_name());
+            if file_source(BLOB_MAGIC, &dest)? != Some(self.keys.source()) {
+                Staged::write(&self.paths.tmp, &seal_blob(self.keys, &handle, plain)?)?.commit(&dest)?;
+            }
+            refs.push(BlobRef {
+                handle,
+                len: plain.len() as u64,
+            });
+        }
+        let header = Header {
+            blobs: refs,
+            ..opened.header
+        };
+        let file = RecordFile::encode(self.keys, &target, &header, &opened.body)?;
+        Staged::write(&self.paths.tmp, &file)?.commit(&self.paths.records.join(target.file_name()))?;
+        if target != *id {
+            remove_if_exists(path)?;
+        }
+        if let Some(index) = existing {
+            found.swap_remove(index);
+        }
+        found.push((target, Meta::from(&header)));
+        Ok(true)
     }
 }
 
@@ -902,27 +1192,16 @@ fn read_header(keys: &NamespaceKeys, path: &Path, id: &RecordId) -> Result<Optio
         (NONCE_LEN + TAG_LEN) as u64 + header.body_len
     };
     let expected = (RECORD_PREFIX_LEN + NONCE_LEN + header_len) as u64 + body;
-    let marker = *id == RecordId::CLEAR_MARKER;
-    let consistent = header.stamp.device == origin
-        && header.blobs.len() <= MAX_BLOBS_PER_RECORD
-        && (!header.deleted || (header.body_len == 0 && header.blobs.is_empty()))
-        && marker == header.clear_before.is_some()
-        && (!marker || header.deleted);
-    if file_len != expected || !consistent {
+    if file_len != expected || !header_consistent(&header, &origin, id) {
         return Err(corrupt());
     }
-    Ok(Some(Meta {
-        stamp: header.stamp,
-        created_at: header.created_at,
-        deleted: header.deleted,
-        clear_before: header.clear_before,
-        body_len: header.body_len,
-        blobs: header.blobs,
-    }))
+    Ok(Some(Meta::from(&header)))
 }
 
 struct State {
     limits: Limits,
+    /// Deletions keep tombstones and records may wait for a blob only where the namespace syncs.
+    synced: bool,
     records: HashMap<RecordId, Meta>,
     /// Every record by `(stamp, id)`: the order `list` pages in and limits evict from.
     order: BTreeSet<(Stamp, RecordId)>,
@@ -930,6 +1209,11 @@ struct State {
     /// Blob files a skipped record may use, never removed by this store.
     kept: HashSet<BlobHandle>,
     total: u64,
+    /// Tombstones and the clear marker a synced namespace keeps for other devices.
+    dead: HashMap<RecordId, Meta>,
+    /// Versions of a synced namespace waiting for a blob that has not arrived. They hold
+    /// references to the blobs that have.
+    pending: HashMap<RecordId, Meta>,
 }
 
 impl State {
@@ -937,6 +1221,37 @@ impl State {
         self.total += meta.body_len;
         self.order.insert((meta.stamp, id));
         self.records.insert(id, meta);
+    }
+
+    /// Adds a live version whose blobs are counted here, as pending while one is missing.
+    fn add_live(&mut self, id: RecordId, meta: Meta) {
+        self.count_refs(&meta);
+        self.place(id, meta);
+    }
+
+    fn count_refs(&mut self, meta: &Meta) {
+        for blob in &meta.blobs {
+            if let Some(entry) = self.blobs.get_mut(&blob.handle) {
+                entry.refs += 1;
+            }
+        }
+    }
+
+    /// Adds a live version whose blob references are already counted.
+    fn place(&mut self, id: RecordId, meta: Meta) {
+        if self.missing_blobs(&meta) {
+            self.pending.insert(id, meta);
+        } else {
+            self.insert(id, meta);
+        }
+    }
+
+    fn missing_blobs(&self, meta: &Meta) -> bool {
+        meta.blobs.iter().any(|blob| {
+            self.blobs
+                .get(&blob.handle)
+                .is_none_or(|entry| entry.len != blob.len)
+        })
     }
 
     fn forget(&mut self, id: &RecordId) -> Option<Meta> {
@@ -948,6 +1263,33 @@ impl State {
 
     fn oldest(&self) -> Option<RecordId> {
         self.order.first().map(|(_, id)| *id)
+    }
+
+    /// The version stored for `id`, whatever it is.
+    fn current(&self, id: &RecordId) -> Option<&Meta> {
+        self.records
+            .get(id)
+            .or_else(|| self.pending.get(id))
+            .or_else(|| self.dead.get(id))
+    }
+
+    fn clear_before(&self) -> Option<Stamp> {
+        self.dead
+            .get(&RecordId::CLEAR_MARKER)
+            .and_then(|meta| meta.clear_before)
+    }
+}
+
+impl From<&Header> for Meta {
+    fn from(header: &Header) -> Self {
+        Self {
+            stamp: header.stamp,
+            created_at: header.created_at,
+            deleted: header.deleted,
+            clear_before: header.clear_before,
+            body_len: header.body_len,
+            blobs: header.blobs.clone(),
+        }
     }
 }
 
@@ -993,6 +1335,11 @@ impl Store {
     pub fn set_limits(&self, limits: Limits) -> Result<usize, Error> {
         limits.validate()?;
         let mut state = self.state();
+        if state.synced && limits.max_item_bytes > Limits::MAX_SYNC_ITEM_BYTES {
+            return Err(Error::InvalidLimits(
+                "max_item_bytes of a synced namespace can't exceed 64 MiB",
+            ));
+        }
         state.limits = limits;
         self.enforce(&mut state)
     }
@@ -1020,7 +1367,7 @@ impl Store {
     /// namespace are shared, not written again. The plaintext buffers are zeroized before
     /// this returns.
     pub fn put(&self, record: NewRecord) -> Result<Record, Error> {
-        self.write(RecordId::random()?, record, false)
+        self.write(RecordId::random()?, None, record, false)
     }
 
     /// Like [`Store::put`], but refuses a record the namespace has no room for with
@@ -1028,22 +1375,29 @@ impl Store {
     /// check and the write hold one lock, so concurrent writers can't overrun the limits
     /// together. Records past `max_age` go first and don't count against the room.
     pub fn put_within_limits(&self, record: NewRecord) -> Result<Record, Error> {
-        self.write(RecordId::random()?, record, true)
+        self.write(RecordId::random()?, None, record, true)
     }
 
     /// Stores `record` as the record for the owner's logical `key`, replacing the one stored
-    /// before, which keeps its creation time. The key itself is never written.
+    /// before, which keeps its creation time. The key is written only inside the sealed
+    /// header, so a re-seal under another key can move the record to that key's ID.
     pub fn upsert(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
-        self.write(self.key_id(key), record, false)
+        self.write(self.key_id(key), Some(key), record, false)
     }
 
     /// Like [`Store::upsert`], but refuses a record there is no room for, as
     /// [`Store::put_within_limits`] does. The record it replaces makes room for it.
     pub fn upsert_within_limits(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
-        self.write(self.key_id(key), record, true)
+        self.write(self.key_id(key), Some(key), record, true)
     }
 
-    fn write(&self, id: RecordId, record: NewRecord, within_limits: bool) -> Result<Record, Error> {
+    fn write(
+        &self,
+        id: RecordId,
+        key: Option<&str>,
+        record: NewRecord,
+        within_limits: bool,
+    ) -> Result<Record, Error> {
         let NewRecord { data, blobs } = record;
         let blobs: Vec<Zeroizing<Vec<u8>>> = blobs.into_iter().map(Zeroizing::new).collect();
         if blobs.len() > MAX_BLOBS_PER_RECORD {
@@ -1096,14 +1450,10 @@ impl Store {
         let mut written = HashMap::new();
         for (blob, &handle) in blobs.iter().zip(&handles) {
             let len = blob.len() as u64;
-            if !state.blobs.contains_key(&handle) && !written.contains_key(&handle) {
-                let aad = self.keys.aad("blob", &[&handle.0]);
-                let (nonce, ciphertext) = self.keys.seal_blob(&handle.0, &aad, blob)?;
-                Staged::write(
-                    &self.paths.tmp,
-                    &framed(BLOB_MAGIC, self.keys.source(), &[&nonce, &ciphertext]),
-                )?
-                .commit(&self.paths.blobs.join(handle.file_name()))?;
+            let stored = state.blobs.get(&handle).is_some_and(|entry| entry.len == len);
+            if !stored && !written.contains_key(&handle) {
+                Staged::write(&self.paths.tmp, &seal_blob(&self.keys, &handle, blob)?)?
+                    .commit(&self.paths.blobs.join(handle.file_name()))?;
                 written.insert(handle, len);
             }
             refs.push(BlobRef { handle, len });
@@ -1112,7 +1462,11 @@ impl Store {
 
         let now = unix_millis(self.clock.now());
         let stamp = self.device.stamp(now)?;
-        let created_at = state.records.get(&id).map_or(now, |meta| meta.created_at);
+        let created_at = state
+            .records
+            .get(&id)
+            .or_else(|| state.pending.get(&id))
+            .map_or(now, |meta| meta.created_at);
         let header = Header {
             stamp,
             created_at,
@@ -1120,6 +1474,7 @@ impl Store {
             clear_before: None,
             body_len: body.len() as u64,
             blobs: refs.clone(),
+            key: key.map(str::to_owned),
         };
         let file = RecordFile::encode(&self.keys, &id, &header, &body)?;
         let staged = Staged::write(&self.paths.tmp, &file)?;
@@ -1131,30 +1486,17 @@ impl Store {
         staged.commit(&self.paths.records.join(id.file_name()))?;
 
         for (handle, len) in written {
-            state.blobs.insert(handle, BlobEntry { len, refs: 0 });
+            if let Some(old) = state.blobs.insert(handle, BlobEntry { len, refs: 0 }) {
+                state.total -= old.len;
+            }
             state.total += len;
+            self.recount_pending_refs(&mut state, &handle);
         }
-        for blob in &refs {
-            state
-                .blobs
-                .get_mut(&blob.handle)
-                .expect("written or already stored")
-                .refs += 1;
-        }
-        if let Some(replaced) = state.forget(&id) {
-            self.release(&mut state, replaced.blobs)?;
-        }
-        state.insert(
-            id,
-            Meta {
-                stamp,
-                created_at,
-                deleted: false,
-                clear_before: None,
-                body_len: header.body_len,
-                blobs: refs.clone(),
-            },
-        );
+        let meta = Meta::from(&header);
+        state.count_refs(&meta);
+        self.drop_version(&mut state, &id)?;
+        state.place(id, meta);
+        self.promote_pending(&mut state);
         let record = Record {
             id,
             data: serde_json::from_slice(&body)?,
@@ -1254,54 +1596,63 @@ impl Store {
         }
         let mut bytes = Vec::with_capacity(expected as usize);
         file.read_to_end(&mut bytes)?;
-        let (source, nonce, ciphertext) = parse_sealed(BLOB_MAGIC, &bytes).ok_or_else(corrupt)?;
-        if source != Some(self.keys.source()) {
-            return Err(corrupt());
-        }
-        let aad = self.keys.aad("blob", &[&handle.0]);
-        self.keys
-            .open(&nonce, &aad, ciphertext.to_vec())
-            .ok_or_else(corrupt)
+        open_blob(&self.keys, handle, &bytes)
     }
 
-    /// Writes a tombstone in the record's place, then, as this namespace doesn't sync, drops
-    /// it as soon as it is durable.
+    /// Writes a tombstone in the record's place. A namespace that syncs keeps it for the
+    /// other devices; one that doesn't drops it as soon as it is durable.
     pub fn delete(&self, id: &RecordId) -> Result<bool, Error> {
         let mut state = self.state();
-        let Some(created_at) = state.records.get(id).map(|meta| meta.created_at) else {
+        let Some(created_at) = state
+            .records
+            .get(id)
+            .or_else(|| state.pending.get(id))
+            .map(|meta| meta.created_at)
+        else {
             return Ok(false);
         };
-        self.mark(id, created_at, false)?;
+        let tombstone = self.mark(id, created_at, false)?;
         #[cfg(test)]
         if self.crash_after_marking.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(true);
         }
-        self.remove(&mut state, id)?;
+        if state.synced {
+            self.drop_version(&mut state, id)?;
+            state.dead.insert(*id, tombstone);
+        } else {
+            self.remove(&mut state, id)?;
+        }
         Ok(true)
     }
 
-    /// Writes a clear marker that every version stored so far is older than, deletes those
-    /// versions, then, as this namespace doesn't sync, drops the marker.
+    /// Writes a clear marker that every version stored so far is older than and deletes those
+    /// versions. A namespace that syncs keeps the marker for the other devices; one that
+    /// doesn't drops it.
     pub fn clear(&self) -> Result<(), Error> {
         let mut state = self.state();
         let now = unix_millis(self.clock.now());
         let marker = RecordId::CLEAR_MARKER;
-        let before = self.mark(&marker, now, true)?;
+        let meta = self.mark(&marker, now, true)?;
         #[cfg(test)]
         if self.crash_after_marking.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
-        while let Some(id) = state.oldest().filter(|id| state.records[id].stamp < before) {
-            self.remove(&mut state, &id)?;
+        let before = meta.stamp;
+        if state.synced {
+            state.dead.insert(marker, meta);
+            self.apply_clear(&mut state, before)?;
+        } else {
+            while let Some(id) = state.oldest().filter(|id| state.records[id].stamp < before) {
+                self.remove(&mut state, &id)?;
+            }
+            remove_if_exists(&self.paths.records.join(marker.file_name()))?;
         }
-        remove_if_exists(&self.paths.records.join(marker.file_name()))?;
         sync_dir(&self.paths.records)?;
         Ok(())
     }
 
-    /// Durably writes a tombstone, or with `clear` the clear marker, at `id`; returns its
-    /// stamp.
-    fn mark(&self, id: &RecordId, created_at: u64, clear: bool) -> Result<Stamp, Error> {
+    /// Durably writes a tombstone, or with `clear` the clear marker, at `id`.
+    fn mark(&self, id: &RecordId, created_at: u64, clear: bool) -> Result<Meta, Error> {
         let stamp = self.device.stamp(unix_millis(self.clock.now()))?;
         let header = Header {
             stamp,
@@ -1310,10 +1661,11 @@ impl Store {
             clear_before: clear.then_some(stamp),
             body_len: 0,
             blobs: Vec::new(),
+            key: None,
         };
         let file = RecordFile::encode(&self.keys, id, &header, &[])?;
         Staged::write(&self.paths.tmp, &file)?.commit(&self.paths.records.join(id.file_name()))?;
-        Ok(stamp)
+        Ok(Meta::from(&header))
     }
 
     /// Deletes records past the namespace's limits, oldest first; returns how many.
@@ -1322,17 +1674,24 @@ impl Store {
         self.enforce(&mut state)
     }
 
+    /// Where a record's age starts: its creation time, or, where the namespace syncs, the time
+    /// in its winning version's stamp, so every device evicts the same records.
+    fn age_start(state: &State, meta: &Meta) -> u64 {
+        match state.synced {
+            true => meta.stamp.hlc >> COUNTER_BITS,
+            false => meta.created_at,
+        }
+    }
+
     /// Retention deletes files outright and never writes tombstones.
     fn enforce(&self, state: &mut State) -> Result<usize, Error> {
         let mut removed = 0;
-        if let Some(max_age) = state.limits.max_age {
-            let now = unix_millis(self.clock.now());
-            let max_age = u64::try_from(max_age.as_millis()).unwrap_or(u64::MAX);
-            let cutoff = now.saturating_sub(max_age);
+        if let Some(cutoff) = self.age_cutoff(state) {
             let expired: Vec<RecordId> = state
                 .records
                 .iter()
-                .filter(|(_, meta)| meta.created_at < cutoff)
+                .chain(&state.pending)
+                .filter(|(_, meta)| Self::age_start(state, meta) < cutoff)
                 .map(|(id, _)| *id)
                 .collect();
             for id in expired {
@@ -1348,6 +1707,12 @@ impl Store {
             removed += 1;
         }
         Ok(removed)
+    }
+
+    fn age_cutoff(&self, state: &State) -> Option<u64> {
+        let max_age = state.limits.max_age?;
+        let now = unix_millis(self.clock.now());
+        Some(now.saturating_sub(u64::try_from(max_age.as_millis()).unwrap_or(u64::MAX)))
     }
 
     fn read_record(&self, state: &mut State, id: &RecordId) -> Result<Record, Error> {
@@ -1367,29 +1732,11 @@ impl Store {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(corrupt()),
             other => other?,
         };
-        let (prefix, rest) = bytes.split_at_checked(RECORD_PREFIX_LEN).ok_or_else(corrupt)?;
-        if !matches!(classify(RECORD_MAGIC, prefix, self.keys.source()), Prefix::Ours) {
-            return Err(corrupt());
-        }
-        let origin = DeviceId(
-            prefix[PREFIX_LEN..PREFIX_LEN + ID_LEN]
-                .try_into()
-                .expect("ID length"),
-        );
-        let header_len =
-            u32::from_le_bytes(prefix[PREFIX_LEN + ID_LEN..].try_into().expect("4 bytes")) as usize;
-        let (header_nonce, rest) = rest.split_at_checked(NONCE_LEN).ok_or_else(corrupt)?;
-        let header_nonce: [u8; NONCE_LEN] = header_nonce.try_into().expect("nonce length");
-        let (header_ct, rest) = rest.split_at_checked(header_len).ok_or_else(corrupt)?;
-        let header_plain = self
-            .keys
-            .open(
-                &header_nonce,
-                &RecordFile::header_aad(&self.keys, &origin, id),
-                header_ct.to_vec(),
-            )
-            .ok_or_else(corrupt)?;
-        let header: Header = serde_json::from_slice(&header_plain).map_err(|_| corrupt())?;
+        let opened = open_record(&self.keys, id, &bytes).map_err(|error| match error {
+            Error::NewerFormat => corrupt(),
+            other => other,
+        })?;
+        let header = opened.header;
         if header.deleted
             || header.stamp != meta.stamp
             || header.body_len != meta.body_len
@@ -1397,19 +1744,9 @@ impl Store {
         {
             return Err(corrupt());
         }
-        let (body_nonce, body_ct) = rest.split_at_checked(NONCE_LEN).ok_or_else(corrupt)?;
-        let body_nonce: [u8; NONCE_LEN] = body_nonce.try_into().expect("nonce length");
-        let body = self
-            .keys
-            .open(
-                &body_nonce,
-                &RecordFile::body_aad(&self.keys, &origin, id, &header_nonce),
-                body_ct.to_vec(),
-            )
-            .ok_or_else(corrupt)?;
         Ok(Record {
             id: *id,
-            data: serde_json::from_slice(&body).map_err(|_| corrupt())?,
+            data: serde_json::from_slice(&opened.body).map_err(|_| corrupt())?,
             blobs: header.blobs,
             stamp: header.stamp,
             created_at: header.created_at,
@@ -1417,13 +1754,23 @@ impl Store {
     }
 
     /// Removes the record file first: a crash after that leaves only unreferenced blobs, which
-    /// the next open deletes.
+    /// the next open deletes. Any version of the record goes, live, pending or dead.
     fn remove(&self, state: &mut State, id: &RecordId) -> Result<(), Error> {
-        let Some(meta) = state.forget(id) else {
+        if state.current(id).is_none() {
             return Ok(());
-        };
+        }
         remove_if_exists(&self.paths.records.join(id.file_name()))?;
-        self.release(state, meta.blobs)
+        self.drop_version(state, id)
+    }
+
+    /// Forgets the version stored for `id` and releases its blobs, without touching its file,
+    /// which the caller has replaced or removed.
+    fn drop_version(&self, state: &mut State, id: &RecordId) -> Result<(), Error> {
+        if let Some(meta) = state.forget(id).or_else(|| state.pending.remove(id)) {
+            self.release(state, meta.blobs)?;
+        }
+        state.dead.remove(id);
+        Ok(())
     }
 
     fn release(&self, state: &mut State, blobs: Vec<BlobRef>) -> Result<(), Error> {
@@ -1431,12 +1778,55 @@ impl Store {
             let Some(entry) = state.blobs.get_mut(&blob.handle) else {
                 continue;
             };
-            entry.refs -= 1;
+            entry.refs = entry.refs.saturating_sub(1);
             if entry.refs == 0 && !state.kept.contains(&blob.handle) {
                 state.total -= entry.len;
                 state.blobs.remove(&blob.handle);
                 remove_if_exists(&self.paths.blobs.join(blob.handle.file_name()))?;
             }
+        }
+        Ok(())
+    }
+
+    /// Counts the references pending versions hold on a blob that has just been stored.
+    fn recount_pending_refs(&self, state: &mut State, handle: &BlobHandle) {
+        let refs = state
+            .pending
+            .values()
+            .flat_map(|meta| &meta.blobs)
+            .filter(|blob| blob.handle == *handle)
+            .count();
+        if let Some(entry) = state.blobs.get_mut(handle) {
+            entry.refs += refs;
+        }
+    }
+
+    /// Makes visible every pending version whose blobs have all arrived.
+    fn promote_pending(&self, state: &mut State) {
+        let ready: Vec<RecordId> = state
+            .pending
+            .iter()
+            .filter(|(_, meta)| !state.missing_blobs(meta))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ready {
+            let meta = state.pending.remove(&id).expect("listed above");
+            state.insert(id, meta);
+        }
+    }
+
+    /// Deletes every version older than a clear marker, without tombstones.
+    fn apply_clear(&self, state: &mut State, before: Stamp) -> Result<(), Error> {
+        let cleared: Vec<RecordId> = state
+            .records
+            .iter()
+            .chain(&state.pending)
+            .chain(&state.dead)
+            .filter(|(id, meta)| **id != RecordId::CLEAR_MARKER && meta.stamp < before)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in cleared {
+            self.remove(state, &id)?;
         }
         Ok(())
     }
@@ -1452,6 +1842,120 @@ impl Store {
         self.crash_after_marking
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
+}
+
+/// A record file opened in full: its header and its body.
+struct Opened {
+    header: Header,
+    origin: DeviceId,
+    body: Zeroizing<Vec<u8>>,
+}
+
+/// Opens a whole record file sealed under `keys`, checking that every part belongs to `id` and
+/// that the file is exactly as long as its header says.
+fn open_record(keys: &NamespaceKeys, id: &RecordId, bytes: &[u8]) -> Result<Opened, Error> {
+    let corrupt = || Error::Corrupt(format!("record {id}"));
+    let (prefix, rest) = bytes.split_at_checked(RECORD_PREFIX_LEN).ok_or_else(corrupt)?;
+    match classify(RECORD_MAGIC, prefix, keys.source()) {
+        Prefix::Ours => {}
+        Prefix::Skip => return Err(Error::NewerFormat),
+        Prefix::Damaged => return Err(corrupt()),
+    }
+    let origin = DeviceId(
+        prefix[PREFIX_LEN..PREFIX_LEN + ID_LEN]
+            .try_into()
+            .expect("ID length"),
+    );
+    let header_len = u32::from_le_bytes(prefix[PREFIX_LEN + ID_LEN..].try_into().expect("4 bytes")) as usize;
+    if header_len > MAX_HEADER_LEN {
+        return Err(corrupt());
+    }
+    let (header_nonce, rest) = rest.split_at_checked(NONCE_LEN).ok_or_else(corrupt)?;
+    let header_nonce: [u8; NONCE_LEN] = header_nonce.try_into().expect("nonce length");
+    let (header_ct, rest) = rest.split_at_checked(header_len).ok_or_else(corrupt)?;
+    let header_plain = keys
+        .open(
+            &header_nonce,
+            &RecordFile::header_aad(keys, &origin, id),
+            header_ct.to_vec(),
+        )
+        .ok_or_else(corrupt)?;
+    let header: Header = serde_json::from_slice(&header_plain).map_err(|_| corrupt())?;
+    if !header_consistent(&header, &origin, id) {
+        return Err(corrupt());
+    }
+    let body = if header.deleted {
+        if !rest.is_empty() {
+            return Err(corrupt());
+        }
+        Zeroizing::new(Vec::new())
+    } else {
+        let (body_nonce, body_ct) = rest.split_at_checked(NONCE_LEN).ok_or_else(corrupt)?;
+        if body_ct.len() as u64 != header.body_len + TAG_LEN as u64 {
+            return Err(corrupt());
+        }
+        let body_nonce: [u8; NONCE_LEN] = body_nonce.try_into().expect("nonce length");
+        keys.open(
+            &body_nonce,
+            &RecordFile::body_aad(keys, &origin, id, &header_nonce),
+            body_ct.to_vec(),
+        )
+        .ok_or_else(corrupt)?
+    };
+    Ok(Opened { header, origin, body })
+}
+
+fn header_consistent(header: &Header, origin: &DeviceId, id: &RecordId) -> bool {
+    let marker = *id == RecordId::CLEAR_MARKER;
+    header.stamp.device == *origin
+        && header.blobs.len() <= MAX_BLOBS_PER_RECORD
+        && (!header.deleted || (header.body_len == 0 && header.blobs.is_empty()))
+        && marker == header.clear_before.is_some()
+        && (!marker || header.deleted)
+}
+
+fn seal_blob(keys: &NamespaceKeys, handle: &BlobHandle, plain: &[u8]) -> Result<Vec<u8>, Error> {
+    let aad = keys.aad("blob", &[&handle.0]);
+    let (nonce, ciphertext) = keys.seal_blob(&handle.0, &aad, plain)?;
+    Ok(framed(BLOB_MAGIC, keys.source(), &[&nonce, &ciphertext]))
+}
+
+/// Opens a blob file sealed under `keys` and checks it holds the content its handle names.
+fn open_blob(keys: &NamespaceKeys, handle: &BlobHandle, bytes: &[u8]) -> Result<Zeroizing<Vec<u8>>, Error> {
+    let corrupt = || Error::Corrupt(format!("blob {handle}"));
+    let (source, nonce, ciphertext) = parse_sealed(BLOB_MAGIC, bytes).ok_or_else(corrupt)?;
+    if source != Some(keys.source()) || nonce != keys.blob_nonce(&handle.0) {
+        return Err(corrupt());
+    }
+    let plain = keys
+        .open(&nonce, &keys.aad("blob", &[&handle.0]), ciphertext.to_vec())
+        .ok_or_else(corrupt)?;
+    if keys.blob_handle(&plain) != handle.0 {
+        return Err(corrupt());
+    }
+    Ok(plain)
+}
+
+/// The key source a sealed file's tag names, if it is in this format and names one.
+fn file_source(magic: &[u8; 4], path: &Path) -> Result<Option<KeySource>, Error> {
+    let mut prefix = [0u8; PREFIX_LEN];
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    match file.read_exact(&mut prefix) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    let Some(rest) = prefix.strip_prefix(magic.as_slice()) else {
+        return Ok(None);
+    };
+    if rest[0] != VERSION {
+        return Ok(None);
+    }
+    Ok(KeySource::from_tag(rest[1..].try_into().expect("prefix length")))
 }
 
 #[cfg(test)]

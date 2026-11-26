@@ -268,6 +268,7 @@ mod tests {
         assert_eq!(
             ids,
             [
+                "app.commands",
                 "apps.search",
                 "calculator.evaluate",
                 "calendar.events",
@@ -329,6 +330,7 @@ mod tests {
                 "calculator.evaluate",
                 "apps.search",
                 "system.commands",
+                "app.commands",
                 "scripts.search",
                 "settings.search",
                 "web.keywords",

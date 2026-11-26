@@ -1,15 +1,22 @@
 //! `dupin ext search|install|list|update|remove|sync`: `dupin-extension-install` pointed at
 //! Dupin's directories and at the keywords the launcher already routes.
+//!
+//! The installed extensions list and the grants are in encrypted storage, which only one
+//! process at a time may hold open. While the launcher runs it holds them, and a command asks
+//! it over the control socket to read or change them; otherwise the command opens them itself.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use dupin_broker::{Base, Broker, ConsentState, Local, PackageId};
 use dupin_extension_install::{
-    Change, Error, Found, Git, GitHub, Installer, LOCK_FILE, Listed, Outcomes, State, TOPIC,
+    Change, Error, Found, Git, GitHub, Installer, Listed, Outcomes, State, TOPIC, guard_path,
 };
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::Storage;
 use serde_json::{Value, json};
+
+use crate::extensions::grants::Grants;
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -20,32 +27,38 @@ pub enum Command {
     Sync,
 }
 
-/// `extensions.lock` in Dupin's data directory, beside `storage/`.
-pub fn lock_path() -> Option<PathBuf> {
-    crate::store::data_dir().map(|dir| dir.join(LOCK_FILE))
-}
+/// Asks the running launcher, as [`crate::control::exchange`] does; tests answer for it.
+pub(crate) type Launcher<'a> = &'a dyn Fn(crate::control::Command) -> Result<Value, String>;
 
 pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
     let bundled = crate::extensions::bundled::directory()
         .map(|directory| crate::extensions::bundled::packages(&directory))
         .unwrap_or_default();
+    let data = crate::store::data_dir()
+        .ok_or_else(|| Diagnostic::new("no-directory", "neither XDG_DATA_HOME nor HOME is set"))?;
+    let storage = crate::extensions::access::shared_storage();
     let installer = Installer {
         extensions: crate::extensions::directory()
             .ok_or_else(|| Diagnostic::new("no-directory", "neither XDG_CONFIG_HOME nor HOME is set"))?,
-        lock: lock_path()
-            .ok_or_else(|| Diagnostic::new("no-directory", "neither XDG_DATA_HOME nor HOME is set"))?,
+        lock: Box::new(crate::extensions::installed::Command {
+            storage: storage.clone(),
+            launcher: Box::new(crate::control::exchange),
+        }),
+        guard: guard_path(&data),
         git: Git::default(),
         github: GitHub::default(),
         bundled: bundled.iter().map(|(_, name, _)| name.clone()).collect(),
     };
+    let storage = storage.as_ref();
+    let launcher: Launcher<'_> = &crate::control::exchange;
     let taken = routed_keywords(bundled);
     let cwd = std::env::current_dir().map_err(|error| Diagnostic::new("io-error", error.to_string()))?;
     let (lines, value) = match command {
         Command::Install(spec) => {
             let change = installer.install(&spec, &cwd, &taken).map_err(diagnostic)?;
             if change.previous.is_none() {
-                forget_grants(&change.name)?;
-                if let Err(failure) = delete_data(&change.name) {
+                forget_grants(storage, &change.name, launcher)?;
+                if let Err(failure) = delete_data(storage, &change.name, launcher) {
                     installer.remove(&change.name).map_err(diagnostic)?;
                     return Err(Diagnostic::new(
                         "data-undeleted",
@@ -66,8 +79,8 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
         Command::Sync => batch(installer.sync(&taken).map_err(diagnostic)?, "Restored")?,
         Command::Remove(name) => {
             let entry = installer.remove(&name).map_err(diagnostic)?;
-            forget_grants(&name)?;
-            delete_data(&name)?;
+            forget_grants(storage, &name, launcher)?;
+            delete_data(storage, &name, launcher)?;
             (
                 vec![format!(
                     "Removed {name} {}, its grants and its stored data.",
@@ -78,11 +91,7 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
         }
         Command::List => {
             let listed = installer.list().map_err(diagnostic)?;
-            let mut broker = grants().0;
-            let granted: Vec<_> = listed
-                .iter()
-                .map(|listed| granted(&mut broker, &installer.extensions.join(&listed.name)))
-                .collect();
+            let granted = granted(storage, &installer.extensions, &listed, launcher);
             let lines = if listed.is_empty() {
                 vec!["No extensions were installed with `dupin ext install`.".to_owned()]
             } else {
@@ -109,64 +118,85 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
     Ok(Value::Null)
 }
 
-/// The broker over the grant files: the declarative base Home Manager writes, and the grants
-/// chosen in Dupin with the path they are saved to. A local file that exists but can't be read
-/// grants nothing and is never written.
-fn grants() -> (Broker, Option<std::path::PathBuf>) {
-    let read =
-        |path: &Option<std::path::PathBuf>| path.as_ref().and_then(|path| std::fs::read_to_string(path).ok());
+/// The scopes granted to each listed package for the revision installed in its folder, as the
+/// launcher grants them while it holds the grants, or as a broker over them here would. Grants
+/// that can't be read grant nothing.
+fn granted(
+    storage: Option<&Arc<Storage>>,
+    extensions: &Path,
+    listed: &[Listed],
+    launcher: Launcher<'_>,
+) -> Vec<Vec<String>> {
+    let declarations: Vec<_> = listed
+        .iter()
+        .map(|listed| crate::extensions::declaration_of(&extensions.join(&listed.name)).ok())
+        .collect();
+    let local = match storage.map(|storage| Grants::new(Some(storage.clone())).local()) {
+        Some(Ok(local)) => local,
+        Some(Err(dupin_storage::Error::Busy)) => {
+            let packages = declarations
+                .iter()
+                .flatten()
+                .map(|(id, ..)| id.to_string())
+                .collect();
+            let reply =
+                launcher(crate::control::Command::ExtensionGrantsList { packages }).unwrap_or_default();
+            return declarations
+                .iter()
+                .map(|declaration| {
+                    declaration
+                        .as_ref()
+                        .and_then(|(id, ..)| reply["granted"][id.as_str()].as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|key| key.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .collect();
+        }
+        _ => Local::unreadable(),
+    };
     let base = crate::extensions::access::base_path()
         .map(|path| Base::read(&path))
         .unwrap_or_default();
-    let path = crate::extensions::access::local_path();
-    let local = match (read(&path), path.as_ref().is_some_and(|path| path.exists())) {
-        (Some(source), _) => Local::parse(&source).unwrap_or_else(|_| Local::unreadable()),
-        (None, true) => Local::unreadable(),
-        (None, false) => Local::default(),
-    };
-    (Broker::new(base, local), path)
-}
-
-/// The scopes of the package in `folder` granted for the revision installed there.
-fn granted(broker: &mut Broker, folder: &std::path::Path) -> Vec<String> {
-    let Ok((id, revision, capabilities)) = crate::extensions::declaration_of(folder) else {
-        return Vec::new();
-    };
-    let _ = broker.install(id.clone(), revision, capabilities);
-    broker
-        .consents(&id)
+    let mut broker = Broker::new(base, local);
+    declarations
         .into_iter()
-        .filter(|(_, state)| matches!(state, ConsentState::Granted(_)))
-        .map(|(scope, _)| scope.key().to_string())
+        .map(|declaration| {
+            let Some((id, revision, capabilities)) = declaration else {
+                return Vec::new();
+            };
+            let _ = broker.install(id.clone(), revision, capabilities);
+            broker
+                .consents(&id)
+                .into_iter()
+                .filter(|(_, state)| matches!(state, ConsentState::Granted(_)))
+                .map(|(scope, _)| scope.key().to_string())
+                .collect()
+        })
         .collect()
 }
 
 /// Uninstalling forgets the user's decisions, and so does installing a name afresh, since the
-/// decisions left under it were about another package. A running Dupin reads the file again
-/// before it next decides or saves.
-fn forget_grants(name: &str) -> Result<(), Diagnostic> {
-    match crate::extensions::access::local_path() {
-        Some(path) => forget_grants_in(&path, name),
-        None => Ok(()),
-    }
-}
-
-/// [`forget_grants`] over the local grant file at `path`.
-fn forget_grants_in(path: &Path, name: &str) -> Result<(), Diagnostic> {
-    let Ok(id) = PackageId::new(name) else {
+/// decisions left under it were about another package. A running launcher forgets them itself.
+fn forget_grants(
+    storage: Option<&Arc<Storage>>,
+    name: &str,
+    launcher: Launcher<'_>,
+) -> Result<(), Diagnostic> {
+    let (Some(storage), Ok(id)) = (storage, PackageId::new(name)) else {
         return Ok(());
     };
-    if !path.exists() {
-        return Ok(());
+    let unsaved = |message: String| Diagnostic::new("grants-unsaved", message);
+    match Grants::new(Some(storage.clone())).forget(&id) {
+        Ok(()) => Ok(()),
+        Err(dupin_storage::Error::Busy) => launcher(crate::control::Command::ExtensionGrantsForget {
+            package: name.to_owned(),
+        })
+        .map(drop)
+        .map_err(|error| unsaved(format!("Dupin couldn't forget {name}'s grants: {error}"))),
+        Err(error) => Err(unsaved(format!("Couldn't forget {name}'s grants: {error}"))),
     }
-    let unsaved = |message: String| {
-        Diagnostic::new("grants-unsaved", message).file(crate::extensions::access::LOCAL_FILE)
-    };
-    let source = std::fs::read_to_string(path).map_err(|error| unsaved(error.to_string()))?;
-    let local = Local::parse(&source).map_err(|error| unsaved(error.to_string()))?;
-    let mut broker = Broker::new(Base::default(), local);
-    broker.uninstall(&id);
-    broker.save(path).map_err(|error| unsaved(error.to_string()))
 }
 
 /// `dupin ext eject NAME`: copies the bundled package into the extensions folder. The copy
@@ -184,27 +214,26 @@ pub fn eject(name: &str) -> Result<PathBuf, Diagnostic> {
     eject_into(
         &bundled,
         &user,
-        crate::extensions::access::local_path().as_deref(),
-        crate::extensions::access::storage().as_ref(),
+        crate::extensions::access::shared_storage().as_ref(),
         name,
+        &crate::control::exchange,
     )
 }
 
 /// [`eject`] from the bundled packages in `bundled` to the extensions folder `user`,
-/// forgetting `name`'s decisions in the grant file `grants` and its data in `storage`. A copy
-/// whose earlier decisions or data can't be forgotten is removed again, so it never runs with
-/// them.
+/// forgetting `name`'s decisions and data in `storage`, or through `launcher` while it holds
+/// them. A copy whose earlier decisions or data can't be forgotten is removed again, so it
+/// never runs with them.
 pub(crate) fn eject_into(
     bundled: &Path,
     user: &Path,
-    grants: Option<&Path>,
-    storage: Option<&Storage>,
+    storage: Option<&Arc<Storage>>,
     name: &str,
+    launcher: Launcher<'_>,
 ) -> Result<PathBuf, Diagnostic> {
     let copy = crate::extensions::bundled::eject(bundled, user, name)?;
-    let forgotten = grants
-        .map_or(Ok(()), |grants| forget_grants_in(grants, name))
-        .and_then(|()| storage.map_or(Ok(()), |storage| delete_data_in(storage, name)));
+    let forgotten =
+        forget_grants(storage, name, launcher).and_then(|()| delete_data(storage, name, launcher));
     if let Err(failure) = forgotten {
         let _ = std::fs::remove_dir_all(&copy);
         return Err(Diagnostic::new(
@@ -221,30 +250,20 @@ pub(crate) fn eject_into(
 
 /// Uninstalling deletes what the package stored, and so does installing a name afresh, since a
 /// package's namespace is named after its package name; revoking its `storage` in Settings
-/// keeps it. A running Dupin that has the package's data open deletes it itself.
-fn delete_data(name: &str) -> Result<(), Diagnostic> {
-    match crate::extensions::access::storage() {
-        Some(storage) => delete_data_in(&storage, name),
-        None => Ok(()),
-    }
-}
-
-/// [`delete_data`] from `storage`.
-fn delete_data_in(storage: &Storage, name: &str) -> Result<(), Diagnostic> {
-    let Ok(id) = PackageId::new(name) else {
+/// keeps it. A running launcher that has the package's data open deletes it itself.
+fn delete_data(storage: Option<&Arc<Storage>>, name: &str, launcher: Launcher<'_>) -> Result<(), Diagnostic> {
+    let (Some(storage), Ok(id)) = (storage, PackageId::new(name)) else {
         return Ok(());
     };
     let namespace = dupin_extension_bridge::storage::namespace(&id, dupin_extension_bridge::Origin::User);
     let unsaved = |message: String| Diagnostic::new("data-undeleted", message);
     match storage.discard(&namespace) {
         Ok(()) => Ok(()),
-        Err(dupin_storage::Error::Busy) => {
-            crate::control::exchange(crate::control::Command::ExtensionDataDelete {
-                package: name.to_owned(),
-            })
-            .map(|_| ())
-            .map_err(|error| unsaved(format!("Dupin couldn't delete {name}'s stored data: {error}")))
-        }
+        Err(dupin_storage::Error::Busy) => launcher(crate::control::Command::ExtensionDataDelete {
+            package: name.to_owned(),
+        })
+        .map(|_| ())
+        .map_err(|error| unsaved(format!("Dupin couldn't delete {name}'s stored data: {error}"))),
         Err(error) => Err(unsaved(format!("Couldn't delete {name}'s stored data: {error}"))),
     }
 }

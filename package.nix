@@ -35,6 +35,8 @@ let
     (root + /packaging)
     (root + /assets/logo/dupin.svg)
     (root + /extensions)
+    # Data under CC BY 3.0 US, which ships beside the binary rather than in it.
+    (root + /crates/dupin-sync/data/eff_large_wordlist.txt)
   ];
   # Each bundled package by the name the broker knows it by after `bundled:`, `name` in its
   # package.json, with the scope keys its capabilities declare. checks.bundled-extension-scopes
@@ -190,6 +192,7 @@ let
       # scripts/package-app.nu points a nightly build at this one.
       icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
       cp ${thirdPartyNotices} $app/Resources/ThirdPartyNotices.txt
+      cp crates/dupin-sync/data/eff_large_wordlist.txt $app/Resources/eff_large_wordlist.txt
       # Each package folder, without extensions/tsconfig.json, which only the type check reads.
       mkdir $app/Resources/extensions
       for package in extensions/*/; do

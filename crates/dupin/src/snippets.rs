@@ -41,7 +41,7 @@ struct Declared {
 enum Opened {
     #[default]
     Closed,
-    Open(Box<Store>),
+    Open(Arc<Store>),
     Failed(String),
 }
 
@@ -70,6 +70,15 @@ pub fn library() -> &'static Library {
         };
         Library::new(storage)
     })
+}
+
+/// Lets sync carry the launcher's stored snippets: reopened when sync turns on or off, read
+/// again when another Mac changed them.
+fn register(store: &Arc<Store>) {
+    if cfg!(test) || rune::tooling::is_headless() {
+        return;
+    }
+    crate::synced::register(NAMESPACE, store, || library().reopen(), || library().reload());
 }
 
 fn headless_storage() -> Option<Arc<Storage>> {
@@ -128,6 +137,39 @@ impl Library {
         };
         if loaded {
             self.changed();
+        }
+    }
+
+    /// Closes the namespace and opens it again, under the key sync now calls for.
+    fn reopen(&self) {
+        let reopened = {
+            let mut store = lock(&self.store);
+            if !matches!(*store, Opened::Open(_)) {
+                return;
+            }
+            *store = Opened::Closed;
+            self.open(&mut store).is_ok()
+        };
+        if reopened {
+            self.changed();
+        }
+    }
+
+    /// Reads the open namespace again, after sync brought another Mac's snippets.
+    fn reload(&self) {
+        let read = {
+            let store = lock(&self.store);
+            let Opened::Open(store) = &*store else {
+                return;
+            };
+            read_snippets(store)
+        };
+        match read {
+            Ok(snippets) => {
+                *write(&self.stored) = Arc::new(snippets);
+                self.changed();
+            }
+            Err(problem) => crate::log::warn(&format!("stored snippets: {problem}")),
         }
     }
 
@@ -225,7 +267,8 @@ impl Library {
             *opened = match read {
                 Ok((store, snippets)) => {
                     *write(&self.stored) = Arc::new(snippets);
-                    Opened::Open(Box::new(store))
+                    register(&store);
+                    Opened::Open(store)
                 }
                 Err(problem) => {
                     crate::log::warn(&format!("stored snippets: {problem}"));
@@ -240,38 +283,43 @@ impl Library {
         }
     }
 
-    fn read_all(&self) -> Result<(Store, Vec<Snippet>), String> {
+    fn read_all(&self) -> Result<(Arc<Store>, Vec<Snippet>), String> {
         let storage = self
             .storage
             .as_ref()
             .ok_or("Dupin's storage needs XDG_DATA_HOME or HOME")?;
-        let store = storage
-            .open(NAMESPACE, LIMITS)
+        let store = crate::synced::open(storage, NAMESPACE, LIMITS).map_err(|error| error.to_string())?;
+        let snippets = read_snippets(&store)?;
+        Ok((store, snippets))
+    }
+}
+
+fn read_snippets(store: &Store) -> Result<Vec<Snippet>, String> {
+    let mut snippets = BTreeMap::new();
+    let mut before = None;
+    loop {
+        let page = store
+            .list(before.as_ref(), 200)
             .map_err(|error| error.to_string())?;
-        let mut snippets = BTreeMap::new();
-        let mut before = None;
-        loop {
-            let page = store
-                .list(before.as_ref(), 200)
-                .map_err(|error| error.to_string())?;
-            for record in page.records {
-                match serde_json::from_value::<Snippet>(record.data) {
-                    // The record's key is its keyword, so a body naming another keyword was
-                    // moved or forged; it is left out rather than listed twice.
-                    Ok(snippet) if store.key_id(&snippet.keyword) == record.id => {
-                        snippets.insert(snippet.keyword.clone(), snippet);
-                    }
-                    _ => crate::log::warn("stored snippets: left out a record that isn't a snippet"),
+        for record in page.records {
+            match serde_json::from_value::<Snippet>(record.data) {
+                // The record's key is its keyword, so a body naming another keyword was
+                // moved or forged; it is left out rather than listed twice.
+                Ok(snippet) if store.key_id(&snippet.keyword) == record.id => {
+                    snippets.insert(snippet.keyword.clone(), snippet);
                 }
-            }
-            match page.next {
-                Some(next) => before = Some(next),
-                None => break,
+                _ => crate::log::warn("stored snippets: left out a record that isn't a snippet"),
             }
         }
-        Ok((store, snippets.into_values().collect()))
+        match page.next {
+            Some(next) => before = Some(next),
+            None => break,
+        }
     }
+    Ok(snippets.into_values().collect())
+}
 
+impl Library {
     /// Hands the bundled package the snippets as they are now, before anything that changed
     /// them answers, then tells the listeners.
     fn changed(&self) {

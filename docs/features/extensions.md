@@ -26,7 +26,7 @@ Switch on **Extensions folder** in Settings → Extensions, or set this in `conf
 extensions = true
 ```
 
-Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/extensions/`). Each folder in it holds one extension. Adding, editing or removing a folder, or any JavaScript file in it, applies while Dupin runs. Settings → Extensions lists the loaded extensions with their keywords and a switch for each, and every folder it skipped with the reason. An extension from the folder answers its keyword once it loads but can use nothing it [asks for](#asking-for-more) until you turn it on; turning it off stops it answering. Your choice is kept in `grants.toml` in Dupin's data directory (`$XDG_DATA_HOME/dupin`, else `~/Library/Application Support/Dupin`).
+Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/extensions/`). Each folder in it holds one extension. Adding, editing or removing a folder, or any JavaScript file in it, applies while Dupin runs. Settings → Extensions lists the loaded extensions with their keywords and a switch for each, and every folder it skipped with the reason. An extension from the folder answers its keyword once it loads but can use nothing it [asks for](#asking-for-more) until you turn it on; turning it off stops it answering. Your choice is kept in Dupin's [encrypted storage](./storage.md#built-in-namespaces), in the `extension-grants` namespace.
 
 ## Bundled extensions
 
@@ -982,7 +982,7 @@ dupin ext install https://git.example.com/me/notes.git@main # an https://, ssh:/
 dupin ext install ./word-count                              # a folder, copied as it is now
 ```
 
-Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA, and must be the repository's own: on a branch or tag of a Git source, or on the default branch or a tag of a `github:` source, since GitHub serves a commit pushed to any fork through the repository it was forked from. `dupin ext sync` also takes the locked commit from the branch or tag it was installed from, so a package installed from another branch restores. A ref such as `refs/pull/1/head`, someone else's proposed commit, is refused. A URL can't carry a password or token, which would end up in `extensions.lock`; let Git supply it from a credential helper or an SSH key.
+Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA, and must be the repository's own: on a branch or tag of a Git source, or on the default branch or a tag of a `github:` source, since GitHub serves a commit pushed to any fork through the repository it was forked from. `dupin ext sync` also takes the locked commit from the branch or tag it was installed from, so a package installed from another branch restores. A ref such as `refs/pull/1/head`, someone else's proposed commit, is refused. A URL can't carry a password or token, which would end up in the installed extensions list; let Git supply it from a credential helper or an SSH key.
 
 The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is committed to the repository: JavaScript or erasable TypeScript as written, or the bundle a build made.
 
@@ -1027,29 +1027,31 @@ Searching never installs anything. Dupin treats everything GitHub and the reposi
 
 The search goes through the macOS system curl, as a `github:` install does. GitHub allows 10 searches a minute without a token; if `GITHUB_TOKEN` (or else `GH_TOKEN`) is set, Dupin sends it to the API host for a higher limit, and never prints it. Each `package.json` is read from `raw.githubusercontent.com` without the token.
 
-### The lock file
+### The installed extensions list
 
-`extensions.lock`, in Dupin's data directory (`$XDG_DATA_HOME/dupin`, else `~/Library/Application Support/Dupin`), pins what `dupin ext install` placed:
+Dupin pins what `dupin ext install` placed in its [encrypted storage](./storage.md#built-in-namespaces), one record per package: in the `extensions` namespace for a package from GitHub or Git, and in `extensions-local` for one copied from a folder, whose path means nothing on another Mac. A source names a repository, maybe a private one, or a folder of yours, so the list is never written in the clear. `dupin ext list` shows it. A record looks like this:
 
-```toml
-version = 1
-
-[packages.word-count]
-source = "github:someone/dupin-word-count"
-ref = "v1.2.0"
-commit = "0123456789abcdef0123456789abcdef01234567"
-content_hash = "blake3:…" # every file's path, executable bit and bytes
-installed_at = "2026-11-23T09:00:00Z"
-version = "1.2.0"
-keyword = "wc"
-requested = ["http:https://api.example.com"]
+```json
+{
+	"name": "word-count",
+	"source": "github:someone/dupin-word-count",
+	"ref": "v1.2.0",
+	"commit": "0123456789abcdef0123456789abcdef01234567",
+	"content_hash": "blake3:…",
+	"installed_at": "2026-11-23T09:00:00Z",
+	"version": "1.2.0",
+	"keyword": "wc",
+	"requested": ["http:https://api.example.com"]
+}
 ```
 
-`requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. The lock holds no grants: what you allow is in `grants.toml` beside it, which the broker owns. When Dupin loads an updated package, its grants of scopes the new revision declares no wider carry over, scopes it widens or adds wait for you to allow them, and scopes it drops are forgotten; `dupin ext update` lists what it adds and drops. `dupin ext remove` forgets the package's grants too, and so does installing a name that wasn't installed, so a package never inherits what you allowed another of that name. A running Dupin reads `grants.toml` again before it next decides or saves, so it neither keeps nor writes back what the command forgot. A lock written by an earlier Dupin may still have `granted` and `pending_consent` lists, which nothing ever filled; they are ignored.
+`content_hash` covers every file's path, executable bit and bytes. While Dupin runs it holds the list, and `dupin ext` asks it over the control socket to read or change it; otherwise the command opens the list itself. At most 256 packages can be installed.
 
-When Dupin loads the extensions folder, it checks each locked package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Extensions shows it as **disabled**; an unreadable lock keeps every extension off. `dupin ext sync` puts the installed copy back. Folders the lock doesn't list, such as ones you made yourself, aren't checked.
+`requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. The list holds no grants: what you allow is in the `extension-grants` namespace, which the broker owns. When Dupin loads an updated package, its grants of scopes the new revision declares no wider carry over, scopes it widens or adds wait for you to allow them, and scopes it drops are forgotten; `dupin ext update` lists what it adds and drops. `dupin ext remove` forgets the package's grants too, and so does installing a name that wasn't installed, so a package never inherits what you allowed another of that name. While Dupin runs, the command asks it to forget them, so it neither keeps nor writes back what the command forgot.
 
-The lock is also how to reproduce a set of extensions: copy `extensions.lock` to another Mac and run `dupin ext sync`.
+When Dupin loads the extensions folder, it checks each listed package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Extensions shows it as **disabled**; a list that can't be read, because the Keychain is locked or it was sealed with another key, keeps every extension off, and Settings says why on every page. `dupin ext sync` puts the installed copy back. Folders the list doesn't name, such as ones you made yourself, aren't checked.
+
+Reproducing a set of extensions on another Mac waits for [sync](../design/sync.md#extensions), which will carry the `extensions` records and reinstall each package from its pinned commit.
 
 ### Declaring them with Nix
 

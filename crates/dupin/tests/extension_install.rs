@@ -54,6 +54,7 @@ impl Dirs {
             .env("XDG_CONFIG_HOME", self.path("config"))
             .env("XDG_DATA_HOME", self.path("data"))
             .env("XDG_RUNTIME_DIR", self.path("run"))
+            .env("DUPIN_DEBUG_STORAGE_KEY_FILE", self.path("storage.key"))
             .output()
             .unwrap()
     }
@@ -89,9 +90,12 @@ fn installing_a_name_afresh_deletes_what_an_earlier_package_of_that_name_stored(
 #[test]
 fn installing_a_name_afresh_is_undone_when_its_old_data_cant_be_deleted() {
     let dirs = Dirs::new();
-    let held = dupin_storage::Storage::new(dirs.storage(), dupin_storage::MemoryKey::random())
-        .open(&namespace("notes"), dupin_storage::Limits::default())
-        .unwrap();
+    let held = dupin_storage::Storage::new(
+        dirs.storage(),
+        dupin_storage::FileKey::new(dirs.path("storage.key")),
+    )
+    .open(&namespace("notes"), dupin_storage::Limits::default())
+    .unwrap();
     let package = dirs.package("notes");
 
     let output = dirs.dupin(&["ext", "install", package.to_str().unwrap(), "--json"]);

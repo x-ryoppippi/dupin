@@ -8,6 +8,8 @@ pub mod access;
 pub mod bundled;
 mod catalogue;
 mod fixtures;
+pub mod grants;
+pub mod installed;
 #[cfg(test)]
 mod items_tests;
 mod manifest;
@@ -442,8 +444,8 @@ pub fn directory() -> Option<PathBuf> {
     Some(crate::settings::path()?.parent()?.join("extensions"))
 }
 
-/// Why a folder must stay off: it no longer matches extensions.lock, or isn't a bundled package
-/// this build sealed.
+/// Why a folder must stay off: it no longer matches the installed extensions list, or isn't a
+/// bundled package this build sealed.
 type Integrity = Box<dyn FnMut(&Path) -> Option<String> + Send>;
 
 #[derive(Default)]
@@ -808,20 +810,20 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
 }
 
 /// Scans now and after changes under `directory`, delivering changed catalogues in order. The
-/// user's folder holds packages extensions.lock pins; the bundled folder only the packages
-/// this build sealed.
+/// user's folder holds packages the installed extensions list pins; the bundled folder only the
+/// packages this build sealed.
 pub fn watch(
     directory: PathBuf,
     origin: Origin,
     deliver: impl Fn(Catalog) + Send + 'static,
 ) -> std::io::Result<Watch> {
     let integrity: Option<Integrity> = match origin {
-        Origin::User => crate::extension_install::lock_path().map(|lock| {
+        Origin::User => installed::shared().map(|installed| {
             let bundled = bundled::directory()
                 .map(|directory| bundled::packages(&directory))
                 .unwrap_or_default();
             let names = bundled.into_iter().map(|(_, name, _)| name).collect();
-            let mut integrity = dupin_extension_install::Integrity::new(lock, names);
+            let mut integrity = dupin_extension_install::Integrity::new(Box::new(installed), names);
             Box::new(move |folder: &Path| integrity.check(folder)) as _
         }),
         Origin::Bundled => {
@@ -1276,7 +1278,14 @@ pub(crate) mod tests {
         let fixture = folder();
         let root = fixture.path().join("extensions");
         install(&root, "words", &package_json("words", "wc", None), Some(SEARCH));
-        let lock_path = fixture.path().join(dupin_extension_install::LOCK_FILE);
+        let key = dupin_storage::DataKey::generate().unwrap();
+        let storage = |key: &dupin_storage::DataKey| {
+            Some(Arc::new(dupin_storage::Storage::new(
+                fixture.path().join("storage"),
+                dupin_storage::MemoryKey::new(key.clone()),
+            )))
+        };
+        let installed = Arc::new(installed::Installed::new(storage(&key)));
         let mut lock = dupin_extension_install::Lock::new();
         lock.packages.insert(
             "words".into(),
@@ -1291,8 +1300,9 @@ pub(crate) mod tests {
                 requested: vec![],
             },
         );
-        lock.write(&lock_path).unwrap();
-        let mut integrity = dupin_extension_install::Integrity::new(lock_path, Default::default());
+        installed.write(&lock).unwrap();
+        let mut integrity =
+            dupin_extension_install::Integrity::new(Box::new(installed.clone()), Default::default());
         let mut scanner = Scanner {
             integrity: Some(Box::new(move |folder: &Path| integrity.check(folder))),
             ..Scanner::default()
@@ -1308,7 +1318,30 @@ pub(crate) mod tests {
         assert!(catalog.extensions.is_empty());
         assert!(
             catalog.problems[0].starts_with("words: disabled")
-                && catalog.problems[0].contains("extensions.lock"),
+                && catalog.problems[0].contains("what `dupin ext install` placed"),
+            "{:?}",
+            catalog.problems
+        );
+
+        fs::write(root.join("words/main.js"), SEARCH).unwrap();
+        assert_eq!(scanner.scan(&root).extensions.len(), 1);
+        drop(scanner);
+        drop(installed);
+        let other = dupin_storage::DataKey::generate().unwrap();
+        let wrong = installed::Installed::new(storage(&other));
+        let mut integrity =
+            dupin_extension_install::Integrity::new(Box::new(Arc::new(wrong)), Default::default());
+        let mut scanner = Scanner {
+            integrity: Some(Box::new(move |folder: &Path| integrity.check(folder))),
+            ..Scanner::default()
+        };
+        let catalog = scanner.scan(&root);
+        assert!(
+            catalog.extensions.is_empty(),
+            "a list sealed with another key keeps every folder off"
+        );
+        assert!(
+            catalog.problems[0].contains("couldn't be read"),
             "{:?}",
             catalog.problems
         );

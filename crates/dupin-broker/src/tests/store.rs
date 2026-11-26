@@ -20,22 +20,23 @@ fn local_choices_survive_a_relaunch() {
         .unwrap();
     broker.revoke(&package, &ScopeKey::Dictionary).unwrap();
 
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("nested/grants.toml");
-    broker.save(&path).unwrap();
-    let saved = std::fs::read_to_string(&path).unwrap();
-    assert!(!dir.path().join("nested/grants.toml.tmp").exists());
+    let mut store = MemoryLocal::default();
+    broker.save(&mut store, &Local::default()).unwrap();
+    assert_eq!(store.records().len(), 1);
 
-    let mut relaunched = Broker::new(Base::default(), Local::parse(&saved).unwrap());
+    let mut relaunched = Broker::new(Base::default(), Local::load(&mut store).unwrap());
     let report = relaunched.install(package.clone(), rev("sha256:1111"), everything());
     assert_eq!(report.kept.len(), 2);
     assert!(relaunched.is_enabled(&package));
     assert_eq!(relaunched.consents(&package), broker.consents(&package));
-    assert_eq!(relaunched.local_toml().unwrap(), saved);
+    assert_eq!(
+        relaunched.decisions().records().unwrap(),
+        broker.decisions().records().unwrap()
+    );
 }
 
 #[test]
-fn the_saved_file_records_the_approved_scope_and_revision() {
+fn a_record_holds_the_approved_scope_and_revision() {
     let package = id("bookmarks");
     let mut broker = Broker::new(Base::default(), Local::default());
     let _ = broker.install(package.clone(), rev("sha256:1111"), everything());
@@ -43,62 +44,111 @@ fn the_saved_file_records_the_approved_scope_and_revision() {
         .approve(&package, &key("http:https://api.github.com"), None)
         .unwrap();
     broker.revoke(&package, &ScopeKey::Dictionary).unwrap();
-    let saved: toml::Table = broker.local_toml().unwrap().parse().unwrap();
-    let expected: toml::Table = r#"
-version = 1
-
-[packages.bookmarks.scopes.dictionary]
-decision = "revoked"
-
-[packages.bookmarks.scopes."http:https://api.github.com"]
-decision = "granted"
-revision = "sha256:1111"
-
-[packages.bookmarks.scopes."http:https://api.github.com".approved]
-type = "http"
-origin = "https://api.github.com"
-methods = ["GET", "POST"]
-"#
-    .parse()
-    .unwrap();
-    assert_eq!(saved, expected);
+    let [record] = broker.decisions().records().unwrap().try_into().unwrap();
+    assert_eq!(
+        record,
+        json!({
+            "package": "bookmarks",
+            "scopes": {
+                "dictionary": { "decision": "revoked" },
+                "http:https://api.github.com": {
+                    "decision": "granted",
+                    "revision": "sha256:1111",
+                    "approved": {
+                        "type": "http",
+                        "origin": "https://api.github.com",
+                        "methods": ["GET", "POST"]
+                    }
+                }
+            }
+        })
+    );
+    assert_eq!(Local::record_package(&record), Some(package));
 }
 
 #[test]
-fn packages_with_no_decisions_are_not_saved() {
-    let package = id("bookmarks");
+fn only_the_packages_that_changed_are_written_and_one_left_with_no_decisions_is_deleted() {
+    let (bookmarks, notes) = (id("bookmarks"), id("notes"));
     let mut broker = Broker::new(Base::default(), Local::default());
-    let _ = broker.install(package.clone(), rev("sha256:1111"), everything());
-    broker.approve(&package, &ScopeKey::Dictionary, None).unwrap();
-    assert!(broker.uninstall(&package));
-    assert_eq!(broker.local_toml().unwrap(), "version = 1\n\n[packages]\n");
+    let _ = broker.install(bookmarks.clone(), rev("sha256:1111"), everything());
+    let _ = broker.install(notes.clone(), rev("sha256:1111"), everything());
+    let mut store = MemoryLocal::default();
+    broker
+        .change_saved(&mut store, |broker| {
+            broker.approve(&bookmarks, &ScopeKey::Dictionary, None)?;
+            broker.set_enabled(&notes, true)
+        })
+        .unwrap();
+    assert_eq!(store.records().len(), 2);
+
+    let forged = json!({ "package": "notes", "enabled": false });
+    store.insert(notes.clone(), forged.clone());
+    broker
+        .change_saved(&mut store, |broker| {
+            broker.revoke(&bookmarks, &ScopeKey::Calendar)
+        })
+        .unwrap();
+    assert_eq!(
+        store.records()[&notes],
+        forged,
+        "a package whose decisions didn't change isn't written"
+    );
+
+    let before = broker.decisions();
+    assert!(broker.uninstall(&bookmarks));
+    broker.save(&mut store, &before).unwrap();
+    assert!(
+        !store.records().contains_key(&bookmarks),
+        "a package left with no decisions has no record"
+    );
+
+    let before = broker.decisions();
+    let generation = broker.generation(&notes);
+    broker.forget(&notes).unwrap();
+    broker.save(&mut store, &before).unwrap();
+    assert!(store.records().is_empty());
+    assert!(!broker.is_enabled(&notes));
+    assert_ne!(broker.generation(&notes), generation, "in-flight work is dropped");
 }
 
 #[test]
-fn saved_grants_are_validated() {
-    for (source, problem) in [
-        ("version = 2", "version 2"),
-        ("version = 1\nextra = true", "unknown field"),
+fn saved_records_are_validated() {
+    let granted = |key: &str, approved: serde_json::Value, binding: Option<&str>| {
+        let mut decision = json!({ "decision": "granted", "revision": "r", "approved": approved });
+        if let Some(binding) = binding {
+            decision["binding"] = binding.into();
+        }
+        json!({ "package": "a", "scopes": { key: decision } })
+    };
+    let notes = json!({ "type": "files", "name": "notes", "kind": "file", "access": ["read"] });
+    for (record, problem) in [
+        (json!({ "package": "a", "extra": true }), "unknown field"),
+        (json!({ "scopes": {} }), "missing field"),
         (
-            "version = 1\n[packages.a.scopes.dictionary]\ndecision = \"granted\"\nrevision = \"r\"\napproved = { type = \"storage\", quota_bytes = 1 }",
+            granted("dictionary", json!({ "type": "storage", "quota_bytes": 1 }), None),
             "records another scope",
         ),
+        (granted("files:notes", notes.clone(), None), "wrong binding"),
+        (granted("files:notes", notes, Some("Notes")), "absolute path"),
         (
-            "version = 1\n[packages.a.scopes.\"files:notes\"]\ndecision = \"granted\"\nrevision = \"r\"\napproved = { type = \"files\", name = \"notes\", kind = \"file\", access = [\"read\"] }",
-            "wrong binding",
-        ),
-        (
-            "version = 1\n[packages.a.scopes.\"files:notes\"]\ndecision = \"granted\"\nrevision = \"r\"\nbinding = \"Notes\"\napproved = { type = \"files\", name = \"notes\", kind = \"file\", access = [\"read\"] }",
-            "absolute path",
-        ),
-        (
-            "version = 1\n[packages.a.scopes.network]\ndecision = \"revoked\"",
+            json!({ "package": "a", "scopes": { "network": { "decision": "revoked" } } }),
             "isn't a scope",
         ),
     ] {
-        let error = Local::parse(source).unwrap_err().to_string();
-        assert!(error.contains(problem), "{source}: {error}");
+        let error = Local::from_records(vec![record.clone()]).unwrap_err().to_string();
+        assert!(error.contains(problem), "{record}: {error}");
     }
+    let twice = json!({ "package": "a", "enabled": true });
+    assert!(
+        Local::from_records(vec![twice.clone(), twice])
+            .unwrap_err()
+            .to_string()
+            .contains("twice")
+    );
+
+    let mut store = MemoryLocal::default();
+    store.set_unreadable(Some("the Keychain is locked"));
+    assert!(matches!(Local::load(&mut store), Err(StoreError::Read(_))));
 }
 
 #[test]
