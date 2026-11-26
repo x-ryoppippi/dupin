@@ -20,6 +20,8 @@ Add `dupin mcp` to your agent's MCP servers (see [Configuration](#configuration)
 | `open_panel`                                   | Shows the panel, optionally with a `query` typed in.                   |
 | `pick`                                         | Shows `values` in the panel and waits for you to choose one.           |
 | <kbd>↩</kbd> / <kbd>Esc</kbd> on a `pick`      | Hands the chosen value back, or dismisses it ("Cancelled").            |
+| `list_snapshots`, `read_snapshot`              | List the saved [snapshots](./snapshots.md), or read one's content.     |
+| `open_snapshot`                                | Shows the Snapshots window, optionally with one snapshot selected.     |
 | `ext_check`, `ext_run`, `ext_test`, `ext_snap` | Work on an extension package; see [Extension tools](#extension-tools). |
 
 Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
@@ -34,6 +36,9 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 | `get_active_config` | Returns the values the launcher has applied, as `dupin config get` prints them.                                               |
 | `open_panel`        | Shows the panel, optionally with a `query` typed in, as `dupin open --query` does.                                            |
 | `pick`              | Shows `values` (1 to 1000 JSON values) in the panel and waits up to five minutes for you to choose one, as `dupin pick` does. |
+| `list_snapshots`    | Returns the saved snapshots' metadata, newest first, as `dupin snapshots list --json` does.                                   |
+| `read_snapshot`     | Takes an `id` and returns that snapshot's saved content: what the Snapshots window shows of it.                               |
+| `open_snapshot`     | Shows the Snapshots window, with the snapshot `id` selected if given, as `dupin snapshots open [--id]` does.                  |
 
 `read_config` reports the base's `path`, `exists`, `readOnly` and TOML `source` at the top level. The `overlay`, what Settings saved over a read-only base, has `exists`, its TOML `source`, read from encrypted storage or from the running launcher that holds it, and `active`, which is true when the base is read-only. `lockedKeys` is empty for a writable base and null if the read-only base has invalid TOML syntax.
 
@@ -41,11 +46,15 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 
 `pick` answers `{"value": ...}` with the chosen value unchanged.
 
+`list_snapshots` answers `entries` (each with `id`, `saved_at`, `mode`, `title` and `query`), `truncated` and any storage `problem`. `read_snapshot` answers the same metadata plus `views`: the result rows and text the window shows, each a `text` (`title`, `subtitle`), `detail` (`title`, `body`) or `pair` (`source`, `result`). A snapshot too large for one reply keeps its first views that fit; `truncated` is then true and `omitted_views` counts the rest. Its resume state is never returned. `open_snapshot` answers `{"shown": true}`; an unknown `id` is "NotFound: snapshot".
+
+Reading a snapshot returns what you saved, which can include what you typed and the results shown, to the agent you connected. The tools only read: they don't save, delete or resume a snapshot, and never run its saved actions.
+
 </details>
 
 ## Notes
 
-- `get_active_config`, `open_panel` and `pick` need the resident launcher running.
+- `get_active_config`, `open_panel`, `pick` and the snapshot tools need the resident launcher running.
 - No tool writes configuration, runs a script or opens a file ([#34](https://github.com/x-ryoppippi/dupin/issues/34)).
 
 <details>
@@ -131,11 +140,13 @@ A tool that fails returns a result with `isError: true` and the reason as text, 
 <details>
 <summary>Tool failures and JSON-RPC codes</summary>
 
-| Failure                                | Reason text            |
-| -------------------------------------- | ---------------------- |
-| `open_panel` while Dupin isn't running | "Dupin is not running" |
-| A `pick` the user dismisses            | "Cancelled"            |
-| An argument it doesn't accept          | What is wrong          |
+| Failure                                               | Reason text               |
+| ----------------------------------------------------- | ------------------------- |
+| A launcher tool while Dupin isn't running             | "Dupin is not running"    |
+| `read_snapshot` or `open_snapshot` of an unknown `id` | "NotFound: snapshot"      |
+| A snapshot tool while snapshots are loading           | "Busy: snapshots loading" |
+| A `pick` the user dismisses                           | "Cancelled"               |
+| An argument it doesn't accept                         | What is wrong             |
 
 | Code     | For                                                    |
 | -------- | ------------------------------------------------------ |
