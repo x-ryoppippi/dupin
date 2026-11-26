@@ -190,11 +190,15 @@ fn search(
         .filter_map(|(j, s)| s.map(|s| (j, s)))
         .max_by_key(|&(j, s)| (s, std::cmp::Reverse(j)))?;
     let length = LENGTH * n as i32;
-    let score = if is_whole_name(query, name) {
+    // The whole name and its initials both begin with the name's first letter or digit, so a
+    // name that begins with another rules both out at the cost of one comparison, which a
+    // long catalogue makes for every row on every keystroke.
+    let may_lead = !chars[0].is_alphanumeric() || lower[0] == query[0];
+    let score = if may_lead && is_whole_name(query, name) {
         EXACT + total
     } else if runs_from_word_start(query, name) {
         RUN_FROM_WORD_START + total
-    } else if let Some(initials) = initials(query, name, best, next) {
+    } else if may_lead && let Some(initials) = initials(query, name, best, next) {
         // How far apart the initials are says nothing about how well they match ("am" is as
         // good a match for Activity Monitor as for Apple Music); which words they start does.
         INITIALS + initials
