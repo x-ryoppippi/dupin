@@ -64,5 +64,5 @@ Write, install and test extensions of your own.
 
 ## About
 
-- [Philosophy](./philosophy.md): built for searching, fast by rule, extended with plain TypeScript
+- [Philosophy](./philosophy.md): why Dupin exists: built for searching, a launcher and nothing more, fast by rule, extensions agents can write
 - [The name](./name.md): why Dupin, and the Mac launchers it descends from
