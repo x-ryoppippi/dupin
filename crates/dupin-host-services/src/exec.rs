@@ -27,6 +27,7 @@ const MAX_NAME_BYTES: usize = 64;
 const SCRIPT_PREFIX: &str = "@script:";
 const MINIMAL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 const PASSED_VARIABLES: [&str; 4] = ["HOME", "TMPDIR", "LANG", "USER"];
+const SSH_AGENT_VARIABLE: &str = "SSH_AUTH_SOCK";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExecError {
@@ -196,6 +197,8 @@ pub struct Options {
     pub output_bytes: usize,
     /// Whether the guest receives stdout and stderr. Without it the guest learns only the exit.
     pub return_output: bool,
+    /// Whether an executable also receives `SSH_AUTH_SOCK`, so it can use the user's SSH agent.
+    pub ssh_agent: bool,
 }
 
 impl Default for Options {
@@ -205,6 +208,7 @@ impl Default for Options {
             timeout: DEFAULT_TIMEOUT,
             output_bytes: DEFAULT_OUTPUT_BYTES,
             return_output: false,
+            ssh_agent: false,
         }
     }
 }
@@ -291,6 +295,11 @@ impl Profile {
         }
         if options.output_bytes > MAX_OUTPUT_BYTES {
             return Err(invalid("output is limited to 1 MiB"));
+        }
+        if matches!(target, Target::Script(_)) && options.ssh_agent {
+            return Err(invalid(
+                "script commands already run with Dupin's own environment",
+            ));
         }
         match (&target, &options.working_directory) {
             (Target::Script(_), Some(_)) => {
@@ -414,17 +423,25 @@ impl Profile {
         } else {
             format!("Runs {program} with arguments: {}", args.join(" "))
         }];
+        let variables = if self.options.ssh_agent {
+            "PATH, HOME, TMPDIR, LANG, USER and SSH_AUTH_SOCK"
+        } else {
+            "PATH, HOME, TMPDIR, LANG and USER"
+        };
         lines.push(match (&self.target, &self.options.working_directory) {
             (Target::Script(_), _) => {
                 "Runs in your home folder with Dupin's own environment, as when you run the script from Dupin."
                     .into()
             }
             (_, Some(directory)) => format!(
-                "Runs in {} with only PATH, HOME, TMPDIR, LANG and USER set.",
+                "Runs in {} with only {variables} set.",
                 crate::display_path(directory)
             ),
-            (_, None) => "Runs in your home folder with only PATH, HOME, TMPDIR, LANG and USER set.".into(),
+            (_, None) => format!("Runs in your home folder with only {variables} set."),
         });
+        if self.options.ssh_agent {
+            lines.push("SSH_AUTH_SOCK lets it use every key your SSH agent holds.".into());
+        }
         lines.push(
             "It runs with your full user access and can use its own credentials, configuration and hooks."
                 .into(),
@@ -465,7 +482,11 @@ impl Profile {
                         path.display()
                     )));
                 }
-                (path.clone(), Environment::Minimal(minimal_environment()))
+                let mut environment = minimal_environment();
+                if self.options.ssh_agent {
+                    environment.extend(passed(SSH_AGENT_VARIABLE));
+                }
+                (path.clone(), Environment::Minimal(environment))
             }
         };
         Ok(Launch {
@@ -552,12 +573,14 @@ fn quote(text: &str) -> String {
 /// TMPDIR, LANG and USER. Nothing else from Dupin's environment is passed on.
 pub fn minimal_environment() -> Vec<(String, OsString)> {
     let mut environment = vec![("PATH".to_owned(), OsString::from(MINIMAL_PATH))];
-    environment.extend(PASSED_VARIABLES.iter().filter_map(|name| {
-        std::env::var_os(name)
-            .filter(|value| !value.is_empty())
-            .map(|value| ((*name).to_owned(), value))
-    }));
+    environment.extend(PASSED_VARIABLES.iter().filter_map(|name| passed(name)));
     environment
+}
+
+fn passed(name: &str) -> Option<(String, OsString)> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(|value| (name.to_owned(), value))
 }
 
 /// Resolves `@script:<name>` to an installed script command after checking `args` against its

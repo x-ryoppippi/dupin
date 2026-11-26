@@ -1156,45 +1156,69 @@ fn profile(permit: &Permit, script: bool, timeout: Duration) -> Result<exec::Pro
             },
         )
         .map_err(unavailable),
-        Scope::Exec {
-            name, args, output, ..
-        } if !script => {
+        scope @ Scope::Exec { .. } if !script => {
             let binding = permit
                 .binding()
                 .ok_or_else(|| Failure::new("failed", "no program was picked for the profile"))?;
-            let inputs = args
-                .iter()
-                .filter_map(|arg| placeholder(arg))
-                .map(|name| {
-                    (
-                        name,
-                        exec::Input {
-                            kind: exec::InputKind::Text {
-                                max_bytes: MAX_INPUT_BYTES,
-                                multiline: false,
-                                option_like: false,
-                            },
-                            required: true,
-                        },
-                    )
-                })
-                .collect();
-            let template: Vec<&str> = args.iter().map(String::as_str).collect();
-            exec::Profile::new(
-                name.as_str(),
-                exec::Target::Executable(binding.to_path_buf()),
-                &template,
-                inputs,
-                exec::Options {
-                    return_output: *output,
-                    timeout,
-                    ..exec::Options::default()
-                },
-            )
-            .map_err(unavailable)
+            timed_profile(scope, binding, timeout).map_err(unavailable)
         }
         _ => Err(Failure::new("failed", "the permit doesn't name a program")),
     }
+}
+
+/// The profile an `exec` scope declares, run with the program picked for it. Its placeholders
+/// become required one-line text inputs.
+pub fn exec_profile(scope: &Scope, program: &std::path::Path) -> Result<exec::Profile, exec::ExecError> {
+    timed_profile(scope, program, exec::DEFAULT_TIMEOUT)
+}
+
+fn timed_profile(
+    scope: &Scope,
+    program: &std::path::Path,
+    timeout: Duration,
+) -> Result<exec::Profile, exec::ExecError> {
+    let Scope::Exec {
+        name,
+        args,
+        output,
+        ssh_agent,
+        ..
+    } = scope
+    else {
+        return Err(exec::ExecError::InvalidProfile(
+            "the scope doesn't run a program".into(),
+        ));
+    };
+    let inputs = args
+        .iter()
+        .filter_map(|arg| placeholder(arg))
+        .map(|name| {
+            (
+                name,
+                exec::Input {
+                    kind: exec::InputKind::Text {
+                        max_bytes: MAX_INPUT_BYTES,
+                        multiline: false,
+                        option_like: false,
+                    },
+                    required: true,
+                },
+            )
+        })
+        .collect();
+    let template: Vec<&str> = args.iter().map(String::as_str).collect();
+    exec::Profile::new(
+        name.as_str(),
+        exec::Target::Executable(program.to_path_buf()),
+        &template,
+        inputs,
+        exec::Options {
+            return_output: *output,
+            ssh_agent: *ssh_agent,
+            timeout,
+            ..exec::Options::default()
+        },
+    )
 }
 
 /// The input an argument template element names, as in `--count={count}`.

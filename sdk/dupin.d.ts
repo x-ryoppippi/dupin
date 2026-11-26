@@ -584,12 +584,19 @@ declare module 'dupin' {
 		 * Up to 16 named profiles: an argument template whose `{input}` placeholders take one line
 		 * of text each, run with the program at the absolute path `program` names, or one the user
 		 * picks; or `@script:<name>` for one of the user's script commands. `output` asks to
-		 * receive stdout and stderr; `background` lets the profile run while the user types, in
+		 * receive stdout and stderr; `sshAgent` hands a picked program `SSH_AUTH_SOCK`, so `ssh`
+		 * can use the user's agent; `background` lets the profile run while the user types, in
 		 * `items` and in event handlers, rather than only in an action.
 		 */
 		exec?: Record<
 			string,
-			{ args?: string[]; output?: boolean; program?: string; background?: boolean }
+			{
+				args?: string[];
+				output?: boolean;
+				program?: string;
+				background?: boolean;
+				sshAgent?: boolean;
+			}
 		>;
 		/**
 		 * Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until

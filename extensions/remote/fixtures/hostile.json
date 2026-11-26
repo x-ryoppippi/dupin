@@ -1,0 +1,954 @@
+{
+	"fixture": 1,
+	"description": "Whatever a hostile machine prints is plain, bounded text: escape sequences, control and bidi or invisible characters are dropped, long lines are cut, lines that don't parse are skipped, and a log line shows in a code block no backtick run can close.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host evil\n"
+		},
+		"exec": [
+			{
+				"profile": "processes",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-oBatchMode=yes",
+					"-oConnectTimeout=5",
+					"-oServerAliveInterval=5",
+					"-oServerAliveCountMax=2",
+					"-oStrictHostKeyChecking=yes",
+					"-oUpdateHostKeys=no",
+					"-oClearAllForwardings=yes",
+					"-oPermitLocalCommand=no",
+					"-oRemoteCommand=none",
+					"-oControlMaster=no",
+					"-oLogLevel=ERROR",
+					"evil",
+					"--",
+					"ps",
+					"-A",
+					"-o",
+					"pid=",
+					"-o",
+					"user=",
+					"-o",
+					"pcpu=",
+					"-o",
+					"pmem=",
+					"-o",
+					"etime=",
+					"-o",
+					"args="
+				],
+				"status": 0,
+				"stdout": "  666 evil      0.0  0.0 00:01 \u001b[31mred\u001b[0m \u001b]0;pwned\u0007title \u202egnp.exe\u202c zero\u200bwidth\u0000nul\n  667 evil      0.0  0.0 00:01 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\ngarbage line that is not a process\n",
+				"stderr": ""
+			},
+			{
+				"profile": "ports",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-oBatchMode=yes",
+					"-oConnectTimeout=5",
+					"-oServerAliveInterval=5",
+					"-oServerAliveCountMax=2",
+					"-oStrictHostKeyChecking=yes",
+					"-oUpdateHostKeys=no",
+					"-oClearAllForwardings=yes",
+					"-oPermitLocalCommand=no",
+					"-oRemoteCommand=none",
+					"-oControlMaster=no",
+					"-oLogLevel=ERROR",
+					"evil",
+					"--",
+					"ss",
+					"-H",
+					"-l",
+					"-n",
+					"-t",
+					"-u",
+					"-p"
+				],
+				"status": 0,
+				"stdout": "x\n",
+				"stderr": ""
+			},
+			{
+				"profile": "log-file",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-oBatchMode=yes",
+					"-oConnectTimeout=5",
+					"-oServerAliveInterval=5",
+					"-oServerAliveCountMax=2",
+					"-oStrictHostKeyChecking=yes",
+					"-oUpdateHostKeys=no",
+					"-oClearAllForwardings=yes",
+					"-oPermitLocalCommand=no",
+					"-oRemoteCommand=none",
+					"-oControlMaster=no",
+					"-oLogLevel=ERROR",
+					"evil",
+					"--",
+					"tail",
+					"-n",
+					"50",
+					"--",
+					"/var/log/evil.log"
+				],
+				"status": 0,
+				"stdout": "```\n[click me](https://evil.example/phish) **bold** <script>alert(1)</script>\n````` fence breaker\n",
+				"stderr": ""
+			}
+		],
+		"storage": [
+			{
+				"allowTerminate": false,
+				"dirs": [],
+				"enabled": true,
+				"host": "evil",
+				"kind": "host",
+				"lines": 50,
+				"logs": ["/var/log/evil.log"],
+				"units": []
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "evil",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "not fetched"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Show evil"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Refresh evil"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "evil",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "evil"
+									},
+									"view": "configure"
+								},
+								"title": "Configure evil…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "evil"
+								},
+								{
+									"label": "State",
+									"text": "not fetched"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "/var/log/evil.log"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:evil",
+						"subtitle": "Not fetched yet: ⌘↩ fetches it",
+						"title": "evil"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Refresh evil",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "refresh",
+						"data": {
+							"host": "evil"
+						}
+					}
+				},
+				"invalidated": true,
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							},
+							{
+								"tag": "online"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Show evil"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Refresh evil"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "evil",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "evil"
+									},
+									"view": "configure"
+								},
+								"title": "Configure evil…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "evil"
+								},
+								{
+									"label": "State",
+									"text": "online"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "/var/log/evil.log"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:evil",
+						"subtitle": "2 processes · 0 ports · 3 log lines",
+						"title": "evil"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "red title gnp.exe zerowidthnul",
+								"title": "Copy"
+							},
+							{
+								"copy": "666",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 0,
+										"record": "d5d8eee125eb8f960bf597de8841929d"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "evil"
+								},
+								{
+									"label": "PID",
+									"text": "666"
+								},
+								{
+									"label": "User",
+									"text": "evil"
+								},
+								{
+									"label": "CPU",
+									"text": "0.0%"
+								},
+								{
+									"label": "Memory",
+									"text": "0.0%"
+								},
+								{
+									"label": "Running for",
+									"text": "00:01"
+								},
+								{
+									"label": "Command",
+									"text": "red title gnp.exe zerowidthnul"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:evil:666",
+						"subtitle": "evil · PID 666 · evil · 0.0% CPU · 0.0% memory · up 00:01",
+						"title": "red title gnp.exe zerowidthnul"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA…",
+								"title": "Copy"
+							},
+							{
+								"copy": "667",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 1,
+										"record": "d5d8eee125eb8f960bf597de8841929d"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "evil"
+								},
+								{
+									"label": "PID",
+									"text": "667"
+								},
+								{
+									"label": "User",
+									"text": "evil"
+								},
+								{
+									"label": "CPU",
+									"text": "0.0%"
+								},
+								{
+									"label": "Memory",
+									"text": "0.0%"
+								},
+								{
+									"label": "Running for",
+									"text": "00:01"
+								},
+								{
+									"label": "Command",
+									"text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA…"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:evil:667",
+						"subtitle": "evil · PID 667 · evil · 0.0% CPU · 0.0% memory · up 00:01",
+						"title": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA…"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "```",
+								"title": "Copy"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 0,
+										"record": "d55c1e0bbe62babc1e07ca020d3a3bba"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"icon": "sf:text.alignleft",
+						"id": "log:evil:dc2b9db5:0",
+						"subtitle": "evil · /var/log/evil.log",
+						"title": "```"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "[click me](https://evil.example/phish) **bold** <script>alert(1)</script>",
+								"title": "Copy"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 1,
+										"record": "d55c1e0bbe62babc1e07ca020d3a3bba"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"icon": "sf:text.alignleft",
+						"id": "log:evil:dc2b9db5:1",
+						"subtitle": "evil · /var/log/evil.log",
+						"title": "[click me](https://evil.example/phish) **bold** <script>alert(1)</script>"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "````` fence breaker",
+								"title": "Copy"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 2,
+										"record": "d55c1e0bbe62babc1e07ca020d3a3bba"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"icon": "sf:text.alignleft",
+						"id": "log:evil:dc2b9db5:2",
+						"subtitle": "evil · /var/log/evil.log",
+						"title": "````` fence breaker"
+					}
+				],
+				"selected": 0,
+				"storage": [
+					{
+						"allowTerminate": false,
+						"dirs": [],
+						"enabled": true,
+						"host": "evil",
+						"kind": "host",
+						"lines": 50,
+						"logs": ["/var/log/evil.log"],
+						"units": []
+					},
+					{
+						"fetchedAt": 1795683600000,
+						"host": "evil",
+						"kind": "probe",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "red title gnp.exe zerowidthnul",
+								"cpu": "0.0",
+								"elapsed": "00:01",
+								"mem": "0.0",
+								"pid": "666",
+								"user": "evil"
+							},
+							{
+								"command": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA…",
+								"cpu": "0.0",
+								"elapsed": "00:01",
+								"mem": "0.0",
+								"pid": "667",
+								"user": "evil"
+							}
+						],
+						"state": "ok",
+						"truncated": false
+					},
+					{
+						"fetchedAt": 1795683600000,
+						"host": "evil",
+						"kind": "probe",
+						"probe": "ports",
+						"rows": [],
+						"state": "ok",
+						"truncated": false
+					},
+					{
+						"fetchedAt": 1795683600000,
+						"host": "evil",
+						"kind": "probe",
+						"probe": "log:/var/log/evil.log",
+						"rows": [
+							{
+								"line": "```"
+							},
+							{
+								"line": "[click me](https://evil.example/phish) **bold** <script>alert(1)</script>"
+							},
+							{
+								"line": "````` fence breaker"
+							}
+						],
+						"state": "ok",
+						"truncated": false
+					}
+				],
+				"toasts": ["Refreshed evil"]
+			}
+		},
+		{
+			"query": "evil ps",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "red title gnp.exe zerowidthnul",
+								"title": "Copy"
+							},
+							{
+								"copy": "666",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 0,
+										"record": "d5d8eee125eb8f960bf597de8841929d"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "evil"
+								},
+								{
+									"label": "PID",
+									"text": "666"
+								},
+								{
+									"label": "User",
+									"text": "evil"
+								},
+								{
+									"label": "CPU",
+									"text": "0.0%"
+								},
+								{
+									"label": "Memory",
+									"text": "0.0%"
+								},
+								{
+									"label": "Running for",
+									"text": "00:01"
+								},
+								{
+									"label": "Command",
+									"text": "red title gnp.exe zerowidthnul"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:evil:666",
+						"subtitle": "evil · PID 666 · evil · 0.0% CPU · 0.0% memory · up 00:01",
+						"title": "red title gnp.exe zerowidthnul"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA…",
+								"title": "Copy"
+							},
+							{
+								"copy": "667",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 1,
+										"record": "d5d8eee125eb8f960bf597de8841929d"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "evil"
+								},
+								{
+									"label": "PID",
+									"text": "667"
+								},
+								{
+									"label": "User",
+									"text": "evil"
+								},
+								{
+									"label": "CPU",
+									"text": "0.0%"
+								},
+								{
+									"label": "Memory",
+									"text": "0.0%"
+								},
+								{
+									"label": "Running for",
+									"text": "00:01"
+								},
+								{
+									"label": "Command",
+									"text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA…"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:evil:667",
+						"subtitle": "evil · PID 667 · evil · 0.0% CPU · 0.0% memory · up 00:01",
+						"title": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA…"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "[click me](https://evil.example/phish) **bold** <script>alert(1)</script>",
+								"title": "Copy"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 1,
+										"record": "d55c1e0bbe62babc1e07ca020d3a3bba"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"icon": "sf:text.alignleft",
+						"id": "log:evil:dc2b9db5:1",
+						"subtitle": "evil · /var/log/evil.log",
+						"title": "[click me](https://evil.example/phish) **bold** <script>alert(1)</script>"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "evil logs fence",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							}
+						],
+						"actions": [
+							{
+								"copy": "````` fence breaker",
+								"title": "Copy"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683600000,
+										"host": "evil",
+										"index": 2,
+										"record": "d55c1e0bbe62babc1e07ca020d3a3bba"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "evil"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"icon": "sf:text.alignleft",
+						"id": "log:evil:dc2b9db5:2",
+						"subtitle": "evil · /var/log/evil.log",
+						"title": "````` fence breaker"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Show Details",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": {
+							"fetchedAt": 1795683600000,
+							"host": "evil",
+							"index": 2,
+							"record": "d55c1e0bbe62babc1e07ca020d3a3bba"
+						},
+						"view": "details"
+					}
+				},
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "````` fence breaker",
+								"title": "Copy"
+							}
+						],
+						"detail": {
+							"markdown": "``````\n````` fence breaker\n``````",
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "evil"
+								},
+								{
+									"label": "Source",
+									"text": "/var/log/evil.log"
+								},
+								{
+									"label": "Fetched",
+									"text": "Just now from evil"
+								}
+							]
+						},
+						"id": "detail",
+						"title": "/var/log/evil.log"
+					}
+				],
+				"selected": 0,
+				"view": {
+					"depth": 1,
+					"name": "details",
+					"state": {
+						"fetchedAt": 1795683600000,
+						"host": "evil",
+						"index": 2,
+						"record": "d55c1e0bbe62babc1e07ca020d3a3bba"
+					},
+					"title": "Show Details",
+					"type": "detail"
+				}
+			}
+		}
+	]
+}
