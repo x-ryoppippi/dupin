@@ -19,30 +19,222 @@
 	},
 	"steps": [
 		{
-			"query": "settings"
-		},
-		{
-			"activate": "Remote Settings\u2026"
-		},
-		{
-			"fill": {
-				"terminal": "iTerm",
-				"hosts": "deploy@build.example.com\n-oProxyCommand=touch"
+			"query": "settings",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "settings"
+								},
+								"title": "Remote Settings…"
+							}
+						],
+						"icon": "sf:gearshape.2",
+						"id": "settings",
+						"subtitle": "Terminal app and hosts beside those in ~/.ssh/config",
+						"title": "Remote Settings…"
+					}
+				],
+				"selected": 0
 			}
 		},
 		{
-			"submit": true
+			"activate": "Remote Settings…",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": null,
+						"view": "settings"
+					}
+				},
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "terminal",
+							"title": "Open SSH sessions in",
+							"type": "select",
+							"value": "Terminal"
+						},
+						{
+							"id": "hosts",
+							"title": "Hosts beside those in ~/.ssh/config, one a line",
+							"type": "textarea",
+							"value": ""
+						}
+					],
+					"name": "settings",
+					"submit": "Save",
+					"title": "Remote Settings…",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"hosts": "deploy@build.example.com\n-oProxyCommand=touch",
+				"terminal": "iTerm"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "terminal",
+							"title": "Open SSH sessions in",
+							"type": "select",
+							"value": "iTerm"
+						},
+						{
+							"id": "hosts",
+							"title": "Hosts beside those in ~/.ssh/config, one a line",
+							"type": "textarea",
+							"value": "deploy@build.example.com\n-oProxyCommand=touch"
+						}
+					],
+					"name": "settings",
+					"submit": "Save",
+					"title": "Remote Settings…",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "terminal",
+							"title": "Open SSH sessions in",
+							"type": "select",
+							"value": "iTerm"
+						},
+						{
+							"error": "“-oProxyCommand=touch” isn’t a host name or user@host",
+							"id": "hosts",
+							"title": "Hosts beside those in ~/.ssh/config, one a line",
+							"type": "textarea",
+							"value": "deploy@build.example.com\n-oProxyCommand=touch"
+						}
+					],
+					"name": "settings",
+					"submit": "Save",
+					"title": "Remote Settings…",
+					"type": "form"
+				}
+			}
 		},
 		{
 			"fill": {
 				"hosts": "deploy@build.example.com"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "terminal",
+							"title": "Open SSH sessions in",
+							"type": "select",
+							"value": "iTerm"
+						},
+						{
+							"id": "hosts",
+							"title": "Hosts beside those in ~/.ssh/config, one a line",
+							"type": "textarea",
+							"value": "deploy@build.example.com"
+						}
+					],
+					"name": "settings",
+					"submit": "Save",
+					"title": "Remote Settings…",
+					"type": "form"
+				}
 			}
 		},
 		{
-			"submit": true
+			"submit": true,
+			"expect": {
+				"invalidated": true,
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "settings"
+								},
+								"title": "Remote Settings…"
+							}
+						],
+						"icon": "sf:gearshape.2",
+						"id": "settings",
+						"subtitle": "Terminal app and hosts beside those in ~/.ssh/config",
+						"title": "Remote Settings…"
+					}
+				],
+				"selected": 0,
+				"storage": [
+					{
+						"hosts": ["deploy@build.example.com"],
+						"kind": "settings",
+						"terminal": "iTerm"
+					}
+				],
+				"toasts": ["Saved Remote Settings"]
+			}
 		},
 		{
-			"query": "build"
+			"query": "build",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "off"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "enable",
+									"data": {
+										"host": "deploy@build.example.com"
+									}
+								},
+								"title": "Enable deploy@build.example.com"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "deploy@build.example.com"
+									},
+									"view": "configure"
+								},
+								"title": "Configure deploy@build.example.com…"
+							},
+							{
+								"copy": "deploy@build.example.com",
+								"title": "Copy Host Name"
+							}
+						],
+						"icon": "sf:server.rack",
+						"id": "off:deploy@build.example.com",
+						"subtitle": "Added in Remote Settings",
+						"title": "deploy@build.example.com"
+					}
+				],
+				"selected": 0
+			}
 		}
 	]
 }

@@ -20,8 +20,7 @@ function rows() {
 			title: host,
 			subtitle: '300 processes · 100 ports · 400 log lines · 200 files',
 			section: 'Hosts',
-			time: 1795683558000,
-			accessories: [{ tag: 'online' }],
+			accessories: [{ freshness: 1795683558000 }, { tag: 'online' }],
 			matchText: `${host} host`,
 		});
 	}
@@ -33,7 +32,7 @@ function rows() {
 				title: command,
 				subtitle: `${host} · PID ${pid} · www-data · 0.3% CPU · 0.4% memory · up 41-03:11:58`,
 				section: `${host} · Processes`,
-				time: 1795683558000,
+				accessories: [{ freshness: 1795683558000 }],
 				text: command,
 				matchText: `${host} ps processes ${pid} www-data ${command}`,
 			});
@@ -45,7 +44,7 @@ function rows() {
 				title: `tcp ${local}`,
 				subtitle: `${host} · LISTEN · users:(("node",pid=${index},fd=6))`,
 				section: `${host} · Ports`,
-				time: 1795683558000,
+				accessories: [{ freshness: 1795683558000 }],
 				text: local,
 				matchText: `${host} ports port tcp ${local} users:(("node",pid=${index},fd=6))`,
 			});
@@ -57,7 +56,7 @@ function rows() {
 				title: line,
 				subtitle: `${host} · nginx.service`,
 				section: `${host} · nginx.service`,
-				time: 1795683558000,
+				accessories: [{ freshness: 1795683558000 }],
 				text: line,
 				matchText: `${host} logs log nginx.service ${line}`,
 			});
@@ -69,7 +68,7 @@ function rows() {
 				title: 'server.js',
 				subtitle: `${host} · /srv/app/releases/${index}`,
 				section: `${host} · /srv/app`,
-				time: 1795683558000,
+				accessories: [{ freshness: 1795683558000 }],
 				text: path,
 				matchText: `${host} files file ${path}`,
 			});

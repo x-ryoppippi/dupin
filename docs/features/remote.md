@@ -8,10 +8,10 @@ Switch on **Remote** in Settings → Extensions and allow its scopes there (see 
 
 ## What you see
 
-- **Hosts**: each host you enabled, with how it answered last (`online`, `unreachable`, `auth failed`, `host key`, `timed out`) and how long ago Remote fetched it.
+- **Hosts**: each host you enabled, with how long ago Remote last reached it (`12 s ago`), **Offline** when it didn't answer, **Stale** when its last answer is over an hour old, and a label saying how it answered (`online`, `unreachable`, `auth failed`, `host key`, `timed out`).
 - **Other Hosts**: the hosts in `~/.ssh/config` and its `Include` files that you haven't enabled, and those you added in Remote Settings. Patterns such as `*.internal` are left out.
 - **Remote**: Remote Settings, Refresh All Hosts and Forget Fetched Results.
-- Then each enabled host's sections, such as **web1 · Processes**, **web1 · Ports**, **web1 · nginx.service** and **web1 · /srv/app**. Every row starts its subtitle with how long ago it was fetched, and a host that didn't answer last time marks its rows `unreachable` while they still show what it had.
+- Then each enabled host's sections, such as **web1 · Processes**, **web1 · Ports**, **web1 · nginx.service** and **web1 · /srv/app**. Every row ends with how long ago it was fetched, and the rows of a host that didn't answer last time say **Offline** while they still show what it had.
 
 Typing keeps the rows that hold every word, in this order: `remote web1 ports 5432`, `remote db logs error`.
 
@@ -19,7 +19,7 @@ Typing keeps the rows that hold every word, in this order: `remote web1 ports 54
 
 | Key / action                        | On                              | What it does                                                                                                    |
 | ----------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| <kbd>↩</kbd> **Show _host_**        | A host                          | Opens the host on a page of its own; type there to narrow it, as after `remote web1`                            |
+| <kbd>↩</kbd> **Show _host_**        | A host                          | Types the host after `remote`, such as `remote web1 `, so only its rows are left; type a sub-scope after it     |
 | <kbd>⌘↩</kbd> **Refresh _host_**    | A host                          | Fetches the host again over SSH; the panel stays usable while it runs                                           |
 | <kbd>⌘↩</kbd> **Open SSH Session**  | A process, port, log line, file | Opens `ssh://host` in Terminal or iTerm, as Remote Settings choose; a host offers it too                        |
 | <kbd>↩</kbd> **Copy**               | A process, port, log line, file | Copies the command line, the address, the line or the path                                                      |
