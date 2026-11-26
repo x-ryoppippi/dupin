@@ -2,6 +2,8 @@
 
 <p align="center"><img src="../assets/logo/dupin.svg" alt="Dupin's mark: a pair of green spectacles" width="128" height="128" /></p>
 
+> **温故知新** (_onko chishin_): revisit the old to understand the new. From the [_Analects_](https://en.wiktionary.org/wiki/%E6%B8%A9%E6%95%85%E7%9F%A5%E6%96%B0), II.11.
+
 Dupin continues Alfred's line, but takes its name from where the line began. Mac search tools and launchers have a line of names that runs Sherlock → Watson → Alfred: a detective, his companion, a butler. [C. Auguste Dupin](https://en.wikipedia.org/wiki/C._Auguste_Dupin), [Edgar Allan Poe](https://en.wikipedia.org/wiki/Edgar_Allan_Poe)'s detective, came before [Sherlock Holmes](https://en.wikipedia.org/wiki/Sherlock_Holmes), and Holmes's author owed the detective story to Poe.
 
 The name is French, pronounced /dy.pɛ̃/ ([Wiktionary](https://en.wiktionary.org/wiki/Dupin)). Why Dupin exists, and what it keeps from the launchers below, is in [Philosophy](./philosophy.md).

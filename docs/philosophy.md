@@ -1,5 +1,7 @@
 # Philosophy
 
+**Back to basics.**
+
 Dupin is what Alfred was meant to be, as its author sees it: a launcher built for searching, simple and extensible. Its author loves Alfred's simplicity, a quick panel driven from the keyboard where a short keyword reaches anything, and Dupin keeps that interface and carries it forward, with extensions that agents can write. In the age of AI agents, Dupin keeps its core small, fast and extensible rather than building AI into it.
 
 Dupin owes its shape to LaunchBar, Quicksilver, Alfred, Spotlight and Raycast, and to everyone who made them. [The name](./name.md) tells their story and where Dupin's name comes from.
