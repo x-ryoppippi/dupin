@@ -20,6 +20,9 @@ recent = [
 	"/System/Applications/Maps.app",
 ]
 
+# What the `glass = true` clips are recorded over, so every tab on the home page shows the same.
+wallpaper = "dusk"
+
 # Folders end with a slash.
 documents = [
 	"Budget 2026.numbers",
@@ -233,7 +236,13 @@ width = 760
 # The website's clips, on page `home`, play on a dark page only (`themes = ["dark"]`), at the
 # `scale` that keeps them sharp on a Retina screen at the size the page shows them. A backdrop shader changes every pixel
 # of every frame, so they are MP4 videos over the page's black (`video = true`, with a WebP
-# poster of the last frame), and the shader clips have no captions (`captions = false`).
+# poster of the last frame).
+#
+# A `glass = true` clip shows Liquid Glass, which a headless render draws as an opaque fallback,
+# so `just docs-glass` (scripts/docs-glass.nu) records it from the real app over a `wallpaper`
+# (one of its presets or an image, the manifest's `wallpaper` unless the clip names its own) and
+# lists it in docs/images/glass.json. Until then `just docs-clips` renders it headless over its
+# `backdrop` in its place, and the website says so.
 #
 # A clip never types into a Spotlight search (Files after Space, or `in`): Spotlight answers
 # from this Mac's index, whatever the scratch home holds. Files clips start from Recent items and
@@ -421,79 +430,114 @@ extension = "examples/extensions/notes-js"
 fixture = "notes.json"
 step = 5
 
+# The home page's tabs, each one use of Dupin over Liquid Glass, as it opens by default.
+
 [[clips]]
 page = "home"
-name = "hero"
+name = "apps"
+glass = true
 backdrop = "flow"
 themes = ["dark"]
 scale = 2
 video = true
-steps = [
-	{ type = "ma" },
-	{ key = "down" },
-	{ key = "a", cmd = true },
-	{ key = "backspace" },
-	{ key = "space" },
-	{ wait = 0.6 },
-	{ key = "backspace" },
-	{ type = "d" },
-	{ key = "space" },
-	{ type = "serendipity", burst = true },
-	{ wait = 1.4 },
-	{ key = "a", cmd = true },
-	{ key = "backspace" },
-	{ key = "backspace" },
-	{ type = "?" },
-	{ key = "down" },
-	{ key = "down" },
-]
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
 
 [[clips]]
 page = "home"
-name = "flow"
+name = "files"
+glass = true
 backdrop = "flow"
 themes = ["dark"]
-scale = 1
+scale = 2
 video = true
-captions = false
-steps = [{ wait = 4.0 }]
+steps = [{ wait = 1.0 }, { key = "tab" }, { key = "down" }, { key = "down" }]
 
 [[clips]]
 page = "home"
-name = "aurora"
+name = "in-files"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "in" }, { key = "space" }, { wait = 1.0 }]
+
+[[clips]]
+page = "home"
+name = "dictionary"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "d" }, { key = "space" }, { type = "serendipity", burst = true }, { wait = 1.0 }]
+
+[[clips]]
+page = "home"
+name = "keywords"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "?" }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "clipboard"
+glass = true
+fixtures = "scripts/headless/clipboard-images.json"
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+# The Apps tab again over each backdrop shader, for the home page's backdrop switcher: one
+# recording per shader, not every tab over every shader, which would be six times the bytes to
+# show the same thing.
+
+[[clips]]
+page = "home"
+name = "apps-flow"
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-aurora"
 backdrop = "shaders/aurora.wgsl"
 themes = ["dark"]
-scale = 1
+scale = 2
 video = true
-captions = false
-steps = [{ wait = 4.0 }]
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
 
 [[clips]]
 page = "home"
-name = "embers"
+name = "apps-embers"
 backdrop = "shaders/embers.wgsl"
 themes = ["dark"]
-scale = 1
+scale = 2
 video = true
-captions = false
-steps = [{ wait = 4.0 }]
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
 
 [[clips]]
 page = "home"
-name = "snow"
+name = "apps-snow"
 backdrop = "shaders/snow.wgsl"
 themes = ["dark"]
-scale = 1
+scale = 2
 video = true
-captions = false
-steps = [{ wait = 4.0 }]
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
 
 [[clips]]
 page = "home"
-name = "matrix"
+name = "apps-matrix"
 backdrop = "shaders/matrix.wgsl"
 themes = ["dark"]
-scale = 1
+scale = 2
 video = true
-captions = false
-steps = [{ wait = 4.0 }]
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Clip from '../components/Clip.svelte';
 	import CopyButton from '../components/CopyButton.svelte';
+	import Demo from '../components/Demo.svelte';
 	import DesignChoices from '../components/docs/DesignChoices.svelte';
 	import Footer from '../components/Footer.svelte';
 	import Nav from '../components/Nav.svelte';
@@ -46,39 +46,6 @@
 			title: 'Snapshots and MCP',
 			text: 'Save a calculation, search or extension view to read again later, and let an AI agent read and drive Dupin over MCP.',
 			href: '/docs/features/snapshots/',
-		},
-	];
-
-	const backdrops = [
-		{
-			title: 'Flow',
-			text: 'Built in: the accent colour as warped noise, swelling as you type',
-			src: '/docs/images/home/flow-dark.mp4',
-			poster: '/docs/images/home/flow-dark-poster.webp',
-		},
-		{
-			title: 'Aurora',
-			text: 'Curtains of light with twinkling stars',
-			src: '/docs/images/home/aurora-dark.mp4',
-			poster: '/docs/images/home/aurora-dark-poster.webp',
-		},
-		{
-			title: 'Embers',
-			text: 'Sparks rising from a flickering fire',
-			src: '/docs/images/home/embers-dark.mp4',
-			poster: '/docs/images/home/embers-dark-poster.webp',
-		},
-		{
-			title: 'Snow',
-			text: 'Flakes drifting down in three layers',
-			src: '/docs/images/home/snow-dark.mp4',
-			poster: '/docs/images/home/snow-dark-poster.webp',
-		},
-		{
-			title: 'Matrix',
-			text: 'Columns of glyphs raining down, brightening as you type',
-			src: '/docs/images/home/matrix-dark.mp4',
-			poster: '/docs/images/home/matrix-dark-poster.webp',
 		},
 	];
 </script>
@@ -135,15 +102,7 @@
 			</div>
 		</div>
 		<div class="container rise" style="--d: 300ms">
-			<Clip
-				class="hero-clip"
-				src="/docs/images/home/hero-dark.mp4"
-				poster="/docs/images/home/hero-dark-poster.webp"
-				width={680}
-				height={554}
-				preload="auto"
-				label="The Dupin panel over its Flow backdrop: typing ma lists Maps, the Apple Maps web search and other apps; Space on an empty query enters Files; d and Space looks up serendipity in the dictionary; ? lists every command with its keyword."
-			/>
+			<Demo />
 			<ul class="traits">
 				<li>
 					<strong>Under 3 ms</strong>
@@ -186,32 +145,6 @@
 				{/each}
 			</ul>
 			<a class="link-arrow" href="/docs/#features">Every feature <span class="arrow">→</span></a>
-		</div>
-	</section>
-	<section class="backdrops" aria-labelledby="backdrops-title">
-		<div class="container">
-			<h2 id="backdrops-title" class="section-title">A shader behind the panel</h2>
-			<p class="section-sub">
-				Pick a backdrop in Settings → Appearance, or write your own in WGSL. It is off by default and holds still
-				under Reduce motion.
-			</p>
-			<ul class="backdrop-grid">
-				{#each backdrops as backdrop (backdrop.title)}
-					<li>
-						<Clip
-							src={backdrop.src}
-							poster={backdrop.poster}
-							width={680}
-							height={390}
-							preload="none"
-							label={`The Dupin panel listing recent items over the ${backdrop.title} backdrop.`}
-						/>
-						<strong>{backdrop.title}</strong>
-						<span>{backdrop.text}</span>
-					</li>
-				{/each}
-			</ul>
-			<a class="link-arrow" href="/docs/features/shaders/">Write your own shader <span class="arrow">→</span></a>
 		</div>
 	</section>
 </main>
@@ -399,18 +332,11 @@
 		padding: 0 0 96px;
 	}
 
-	.hero :global(.hero-clip) {
-		max-width: 680px;
-		margin: 48px auto 0;
-	}
-
-	.features,
-	.backdrops {
+	.features {
 		padding: 0 0 96px;
 	}
 
-	.features .container,
-	.backdrops .container {
+	.features .container {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -426,26 +352,12 @@
 		text-align: center;
 	}
 
-	.section-sub {
-		margin: -12px 0 0;
-		max-width: 60ch;
-		color: var(--fg-muted);
-		font-size: 15px;
-		line-height: 1.55;
-		text-align: center;
-		text-wrap: balance;
-	}
-
-	.feature-grid,
-	.backdrop-grid {
+	.feature-grid {
 		display: grid;
 		width: 100%;
 		margin: 0;
 		padding: 0;
 		list-style: none;
-	}
-
-	.feature-grid {
 		grid-template-columns: repeat(4, 1fr);
 		gap: 16px;
 	}
@@ -466,15 +378,13 @@
 		border-color: var(--border-strong);
 	}
 
-	.feature-grid strong,
-	.backdrop-grid strong {
+	.feature-grid strong {
 		font-size: 15px;
 		font-weight: 600;
 		color: var(--fg);
 	}
 
-	.feature-grid span,
-	.backdrop-grid span {
+	.feature-grid span {
 		font-size: 13px;
 		line-height: 1.5;
 		color: var(--fg-muted);
@@ -482,21 +392,6 @@
 
 	.feature-grid code {
 		font-size: 0.92em;
-	}
-
-	.backdrop-grid {
-		grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-		gap: 28px 20px;
-	}
-
-	.backdrop-grid li {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.backdrop-grid li > :global(.clip) {
-		margin-bottom: 8px;
 	}
 
 	.philosophy .container {
