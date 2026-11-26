@@ -25,3 +25,7 @@ lint: install
 # Build and deploy the static site
 deploy: install
     pnpm run deploy
+
+# Regenerate the Japanese display-font subset from the characters in docs/
+font:
+    nu scripts/subset-ja-font.nu

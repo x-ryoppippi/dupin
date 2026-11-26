@@ -186,6 +186,16 @@
 	border-radius: var(--radius-sm);
 }
 
+/* Japanese text, set in the self-hosted Shippori Mincho B1 where the browser has its glyphs. */
+.docs-content :lang(ja) {
+	font-family:
+		'Shippori Mincho B1', 'Hiragino Mincho ProN', 'Yu Mincho', YuMincho, 'Noto Serif CJK JP', serif;
+	font-weight: 700;
+	font-size: 1.35em;
+	letter-spacing: 0.12em;
+	color: var(--fg);
+}
+
 .docs-content .ox-callout-title {
 	margin: 0;
 	color: var(--fg);
