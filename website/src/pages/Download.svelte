@@ -58,7 +58,9 @@
 					</span>
 				</a>
 			</div>
-			<p class="download-note">Signed and notarized. It updates itself.</p>
+			<p class="download-note">
+				Signed and notarized. Drag it to Applications and it updates itself. Official builds send <a href="/docs/features/telemetry/">one anonymous usage ping a day</a>, which one switch turns off.
+			</p>
 		</section>
 
 		<section class="download-section">
@@ -149,7 +151,8 @@
 	}
 
 	.download-version a,
-	.download-all a {
+	.download-all a,
+	.download-note a {
 		color: var(--fg-muted);
 		text-decoration: underline;
 		text-decoration-color: rgba(163, 163, 163, 0.4);
@@ -157,7 +160,8 @@
 	}
 
 	.download-version a:hover,
-	.download-all a:hover {
+	.download-all a:hover,
+	.download-note a:hover {
 		color: var(--fg);
 	}
 

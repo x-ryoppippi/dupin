@@ -1,11 +1,91 @@
 <script lang="ts">
+	import Clip from '../components/Clip.svelte';
 	import CopyButton from '../components/CopyButton.svelte';
 	import DesignChoices from '../components/docs/DesignChoices.svelte';
 	import Footer from '../components/Footer.svelte';
 	import Nav from '../components/Nav.svelte';
-	import PanelDemo from '../components/PanelDemo.svelte';
 	import { channels, downloadChannel, repo, setupPrompt, stableReleased } from '../site.ts';
+
+	const features = [
+		{
+			title: 'Apps and files',
+			text: 'Apps by any name macOS knows them by. Space on an empty query searches files, `in` and Space searches inside them, and Tab browses a folder.',
+			href: '/docs/features/apps/',
+		},
+		{
+			title: 'Keywords',
+			text: 'A keyword and Space reaches a command: `cal`, `d`, `clip`, `gh`. `?` lists every one, and you can add your own aliases and global shortcuts.',
+			href: '/docs/features/keywords/',
+		},
+		{
+			title: 'Clipboard and snippets',
+			text: 'The text, images and files you copy, searchable and encrypted, and snippets that paste with the date or clipboard filled in.',
+			href: '/docs/features/clipboard/',
+		},
+		{
+			title: 'Answers as you type',
+			text: 'Calculations and unit or currency conversions in the main search, your calendar under `cal`, the dictionary under `d`, emoji under `emoji`.',
+			href: '/docs/features/calculator/',
+		},
+		{
+			title: 'Commands',
+			text: 'Your own scripts, window halves and thirds, sleep and lock, and Restart or Update Dupin, from search or a hotkey.',
+			href: '/docs/features/scripts/',
+		},
+		{
+			title: 'Extensions',
+			text: 'TypeScript packages installed from Git, sandboxed to the capabilities you grant and tested against fixtures, so an agent can write one.',
+			href: '/docs/features/extensions/',
+		},
+		{
+			title: 'No account',
+			text: 'What Dupin keeps stays on your Mac, encrypted, and can sync between your Macs through a folder you already sync.',
+			href: '/docs/features/storage/',
+		},
+		{
+			title: 'Snapshots and MCP',
+			text: 'Save a calculation, search or extension view to read again later, and let an AI agent read and drive Dupin over MCP.',
+			href: '/docs/features/snapshots/',
+		},
+	];
+
+	const backdrops = [
+		{
+			title: 'Flow',
+			text: 'Built in: the accent colour as warped noise, swelling as you type',
+			src: '/docs/images/home/flow-dark.mp4',
+			poster: '/docs/images/home/flow-dark-poster.webp',
+		},
+		{
+			title: 'Aurora',
+			text: 'Curtains of light with twinkling stars',
+			src: '/docs/images/home/aurora-dark.mp4',
+			poster: '/docs/images/home/aurora-dark-poster.webp',
+		},
+		{
+			title: 'Embers',
+			text: 'Sparks rising from a flickering fire',
+			src: '/docs/images/home/embers-dark.mp4',
+			poster: '/docs/images/home/embers-dark-poster.webp',
+		},
+		{
+			title: 'Snow',
+			text: 'Flakes drifting down in three layers',
+			src: '/docs/images/home/snow-dark.mp4',
+			poster: '/docs/images/home/snow-dark-poster.webp',
+		},
+		{
+			title: 'Matrix',
+			text: 'Columns of glyphs raining down, brightening as you type',
+			src: '/docs/images/home/matrix-dark.mp4',
+			poster: '/docs/images/home/matrix-dark-poster.webp',
+		},
+	];
 </script>
+
+{#snippet code(text: string)}
+	{#each text.split('`') as part, i (i)}{#if i % 2}<code>{part}</code>{:else}{part}{/if}{/each}
+{/snippet}
 
 <Nav />
 <main>
@@ -17,8 +97,8 @@
 			</a>
 			<h1 class="display hero-title rise" style="--d: 0ms">Press ⌘Space. It's there.</h1>
 			<p class="hero-sub rise" style="--d: 100ms">
-				A fast, simple and beautiful app launcher for your mac.<br />
-				The simplicity of Alfred, with Raycast-style extensions on the way.
+				The doorway to your Mac: type a keyword, reach anything.<br />
+				A fast launcher for Apple silicon, with extensions you or your agent can write.
 			</p>
 			<div class="cta rise" style="--d: 200ms">
 				<div class="cta-buttons">
@@ -47,25 +127,38 @@
 					Read the source (it's GPL) <span class="arrow">↗</span>
 				</a>
 				<p class="cta-more">
+					macOS 14 or later ·
 					{#if !stableReleased}Nightly build until the first release ·{/if}
+					<a href="/docs/features/hotkeys/#freeing-the-hotkey">Free ⌘Space from Spotlight first</a> ·
 					<a href="/download/">All downloads</a>
 				</p>
 			</div>
 		</div>
 		<div class="container rise" style="--d: 300ms">
-			<PanelDemo />
+			<Clip
+				class="hero-clip"
+				src="/docs/images/home/hero-dark.mp4"
+				poster="/docs/images/home/hero-dark-poster.webp"
+				width={680}
+				height={554}
+				preload="auto"
+				label="The Dupin panel over its Flow backdrop: typing ma lists Maps, the Apple Maps web search and other apps; Space on an empty query enters Files; d and Space looks up serendipity in the dictionary; ? lists every command with its keyword."
+			/>
 			<ul class="traits">
 				<li>
-					<strong>~20 ms</strong>
-					<span>from ⌘Space to the panel on screen. It is drawn before you ask for it.</span>
+					<strong>Under 3 ms</strong>
+					<span
+						>from a keystroke to the frame that shows its results, at the 95th percentile, measured in CI on every
+						change. The panel is drawn before you press the hotkey.</span
+					>
 				</li>
 				<li>
 					<strong>Written in Rust</strong>
-					<span>Native and fast, drawn on Liquid Glass. No web view, no Electron.</span>
+					<span>Native, drawn on the GPU. No web view, no Electron.</span>
 				</li>
 				<li>
 					<strong>Open source</strong>
-					<span>GPL-3.0. Read it, build it with Nix, change it.</span>
+					<span>GPL-3.0-or-later. Read it, build it with Nix, change it.</span>
 				</li>
 			</ul>
 		</div>
@@ -77,6 +170,48 @@
 			</p>
 			<DesignChoices />
 			<a class="link-arrow" href="/docs/philosophy/">Read the philosophy <span class="arrow">→</span></a>
+		</div>
+	</section>
+	<section class="features" aria-labelledby="features-title">
+		<div class="container">
+			<h2 id="features-title" class="section-title">What it does</h2>
+			<ul class="feature-grid">
+				{#each features as feature (feature.title)}
+					<li>
+						<a href={feature.href}>
+							<strong>{feature.title}</strong>
+							<span>{@render code(feature.text)}</span>
+						</a>
+					</li>
+				{/each}
+			</ul>
+			<a class="link-arrow" href="/docs/#features">Every feature <span class="arrow">→</span></a>
+		</div>
+	</section>
+	<section class="backdrops" aria-labelledby="backdrops-title">
+		<div class="container">
+			<h2 id="backdrops-title" class="section-title">A shader behind the panel</h2>
+			<p class="section-sub">
+				Pick a backdrop in Settings → Appearance, or write your own in WGSL. It is off by default and holds still
+				under Reduce motion.
+			</p>
+			<ul class="backdrop-grid">
+				{#each backdrops as backdrop (backdrop.title)}
+					<li>
+						<Clip
+							src={backdrop.src}
+							poster={backdrop.poster}
+							width={680}
+							height={390}
+							preload="none"
+							label={`The Dupin panel listing recent items over the ${backdrop.title} backdrop.`}
+						/>
+						<strong>{backdrop.title}</strong>
+						<span>{backdrop.text}</span>
+					</li>
+				{/each}
+			</ul>
+			<a class="link-arrow" href="/docs/features/shaders/">Write your own shader <span class="arrow">→</span></a>
 		</div>
 	</section>
 </main>
@@ -264,6 +399,106 @@
 		padding: 0 0 96px;
 	}
 
+	.hero :global(.hero-clip) {
+		max-width: 680px;
+		margin: 48px auto 0;
+	}
+
+	.features,
+	.backdrops {
+		padding: 0 0 96px;
+	}
+
+	.features .container,
+	.backdrops .container {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 28px;
+		max-width: 1080px;
+	}
+
+	.section-title {
+		margin: 0;
+		font-size: clamp(22px, 3vw, 32px);
+		font-weight: 600;
+		letter-spacing: -0.02em;
+		text-align: center;
+	}
+
+	.section-sub {
+		margin: -12px 0 0;
+		max-width: 60ch;
+		color: var(--fg-muted);
+		font-size: 15px;
+		line-height: 1.55;
+		text-align: center;
+		text-wrap: balance;
+	}
+
+	.feature-grid,
+	.backdrop-grid {
+		display: grid;
+		width: 100%;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.feature-grid {
+		grid-template-columns: repeat(4, 1fr);
+		gap: 16px;
+	}
+
+	.feature-grid a {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		height: 100%;
+		padding: 18px;
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		background: var(--bg-elev);
+		transition: border-color 0.18s ease;
+	}
+
+	.feature-grid a:hover {
+		border-color: var(--border-strong);
+	}
+
+	.feature-grid strong,
+	.backdrop-grid strong {
+		font-size: 15px;
+		font-weight: 600;
+		color: var(--fg);
+	}
+
+	.feature-grid span,
+	.backdrop-grid span {
+		font-size: 13px;
+		line-height: 1.5;
+		color: var(--fg-muted);
+	}
+
+	.feature-grid code {
+		font-size: 0.92em;
+	}
+
+	.backdrop-grid {
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+		gap: 28px 20px;
+	}
+
+	.backdrop-grid li {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.backdrop-grid li > :global(.clip) {
+		margin-bottom: 8px;
+	}
+
 	.philosophy .container {
 		display: flex;
 		flex-direction: column;
@@ -289,13 +524,15 @@
 	}
 
 	@media (max-width: 1000px) {
-		.philosophy :global(.doc-choices) {
+		.philosophy :global(.doc-choices),
+		.feature-grid {
 			grid-template-columns: repeat(2, 1fr);
 		}
 	}
 
 	@media (max-width: 820px) {
-		.philosophy :global(.doc-choices) {
+		.philosophy :global(.doc-choices),
+		.feature-grid {
 			grid-template-columns: 1fr;
 		}
 
