@@ -67,7 +67,7 @@ impl Source {
             {
                 return Err(Error::new(
                     "invalid-source",
-                    "carries a password or token, which would be stored in extensions.lock and shown in messages",
+                    "carries a password or token, which would be stored in the installed extensions list and shown in messages",
                 )
                 .hint("Drop it from the URL and let Git supply it, for example from a credential helper or an SSH key."));
             }

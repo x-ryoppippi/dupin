@@ -296,6 +296,7 @@
 	{#each features as choice (choice.label)}
 		<button type="button" aria-pressed={feature === choice.label} onclick={() => (feature = choice.label)}>{choice.label}</button>
 	{/each}
+	<a class="more" href="/docs/#features">More features →</a>
 </div>
 <div class="desk" bind:this={desk} aria-hidden="true">
 	<div class={['panel', !open && 'is-closed']} bind:this={panel}>
@@ -758,14 +759,14 @@
 		border-color: var(--accent);
 	}
 
-	.backdrop-picker .more {
+	.more {
 		align-self: center;
 		margin-left: 6px;
 		font-size: 13px;
 		color: var(--fg-muted);
 	}
 
-	.backdrop-picker .more:hover {
+	.more:hover {
 		color: var(--fg);
 	}
 

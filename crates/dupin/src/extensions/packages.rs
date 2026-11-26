@@ -1,5 +1,5 @@
 //! Which loaded extensions run, by origin and by the user's choices, which the broker bridge
-//! keeps in grants.toml in the data directory.
+//! keeps in encrypted storage.
 //!
 //! A user extension whose `name` matches a bundled one replaces it. A bundled package is known
 //! to the broker as `bundled:<name>`, so grants and choices made for it never pass to a package
@@ -150,21 +150,42 @@ impl Packages {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extensions::grants::Grants;
     use crate::extensions::tests::extension;
     use dupin_extension_bridge::{
         Base, Broker, Capabilities, ConsentState, GrantSource, Local, Revision, SaveError, Services,
     };
+    use dupin_storage::{DataKey, KeyProvider, MemoryKey, Storage};
 
-    const GRANTS_FILE: &str = "grants.toml";
+    fn grants(dir: &std::path::Path, key: impl KeyProvider + 'static) -> Grants {
+        Grants::new(Some(Arc::new(Storage::new(dir.join("storage"), key))))
+    }
 
-    fn bridge(grants: Option<&std::path::Path>) -> Bridge {
-        match grants {
-            Some(local) => Bridge::open(&local.with_file_name("base.toml"), local, Services::none()),
+    /// A bridge that saves to encrypted storage in `dir` under `key`, or to nowhere.
+    fn bridge(saved: Option<(&std::path::Path, &DataKey)>) -> Bridge {
+        match saved {
+            Some((dir, key)) => {
+                let bridge = Bridge::open(
+                    &dir.join("base.toml"),
+                    Box::new(grants(dir, MemoryKey::new(key.clone()))),
+                    Services::none(),
+                );
+                bridge.open_grants();
+                bridge
+            }
             None => Bridge::new(
                 Broker::new(Base::default(), Local::default()),
                 None,
                 Services::none(),
             ),
+        }
+    }
+
+    struct NoKey;
+
+    impl KeyProvider for NoKey {
+        fn data_key(&self) -> Result<DataKey, dupin_storage::Error> {
+            Err(dupin_storage::Error::Key("the Keychain is locked".into()))
         }
     }
 
@@ -262,8 +283,8 @@ mod tests {
     #[test]
     fn a_package_reusing_a_bundled_name_gets_none_of_the_choices_made_for_it() {
         let dir = tempfile::tempdir().unwrap();
-        let grants = dir.path().join(GRANTS_FILE);
-        let bridge = bridge(Some(&grants));
+        let key = DataKey::generate().unwrap();
+        let bridge = bridge(Some((dir.path(), &key)));
         let mut packages = Packages::new(bridge.clone());
         packages.set(
             Origin::Bundled,
@@ -290,8 +311,13 @@ mod tests {
         );
         assert!(packages.active().is_empty());
 
-        let saved = std::fs::read_to_string(&grants).unwrap();
-        assert!(saved.contains("\"bundled:about\""), "{saved}");
+        drop((bridge, packages));
+        let saved = grants(dir.path(), MemoryKey::new(key)).local().unwrap();
+        let saved = saved.records().unwrap();
+        assert!(
+            saved.iter().any(|record| record["package"] == "bundled:about"),
+            "{saved:?}"
+        );
     }
 
     #[test]
@@ -319,9 +345,9 @@ mod tests {
     #[test]
     fn a_user_extension_runs_until_turned_off_and_the_choice_survives_a_restart() {
         let dir = tempfile::tempdir().unwrap();
-        let grants = dir.path().join(GRANTS_FILE);
-        let load = || {
-            let bridge = bridge(Some(&grants));
+        let key = DataKey::generate().unwrap();
+        let load = |key: &DataKey| {
+            let bridge = bridge(Some((dir.path(), key)));
             let mut packages = Packages::new(bridge.clone());
             packages.set(
                 Origin::Bundled,
@@ -333,7 +359,7 @@ mod tests {
             );
             (bridge, packages)
         };
-        let (bridge, packages) = load();
+        let (bridge, packages) = load(&key);
         let words = listed(&packages, "words").package;
         assert_eq!(ids(&packages.active()), ["about", "words"]);
         assert!(!bridge.is_enabled(&words), "it runs but can use nothing yet");
@@ -342,16 +368,17 @@ mod tests {
             .unwrap();
         bridge.set_enabled(&words, false).unwrap();
         assert!(packages.active().is_empty());
+        drop((bridge, packages));
 
-        let (bridge, restarted) = load();
+        let (bridge, restarted) = load(&key);
         assert!(restarted.active().is_empty());
         bridge
             .set_enabled(&listed(&restarted, "about").package, true)
             .unwrap();
         assert_eq!(ids(&restarted.active()), ["about"]);
 
-        std::fs::write(&grants, "not toml").unwrap();
-        let (bridge, unreadable) = load();
+        drop((bridge, restarted));
+        let (bridge, unreadable) = load(&DataKey::generate().unwrap());
         assert!(unreadable.active().is_empty());
         assert!(!bridge.problems().is_empty());
         assert!(matches!(
@@ -363,13 +390,18 @@ mod tests {
     #[test]
     fn a_choice_that_cannot_be_saved_changes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let bridge = bridge(Some(&dir.path().join(GRANTS_FILE)));
+        let bridge = Bridge::open(
+            &dir.path().join("base.toml"),
+            Box::new(grants(dir.path(), NoKey)),
+            Services::none(),
+        );
+        bridge.open_grants();
         let mut packages = Packages::new(bridge.clone());
         packages.set(
             Origin::Bundled,
             vec![package(Origin::Bundled, "About", "about", "blake3:shipped")],
         );
-        std::fs::create_dir(dir.path().join(format!("{GRANTS_FILE}.tmp"))).unwrap();
+
         assert!(
             bridge
                 .set_enabled(&listed(&packages, "about").package, false)
