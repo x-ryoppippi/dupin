@@ -610,6 +610,12 @@ impl Replayer<'_> {
             Some(ActionEffect::Paste) => {
                 outcome.insert("panel".into(), "paste".into());
             }
+            Some(ActionEffect::Enter { command, .. }) if !self.extension.may_enter(&command) => {
+                refuse(
+                    outcome,
+                    "only a package that ships with Dupin may enter another command",
+                );
+            }
             Some(ActionEffect::Enter { command, query }) => {
                 outcome.insert(
                     "panel".into(),

@@ -672,7 +672,7 @@ An action, or a form's submit, may return `push`, `pop`, `refresh`, `replaceStat
 
 `toast` is optional, one line of up to 512 bytes shown once Dupin has done the rest, and `state` is at most 16 KiB of JSON nested 16 levels deep.
 
-`enter` names a command as an [alias](./keywords.md#aliases) or a shortcut does: a built-in's name, such as `calendar` or `dictionary`, or an extension's package name, such as `port`, so it reaches the command whatever keyword you gave it. It enters the command as typing its keyword and the query does, so the command searches the query as if you had typed it and you see it in the field; one package hands another nothing else. A command that isn't on fails as a notice that names it.
+`enter` names a command as an [alias](./keywords.md#aliases) or a shortcut does: a built-in's name, such as `calendar` or `dictionary`, or an extension's package name, such as `port`, so it reaches the command whatever keyword you gave it. It enters the command as typing its keyword and the query does, so the command searches the query as if you had typed it and you see it in the field. Any package may enter its own command; only a package that ships with Dupin may name another, since that command's package receives the text, and any other package could pass on what it read to one allowed to send it elsewhere. A command that isn't on, or that the package may not name, fails as a notice that says so.
 
 ```js
 export const actions = {

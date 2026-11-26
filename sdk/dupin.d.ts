@@ -358,9 +358,10 @@ declare module 'dupin' {
 	 * front (which needs Accessibility; without it, Dupin says how to allow it); open a view on
 	 * a page above the one the action was chosen on, titled `title` or the extension's title;
 	 * close that page; ask its view (or the search) again; give it new state, which asks its view
-	 * again; from a form's submit, show what is wrong with its fields; or enter another command,
-	 * named as an alias names it (a built-in's name, such as `calendar`, or an extension's
-	 * package name), with `query` typed after its keyword. The ones that move or
+	 * again; from a form's submit, show what is wrong with its fields; or enter a command, named
+	 * as an alias names it (a built-in's name, such as `calendar`, or an extension's package
+	 * name), with `query` typed after its keyword: the package's own, or, from a package that
+	 * ships with Dupin, any other. The ones that move or
 	 * change a page take a `toast` too, which Dupin shows once it has. An effect lands only while
 	 * the page it was chosen on is still the one on screen. Toasts are one line of up to 512
 	 * bytes, state at most 16 KiB of JSON and each field error one line of up to 256 bytes.
