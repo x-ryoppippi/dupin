@@ -10,7 +10,29 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use dupin_extension_install::{Error, Git, GitHub, Installer, LOCK_FILE, Lock, content_hash};
+use dupin_extension_install::{Error, Git, GitHub, Installer, Lock, LockStore, content_hash, guard_path};
+
+/// The list in a JSON file, so each installer a test makes for one name shares it.
+struct FileLock(PathBuf);
+
+impl LockStore for FileLock {
+    fn read(&self) -> Result<Lock, Error> {
+        match std::fs::read(&self.0) {
+            Ok(bytes) => {
+                serde_json::from_slice(&bytes).map_err(|error| Error::new("invalid-lock", error.to_string()))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Lock::new()),
+            Err(error) => Err(Error::new("io-error", error.to_string())),
+        }
+    }
+
+    fn write(&self, lock: &Lock) -> Result<(), Error> {
+        lock.validate()?;
+        std::fs::create_dir_all(self.0.parent().unwrap()).unwrap();
+        std::fs::write(&self.0, serde_json::to_vec(lock).unwrap())
+            .map_err(|error| Error::new("io-error", error.to_string()))
+    }
+}
 use serde_json::{Value, json};
 
 const OWNER: &str = "someone";
@@ -191,7 +213,8 @@ impl Fixture {
     fn installer(&self, name: &str, token: Option<&str>) -> Installer {
         Installer {
             extensions: self.root.path().join(name).join("extensions"),
-            lock: self.root.path().join(name).join(LOCK_FILE),
+            lock: Box::new(FileLock(self.root.path().join(name).join("installed.json"))),
+            guard: guard_path(&self.root.path().join(name)),
             git: Git {
                 env: ISOLATION
                     .iter()
@@ -614,10 +637,7 @@ fn a_github_install_needs_no_git_and_locks_as_the_git_path_does() {
     let updated = updated[0].1.as_ref().unwrap();
     assert_eq!(updated.entry.rev.as_deref(), Some("v2.0.0"));
     assert_eq!(updated.entry.commit.as_deref(), Some(third.as_str()));
-    assert_eq!(
-        Lock::read(&github.lock).unwrap().packages["word-count"],
-        updated.entry
-    );
+    assert_eq!(github.lock.read().unwrap().packages["word-count"], updated.entry);
 }
 
 #[test]

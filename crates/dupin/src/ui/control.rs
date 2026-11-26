@@ -122,6 +122,22 @@ impl Ui {
                     call.finish(source.map(serde_json::Value::from));
                 });
             }
+            Command::ExtensionLockGet {} | Command::ExtensionLockSet { .. } => {
+                std::thread::spawn(move || {
+                    let result = crate::extensions::installed::answer(
+                        crate::extensions::installed::shared(),
+                        &call.request.command,
+                    );
+                    call.finish(result);
+                });
+            }
+            Command::ExtensionGrantsForget { .. } | Command::ExtensionGrantsList { .. } => {
+                let bridge = self.extensions.bridge.clone();
+                std::thread::spawn(move || {
+                    let result = crate::extensions::grants::answer(&bridge, &call.request.command);
+                    call.finish(result);
+                });
+            }
             Command::ConfigGet {} => call.finish(
                 serde_json::to_value(&*self.configuration.values.borrow())
                     .map_err(|_| "could not encode settings".into()),

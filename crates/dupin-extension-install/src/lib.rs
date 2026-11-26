@@ -1,5 +1,6 @@
 //! Installs Dupin extension packages from GitHub, Git or a local folder into the extensions directory,
-//! pins each one in `extensions.lock`, and detects a package whose files changed after install.
+//! pins each one in the installed extensions list the host keeps through a [`LockStore`], and
+//! detects a package whose files changed after install.
 //!
 //! The launcher calls [`Integrity::check`] while it scans the extensions directory; `dupin ext`
 //! drives an [`Installer`]. Grants aren't kept here: the capability broker owns them. Nothing here runs
@@ -29,7 +30,7 @@ pub use git::Git;
 pub use github::GitHub;
 pub use hash::content_hash;
 pub use integrity::Integrity;
-pub use lock::{Entry, LOCK_FILE, Lock};
+pub use lock::{Entry, Lock, LockStore, MAX_PACKAGES, MemoryLock, guard_path};
 use manifest::Package;
 use source::Source;
 
@@ -46,8 +47,10 @@ pub type Outcomes = Vec<(String, Result<Change, Error>)>;
 pub struct Installer {
     /// `$XDG_CONFIG_HOME/dupin/extensions`.
     pub extensions: PathBuf,
-    /// `extensions.lock` in Dupin's data directory.
-    pub lock: PathBuf,
+    /// The installed extensions list.
+    pub lock: Box<dyn LockStore>,
+    /// The file `dupin ext` commands take turns on, from [`guard_path`].
+    pub guard: PathBuf,
     /// For Git URLs other than `github:`.
     pub git: Git,
     pub github: GitHub,
@@ -108,7 +111,7 @@ impl Installer {
     /// under its package name. Installing a package that is already installed replaces it, as an
     /// update to the named revision would.
     pub fn install(&self, spec: &str, cwd: &Path, taken: Taken<'_>) -> Result<Change, Error> {
-        let _guard = Guard::acquire(&self.lock)?;
+        let _guard = Guard::acquire(&self.guard)?;
         let source = Source::parse(spec, cwd)?;
         self.place(
             Target {
@@ -123,8 +126,8 @@ impl Installer {
     /// Moves `name`, or every installed package, to the newest version tag of its repository,
     /// or its default branch when it has no version tag; a folder source is copied again.
     pub fn update(&self, name: Option<&str>, taken: Taken<'_>) -> Result<Outcomes, Error> {
-        let _guard = Guard::acquire(&self.lock)?;
-        let lock = Lock::read(&self.lock)?;
+        let _guard = Guard::acquire(&self.guard)?;
+        let lock = self.lock.read()?;
         let names: Vec<String> = match name {
             Some(name) if lock.packages.contains_key(name) => vec![name.to_owned()],
             Some(name) => return Err(not_installed(name)),
@@ -153,7 +156,7 @@ impl Installer {
     /// locked commit, and checks the result has the locked content hash.
     pub fn sync(&self, taken: Taken<'_>) -> Result<Outcomes, Error> {
         let listed = self.list()?;
-        let _guard = Guard::acquire(&self.lock)?;
+        let _guard = Guard::acquire(&self.guard)?;
         Ok(listed
             .into_iter()
             .filter(|listed| listed.state != State::Installed)
@@ -179,8 +182,8 @@ impl Installer {
 
     /// Deletes an installed package and its lock entry, and with it the user's grants.
     pub fn remove(&self, name: &str) -> Result<Entry, Error> {
-        let _guard = Guard::acquire(&self.lock)?;
-        let mut lock = Lock::read(&self.lock)?;
+        let _guard = Guard::acquire(&self.guard)?;
+        let mut lock = self.lock.read()?;
         let entry = lock.packages.remove(name).ok_or_else(|| {
             let error = not_installed(name);
             if self.extensions.join(name).symlink_metadata().is_ok() {
@@ -201,7 +204,7 @@ impl Installer {
             std::fs::rename(&target, stage.package())
                 .map_err(|error| Error::io("io-error", format!("move {} aside", target.display()), error))?;
         }
-        if let Err(error) = lock.write(&self.lock) {
+        if let Err(error) = self.lock.write(&lock) {
             if moved {
                 let _ = std::fs::rename(stage.package(), &target);
             }
@@ -212,7 +215,7 @@ impl Installer {
 
     /// The locked packages and whether each folder still matches.
     pub fn list(&self) -> Result<Vec<Listed>, Error> {
-        let lock = Lock::read(&self.lock)?;
+        let lock = self.lock.read()?;
         Ok(lock
             .packages
             .into_iter()
@@ -284,12 +287,12 @@ impl Installer {
         {
             return Err(Error::new(
                 "hash-mismatch",
-                format!("fetched {hash}, but extensions.lock pins {expected}"),
+                format!("fetched {hash}, but the installed extensions list pins {expected}"),
             )
             .hint("The source no longer has the locked contents; run `dupin ext update` to move to what it has now."));
         }
 
-        let mut lock = Lock::read(&self.lock)?;
+        let mut lock = self.lock.read()?;
         let destination = self.extensions.join(&package.name);
         let previous = lock.packages.get(&package.name).cloned();
         if target.name.is_none()
@@ -368,9 +371,9 @@ impl Installer {
         lock.packages.insert(package.name.clone(), change.entry.clone());
         // The lock goes first: the watcher rescans when the folder moves, and by then the lock
         // already pins the new contents.
-        lock.write(&self.lock)?;
+        self.lock.write(&lock)?;
         if let Err(error) = place::swap_into(&staged, &destination) {
-            let _ = before.write(&self.lock);
+            let _ = self.lock.write(&before);
             return Err(Error::io(
                 "io-error",
                 format!("move the package to {}", destination.display()),
@@ -410,8 +413,11 @@ impl Installer {
 }
 
 fn not_installed(name: &str) -> Error {
-    Error::new("not-installed", format!("`{name}` isn't in extensions.lock"))
-        .hint("`dupin ext list` shows what `dupin ext install` installed.")
+    Error::new(
+        "not-installed",
+        format!("`{name}` wasn't installed with `dupin ext install`"),
+    )
+    .hint("`dupin ext list` shows what `dupin ext install` installed.")
 }
 
 /// The lock entry for a newly placed package, and the scopes it adds and drops. The broker

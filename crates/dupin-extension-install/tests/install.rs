@@ -3,7 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use dupin_extension_install::{Change, Error, Git, GitHub, Installer, Integrity, LOCK_FILE, Lock, State};
+use dupin_extension_install::{
+    Change, Error, Git, GitHub, Installer, Integrity, Lock, LockStore, MemoryLock, State, guard_path,
+};
 
 /// Keeps the developer's own Git configuration out of the fixtures and the installer.
 const ISOLATION: [(&str, &str); 7] = [
@@ -42,6 +44,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 struct Fixture {
     _root: tempfile::TempDir,
     repo: PathBuf,
+    store: MemoryLock,
     installer: Installer,
 }
 
@@ -51,9 +54,11 @@ impl Fixture {
         let repo = root.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
         git(&repo, &["init", "--quiet"]);
+        let store = MemoryLock::default();
         let installer = Installer {
             extensions: root.path().join("config/extensions"),
-            lock: root.path().join("data").join(LOCK_FILE),
+            lock: Box::new(store.clone()),
+            guard: guard_path(&root.path().join("data")),
             git: Git {
                 env: ISOLATION
                     .iter()
@@ -70,6 +75,7 @@ impl Fixture {
         Self {
             _root: root,
             repo,
+            store,
             installer,
         }
     }
@@ -109,7 +115,7 @@ impl Fixture {
     }
 
     fn lock(&self) -> Lock {
-        Lock::read(&self.installer.lock).unwrap()
+        self.store.read().unwrap()
     }
 
     fn installed(&self, name: &str) -> PathBuf {
@@ -428,12 +434,12 @@ fn a_package_installed_before_its_name_was_bundled_stays_off_after_the_upgrade()
     fixture.install(&fixture.url()).unwrap();
     let folder = fixture.installed("word-count");
     assert_eq!(
-        Integrity::new(fixture.installer.lock.clone(), Default::default()).check(&folder),
+        Integrity::new(Box::new(fixture.store.clone()), Default::default()).check(&folder),
         None
     );
 
     fixture.installer.bundled.insert("word-count".into());
-    let mut integrity = Integrity::new(fixture.installer.lock.clone(), fixture.installer.bundled.clone());
+    let mut integrity = Integrity::new(Box::new(fixture.store.clone()), fixture.installer.bundled.clone());
     let problem = integrity
         .check(&folder)
         .expect("an installed package never replaces a bundled one");
@@ -445,7 +451,7 @@ fn a_package_installed_before_its_name_was_bundled_stays_off_after_the_upgrade()
     assert_eq!(
         integrity.check(&fixture.installer.extensions.join("hand-made")),
         None,
-        "a folder extensions.lock doesn't list, such as an ejected copy, still may"
+        "a folder the installed extensions list doesn't name, such as an ejected copy, still may"
     );
 }
 
@@ -535,7 +541,7 @@ fn tampering_disables_the_package_until_sync_restores_it() {
     fixture.tag("v1.0.0");
     let change = fixture.install(&fixture.url()).unwrap();
     let folder = fixture.installed("word-count");
-    let mut integrity = Integrity::new(fixture.installer.lock.clone(), Default::default());
+    let mut integrity = Integrity::new(Box::new(fixture.store.clone()), Default::default());
     assert_eq!(integrity.check(&folder), None);
     assert_eq!(
         integrity.check(&fixture.installer.extensions.join("hand-made")),
@@ -544,7 +550,7 @@ fn tampering_disables_the_package_until_sync_restores_it() {
 
     std::fs::write(folder.join("main.js"), "export function search() { steal(); }\n").unwrap();
     let problem = integrity.check(&folder).unwrap();
-    assert!(problem.contains("extensions.lock"), "{problem}");
+    assert!(problem.contains("what `dupin ext install` placed"), "{problem}");
     assert!(matches!(
         fixture.installer.list().unwrap()[0].state,
         State::Modified(_)
@@ -567,8 +573,26 @@ fn tampering_disables_the_package_until_sync_restores_it() {
     fixture.installer.sync(&|_| None).unwrap();
     assert_eq!(fixture.installer.list().unwrap()[0].state, State::Installed);
 
-    std::fs::write(&fixture.installer.lock, "not = [valid").unwrap();
-    assert!(integrity.check(&folder).unwrap().contains("disabled"));
+    fixture
+        .store
+        .set_unreadable(Some(Error::new("invalid-lock", "sealed with another key")));
+    let problem = integrity.check(&folder).unwrap();
+    assert!(
+        problem.contains("disabled") && problem.contains("sealed with another key"),
+        "an unreadable list keeps every listed folder off: {problem}"
+    );
+    assert!(
+        integrity
+            .check(&fixture.installer.extensions.join("hand-made"))
+            .is_some(),
+        "and every other, since which it lists is unknown"
+    );
+    assert!(fixture.installer.list().is_err());
+    assert!(fixture.installer.remove("word-count").is_err());
+    assert!(folder.join("main.js").is_file());
+    fixture.store.set_unreadable(None);
+    assert!(fixture.lock().packages.contains_key("word-count"));
+    assert_eq!(integrity.check(&folder), None);
 }
 
 #[test]

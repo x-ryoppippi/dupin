@@ -1,19 +1,20 @@
-//! `extensions.lock` in Dupin's data directory: what `dupin ext install` placed, pinned by
-//! commit and content hash, with the scopes each package requests. The broker's grant files,
-//! not the lock, hold what the user granted.
+//! The installed extensions list: what `dupin ext install` placed, pinned by commit and content
+//! hash, with the scopes each package requests. The broker's grants, not the list, hold what
+//! the user granted. The host keeps it, through a [`LockStore`]; nothing here writes it to a
+//! file.
 
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::Error;
 
-pub const LOCK_FILE: &str = "extensions.lock";
 const VERSION: u32 = 1;
-const MAX_LOCK_BYTES: u64 = 1024 * 1024;
+/// The most packages the list holds, so it stays small enough to hand between processes whole.
+pub const MAX_PACKAGES: usize = 256;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,54 +46,7 @@ pub struct Entry {
     pub requested: Vec<String>,
 }
 
-/// Keys locks written before the broker owned grants carry. Nothing ever filled them, since no
-/// consent existed then, so they are dropped rather than migrated.
-const RETIRED_KEYS: [&str; 2] = ["granted", "pending_consent"];
-
 impl Lock {
-    /// The lock at `path`, or an empty one when there is none yet.
-    pub fn read(path: &Path) -> Result<Self, Error> {
-        let source = match std::fs::metadata(path) {
-            Ok(metadata) if metadata.len() > MAX_LOCK_BYTES => {
-                return Err(Error::new("invalid-lock", "is larger than 1 MiB").file(LOCK_FILE));
-            }
-            Ok(_) => std::fs::read_to_string(path)
-                .map_err(|error| Error::io("invalid-lock", format!("read {}", path.display()), error))?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::new()),
-            Err(error) => {
-                return Err(Error::io(
-                    "invalid-lock",
-                    format!("read {}", path.display()),
-                    error,
-                ));
-            }
-        };
-        let invalid = |error: toml::de::Error| {
-            Error::new("invalid-lock", error.message().trim_end().to_owned())
-                .file(LOCK_FILE)
-                .hint("Restore extensions.lock, or delete it and reinstall your extensions.")
-        };
-        let mut table: toml::Table = toml::from_str(&source).map_err(invalid)?;
-        if let Some(toml::Value::Table(packages)) = table.get_mut("packages") {
-            for (_, entry) in packages.iter_mut() {
-                if let toml::Value::Table(entry) = entry {
-                    for key in RETIRED_KEYS {
-                        entry.remove(key);
-                    }
-                }
-            }
-        }
-        let lock: Self = table.try_into().map_err(invalid)?;
-        if lock.version != VERSION {
-            return Err(Error::new(
-                "invalid-lock",
-                format!("has version {}, which this Dupin doesn't read", lock.version),
-            )
-            .file(LOCK_FILE));
-        }
-        Ok(lock)
-    }
-
     pub fn new() -> Self {
         Self {
             version: VERSION,
@@ -100,37 +54,132 @@ impl Lock {
         }
     }
 
-    /// Replaces the file at `path` in one rename, so a reader sees the old lock or the new one.
-    pub fn write(&self, path: &Path) -> Result<(), Error> {
-        let text = toml::to_string(self).map_err(|error| Error::new("io-error", error.to_string()))?;
-        let text = format!(
-            "# Written by `dupin ext`; change it with `dupin ext install`, `update` and `remove`.\n{text}"
-        );
-        let dir = path.parent().unwrap_or(Path::new("."));
-        std::fs::create_dir_all(dir)
-            .map_err(|error| Error::io("io-error", format!("create {}", dir.display()), error))?;
-        let temporary = dir.join(format!(".{LOCK_FILE}.{}", std::process::id()));
-        let written = std::fs::File::create(&temporary)
-            .and_then(|mut file| {
-                file.write_all(text.as_bytes())?;
-                file.sync_all()
-            })
-            .and_then(|()| std::fs::rename(&temporary, path));
-        written.map_err(|error| {
-            let _ = std::fs::remove_file(&temporary);
-            Error::io("io-error", format!("write {}", path.display()), error)
-        })
+    /// Checks a list handed over from elsewhere: this version, package names that are folder
+    /// names, and no more than [`MAX_PACKAGES`].
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.version != VERSION {
+            return Err(Error::new(
+                "invalid-lock",
+                format!(
+                    "the installed extensions list has version {}, which this Dupin doesn't read",
+                    self.version
+                ),
+            ));
+        }
+        if self.packages.len() > MAX_PACKAGES {
+            return Err(Error::new(
+                "too-many-extensions",
+                format!("no more than {MAX_PACKAGES} extensions can be installed"),
+            )
+            .hint("Remove one with `dupin ext remove` first."));
+        }
+        if let Some(name) = self
+            .packages
+            .keys()
+            .find(|name| !crate::manifest::valid_name(name))
+        {
+            return Err(Error::new(
+                "invalid-lock",
+                format!("the installed extensions list names {name:?}, which isn't a package name"),
+            ));
+        }
+        Ok(())
     }
 }
 
-/// Serializes `dupin ext` commands that change the extensions directory or the lock.
+/// Where the installed extensions list is kept. Reading one that exists but can't be read is
+/// an error, never an empty list: the launcher keeps every listed folder off while it stands.
+pub trait LockStore: Send + Sync {
+    fn read(&self) -> Result<Lock, Error>;
+    /// Replaces the list with `lock`.
+    fn write(&self, lock: &Lock) -> Result<(), Error>;
+}
+
+impl<T: LockStore + ?Sized> LockStore for &T {
+    fn read(&self) -> Result<Lock, Error> {
+        (**self).read()
+    }
+
+    fn write(&self, lock: &Lock) -> Result<(), Error> {
+        (**self).write(lock)
+    }
+}
+
+impl<T: LockStore + ?Sized> LockStore for Arc<T> {
+    fn read(&self) -> Result<Lock, Error> {
+        (**self).read()
+    }
+
+    fn write(&self, lock: &Lock) -> Result<(), Error> {
+        (**self).write(lock)
+    }
+}
+
+#[derive(Debug)]
+struct Memory {
+    lock: Lock,
+    unreadable: Option<Error>,
+    unwritable: Option<Error>,
+}
+
+/// A list kept in memory, for tests and fixtures. Clones share it.
+#[derive(Clone, Debug)]
+pub struct MemoryLock(Arc<Mutex<Memory>>);
+
+impl Default for MemoryLock {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(Memory {
+            lock: Lock::new(),
+            unreadable: None,
+            unwritable: None,
+        })))
+    }
+}
+
+impl MemoryLock {
+    fn memory(&self) -> MutexGuard<'_, Memory> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Makes every read fail with `error` while it is set.
+    pub fn set_unreadable(&self, error: Option<Error>) {
+        self.memory().unreadable = error;
+    }
+
+    /// Makes every write fail with `error` while it is set.
+    pub fn set_unwritable(&self, error: Option<Error>) {
+        self.memory().unwritable = error;
+    }
+}
+
+impl LockStore for MemoryLock {
+    fn read(&self) -> Result<Lock, Error> {
+        let memory = self.memory();
+        match &memory.unreadable {
+            Some(error) => Err(error.clone()),
+            None => Ok(memory.lock.clone()),
+        }
+    }
+
+    fn write(&self, lock: &Lock) -> Result<(), Error> {
+        lock.validate()?;
+        let mut memory = self.memory();
+        if let Some(error) = &memory.unwritable {
+            return Err(error.clone());
+        }
+        memory.lock = lock.clone();
+        Ok(())
+    }
+}
+
+/// Serializes `dupin ext` commands that change the extensions directory or the list, by an
+/// advisory lock on an empty file.
 pub(crate) struct Guard {
     _file: std::fs::File,
 }
 
 impl Guard {
-    pub(crate) fn acquire(lock_path: &Path) -> Result<Self, Error> {
-        let path = guard_path(lock_path);
+    pub(crate) fn acquire(path: &Path) -> Result<Self, Error> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)
                 .map_err(|error| Error::io("io-error", format!("create {}", dir.display()), error))?;
@@ -139,7 +188,7 @@ impl Guard {
             .create(true)
             .truncate(false)
             .write(true)
-            .open(&path)
+            .open(path)
             .map_err(|error| Error::io("io-error", format!("open {}", path.display()), error))?;
         // Waits rather than failing fast: a child spawned elsewhere in this process can hold a
         // duplicate of an earlier guard's descriptor for a moment after that guard is dropped.
@@ -149,10 +198,9 @@ impl Guard {
     }
 }
 
-fn guard_path(lock_path: &Path) -> PathBuf {
-    let mut name = lock_path.file_name().unwrap_or_default().to_owned();
-    name.push(".guard");
-    lock_path.with_file_name(name)
+/// The guard file `dupin ext` commands take turns on, in `dir`.
+pub fn guard_path(dir: &Path) -> PathBuf {
+    dir.join("extensions.lock.guard")
 }
 
 pub(crate) fn now() -> String {
@@ -198,46 +246,54 @@ mod tests {
         );
     }
 
+    fn entry() -> Entry {
+        Entry {
+            source: "github:ryo/word-count".into(),
+            rev: Some("v1.0.0".into()),
+            commit: Some("a".repeat(40)),
+            content_hash: "blake3:00".into(),
+            installed_at: now(),
+            version: "1.0.0".into(),
+            keyword: "wc".into(),
+            requested: vec!["http:https://example.com".into()],
+        }
+    }
+
     #[test]
-    fn the_lock_round_trips_and_rejects_unknown_keys() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(LOCK_FILE);
-        assert_eq!(Lock::read(&path).unwrap(), Lock::new());
+    fn the_list_round_trips_and_rejects_unknown_keys_versions_and_names() {
         let mut lock = Lock::new();
-        lock.packages.insert(
-            "word-count".into(),
-            Entry {
-                source: "github:ryo/word-count".into(),
-                rev: Some("v1.0.0".into()),
-                commit: Some("a".repeat(40)),
-                content_hash: "blake3:00".into(),
-                installed_at: now(),
-                version: "1.0.0".into(),
-                keyword: "wc".into(),
-                requested: vec!["http:https://example.com".into()],
-            },
-        );
-        lock.write(&path).unwrap();
-        assert_eq!(Lock::read(&path).unwrap(), lock);
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("[packages.word-count]"), "{text}");
-        assert!(!text.contains("granted"), "{text}");
+        lock.packages.insert("word-count".into(), entry());
+        let json = serde_json::to_value(&lock).unwrap();
+        assert_eq!(json["packages"]["word-count"]["ref"], "v1.0.0");
+        assert_eq!(serde_json::from_value::<Lock>(json.clone()).unwrap(), lock);
+        lock.validate().unwrap();
 
-        let retired = text.replace(
-            "requested = [",
-            "granted = []\npending_consent = [\"files:notes\"]\nrequested = [",
-        );
-        std::fs::write(&path, &retired).unwrap();
-        assert_eq!(Lock::read(&path).unwrap(), lock);
+        let mut surprise = json.clone();
+        surprise["packages"]["word-count"]["granted"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<Lock>(surprise).is_err());
 
-        std::fs::write(&path, format!("{text}\nsurprise = 1\n")).unwrap();
-        assert_eq!(Lock::read(&path).unwrap_err().code, "invalid-lock");
+        let mut newer = json;
+        newer["version"] = 2.into();
+        let newer: Lock = serde_json::from_value(newer).unwrap();
+        assert_eq!(newer.validate().unwrap_err().code, "invalid-lock");
+
+        let mut named = Lock::new();
+        named.packages.insert("../escape".into(), entry());
+        assert_eq!(named.validate().unwrap_err().code, "invalid-lock");
+
+        let mut full = Lock::new();
+        for n in 0..=MAX_PACKAGES {
+            full.packages.insert(format!("p{n}"), entry());
+        }
+        let store = MemoryLock::default();
+        assert_eq!(store.write(&full).unwrap_err().code, "too-many-extensions");
+        assert_eq!(store.read().unwrap(), Lock::new());
     }
 
     #[test]
     fn one_command_at_a_time() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(LOCK_FILE);
+        let path = guard_path(dir.path());
         let held = Guard::acquire(&path).unwrap();
         let (acquired, waiting) = std::sync::mpsc::channel();
         let second = path.clone();

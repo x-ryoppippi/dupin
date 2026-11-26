@@ -1,9 +1,9 @@
-//! The app's side of the broker bridge: where the grant files live, which services back each
+//! The app's side of the broker bridge: where the grants live, which services back each
 //! capability, and what macOS allows, read without ever prompting.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use dupin_extension_bridge::services::{self, Services, Subscription};
@@ -18,17 +18,12 @@ use serde_json::Value;
 use crate::scripts::catalog::Catalog;
 use crate::scripts::runner::Runner;
 
-/// The declarative base beside config.toml, which Home Manager writes.
+/// The declarative base beside config.toml, which Home Manager writes. The user's own grants
+/// are in encrypted storage ([`super::grants`]).
 pub const BASE_FILE: &str = "extension-grants.toml";
-/// The user's own grants, in Dupin's data directory beside extensions.lock.
-pub const LOCAL_FILE: &str = "grants.toml";
 
 pub fn base_path() -> Option<PathBuf> {
     Some(crate::settings::path()?.parent()?.join(BASE_FILE))
-}
-
-pub fn local_path() -> Option<PathBuf> {
-    crate::store::data_dir().map(|dir| dir.join(LOCAL_FILE))
 }
 
 /// The root of every `dupin-storage` namespace, in Dupin's data directory.
@@ -39,11 +34,25 @@ pub fn storage_path() -> Option<PathBuf> {
 /// Encrypted storage under the data key in the user's Keychain, which is read only when a
 /// namespace is first opened.
 pub fn storage() -> Option<dupin_storage::Storage> {
+    let root = storage_path()?;
+    // Tests run the `dupin` executable, which must never reach the user's Keychain; a release
+    // build ignores the variable.
+    if cfg!(debug_assertions)
+        && let Some(path) = std::env::var_os(DEBUG_KEY_FILE_ENV)
+    {
+        return Some(dupin_storage::Storage::new(
+            root,
+            dupin_storage::FileKey::new(path),
+        ));
+    }
     Some(dupin_storage::Storage::new(
-        storage_path()?,
+        root,
         dupin_mac::keychain::KeychainKey,
     ))
 }
+
+/// Names a key file a debug build uses instead of the Keychain.
+pub const DEBUG_KEY_FILE_ENV: &str = "DUPIN_DEBUG_STORAGE_KEY_FILE";
 
 /// The launcher's one [`storage`]: extensions' namespaces and the built-ins' own, such as
 /// stored snippets, share the device's clock and key, as a second root over the same folder
@@ -66,8 +75,8 @@ pub struct Platform {
     pub calculator: crate::calculator::Calculator,
 }
 
-/// The bridge the launcher's guest calls go through, with the user's grant files and the
-/// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
+/// The bridge the launcher's guest calls go through, with the user's grants and the services
+/// that act on the Mac. Tests and headless runs get one that keeps grants in memory
 /// and reaches no service of the Mac's but a headless run's fixture calendar, as the built-in
 /// Calendar search reads it, and fixed definitions, as the bundled Dictionary renders them; a
 /// headless render may still declare a base beside its own config, and one `dupin ext snap`
@@ -141,9 +150,9 @@ pub fn open(platform: Platform) -> Bridge {
             dupin_mac::window_management::Windows(platform.front),
         ))),
     };
-    let bridge = match (base_path(), local_path()) {
-        (Some(base), Some(local)) => Bridge::open(&base, &local, services),
-        _ => Bridge::new(Broker::new(Base::default(), Local::unreadable()), None, services),
+    let bridge = match base_path() {
+        Some(base) => Bridge::open(&base, Box::new(super::grants::Shared), services),
+        None => Bridge::new(Broker::new(Base::default(), Local::unreadable()), None, services),
     };
     for problem in bridge.problems() {
         crate::log::warn(&format!("extension grants: {problem}"));
@@ -151,11 +160,38 @@ pub fn open(platform: Platform) -> Bridge {
     bridge
 }
 
+/// Reads the user's grants into `bridge` on a thread of its own, since that reads the Keychain,
+/// unless they are read or being read; until they are, extensions are granted nothing. Call it
+/// once the bridge's listener is set, so what reading them changes reaches the app.
+pub fn read_grants(bridge: &Bridge) {
+    static READING: AtomicBool = AtomicBool::new(false);
+    if bridge.grants_read() || READING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let reader = bridge.clone();
+    let spawned = std::thread::Builder::new()
+        .name("dupin-grants".into())
+        .spawn(move || {
+            reader.open_grants();
+            for problem in reader.problems() {
+                crate::log::warn(&format!("extension grants: {problem}"));
+            }
+            READING.store(false, Ordering::Release);
+        });
+    if let Err(error) = spawned {
+        READING.store(false, Ordering::Release);
+        crate::log::warn(&format!("couldn't start reading extension grants: {error}"));
+    }
+}
+
 /// Reports what macOS allows for each permission an extension scope can need, as the Settings
-/// → Permissions row for it reads it, and reads the grant files again if they changed. Reading
-/// never prompts, so this runs at startup, when the panel shows and when Settings regains focus.
+/// → Permissions row for it reads it, reads the declared base again if it changed, and tries
+/// the user's grants again while they couldn't be read, as a locked Keychain may have been
+/// unlocked since. Reading what macOS allows never prompts, so this runs at startup, when the panel shows and when
+/// Settings regains focus.
 pub fn refresh_os_access(bridge: &Bridge, calendar: &CalendarAccess) {
     bridge.reload();
+    read_grants(bridge);
     if cfg!(test) || rune::tooling::is_headless() {
         return;
     }
