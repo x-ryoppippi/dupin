@@ -556,7 +556,7 @@ impl Storage {
     /// storage holds are re-sealed under the data key. Only one `Store` per namespace may be
     /// open at a time; share it with an `Arc`.
     pub fn open(&self, namespace: &str, limits: Limits) -> Result<Store, Error> {
-        self.open_as(namespace, limits, None)
+        self.open_as(namespace, namespace, limits, None)
     }
 
     /// Opens a namespace that syncs, sealed under `vault`. Files sealed under the data key or
@@ -569,10 +569,35 @@ impl Storage {
                 "max_item_bytes of a synced namespace can't exceed 64 MiB",
             ));
         }
-        self.open_as(namespace, limits, Some(vault))
+        self.open_synced_as(namespace, namespace, limits, vault)
     }
 
-    fn open_as(&self, namespace: &str, limits: Limits, vault: Option<&VaultKey>) -> Result<Store, Error> {
+    /// Like [`Storage::open_synced`] for the directory `namespace`, with the keys and the
+    /// folder's name derived from `synced_name` instead: an extension's namespace is named
+    /// after its installation on this Mac, but syncs under a name every Mac gives the package.
+    pub fn open_synced_as(
+        &self,
+        namespace: &str,
+        synced_name: &str,
+        limits: Limits,
+        vault: &VaultKey,
+    ) -> Result<Store, Error> {
+        if limits.max_item_bytes > Limits::MAX_SYNC_ITEM_BYTES {
+            return Err(Error::InvalidLimits(
+                "max_item_bytes of a synced namespace can't exceed 64 MiB",
+            ));
+        }
+        validate_namespace(synced_name)?;
+        self.open_as(namespace, synced_name, limits, Some(vault))
+    }
+
+    fn open_as(
+        &self,
+        namespace: &str,
+        synced_name: &str,
+        limits: Limits,
+        vault: Option<&VaultKey>,
+    ) -> Result<Store, Error> {
         validate_namespace(namespace)?;
         limits.validate()?;
         let dir = self.dir.join(namespace);
@@ -584,7 +609,7 @@ impl Storage {
         let lock = lock_namespace(&dir)?;
         let data_key = self.data_key()?;
         let keys = match vault {
-            Some(vault) => NamespaceKeys::derive(&vault.key, vault.source(), namespace),
+            Some(vault) => NamespaceKeys::derive(&vault.key, vault.source(), synced_name),
             None => NamespaceKeys::derive(&data_key, KeySource::Device, namespace),
         };
         let synced = vault.is_some();
@@ -592,7 +617,7 @@ impl Storage {
             .held_vaults()
             .iter()
             .filter(|held| held.source() != keys.source())
-            .map(|held| NamespaceKeys::derive(&held.key, held.source(), namespace))
+            .map(|held| NamespaceKeys::derive(&held.key, held.source(), synced_name))
             .collect();
         if synced {
             others.push(NamespaceKeys::derive(&data_key, KeySource::Device, namespace));

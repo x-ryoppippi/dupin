@@ -219,6 +219,20 @@ fn storage_clipboard_dictionary_and_calendar_are_bounded() {
             retention_days: None
         })
     );
+    let synced = caps(json!({ "storage": { "quotaBytes": 1, "sync": true } }));
+    assert_eq!(
+        synced.get(&ScopeKey::StorageSync).cloned(),
+        Some(Scope::StorageSync)
+    );
+    assert!(
+        caps(json!({ "storage": { "quotaBytes": 1, "sync": false } }))
+            .get(&ScopeKey::StorageSync)
+            .is_none()
+    );
+    assert_eq!(
+        problem(json!({ "storage": { "quotaBytes": 1, "sync": "yes" } })).1,
+        "capabilities.storage.sync"
+    );
     assert_eq!(
         problem(json!({ "clipboard": ["type"] })),
         ("invalid-value", "capabilities.clipboard[0]".into())

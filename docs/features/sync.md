@@ -17,8 +17,9 @@ Open **Settings → Sync** (<kbd>⌘,</kbd> in the panel), or use `dupin sync` i
 - Usage history, the ranking Dupin learns from what you open. Each Mac keeps its own log and every Mac ranks with all of them added together.
 - The [snippets](./snippets.md) you add in Dupin, one per keyword: the later edit of a keyword wins, deleting one deletes it on every Mac, and `config.toml`'s snippets stay on each Mac, winning a keyword both hold.
 - Settings saved over a read-only `config.toml`, such as one Home Manager writes: the keys every Mac shares (theme, web searches, keyword lists and the like). Device-local ones (hotkeys, display, permissions-related switches, `[sync]`) never leave the Mac, and a writable `config.toml` is still each Mac's own.
+- What an extension stores, once you grant it `storage:sync` on each Mac ([Extensions](./extensions.md)).
 
-Extensions and, if you choose, clipboard history follow.
+The list of installed extensions and, if you choose, clipboard history follow.
 
 ## What you can do
 

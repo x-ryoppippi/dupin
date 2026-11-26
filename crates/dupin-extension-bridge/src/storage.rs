@@ -52,6 +52,19 @@ pub fn namespace(package: &PackageId, origin: Origin) -> String {
     format!("{NAMESPACE_PREFIX}{tag}-{hex}")
 }
 
+/// The name a Git-installed package's namespace syncs under: the same on every Mac that
+/// installed it from the same source, and apart from every other package's.
+pub fn synced_namespace(source: &str, package: &PackageId) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"dupin extension sync\0");
+    hash.update(source.as_bytes());
+    hash.update(b"\0");
+    hash.update(package.as_str().as_bytes());
+    let digest = hash.finalize();
+    let hex: String = digest[..20].iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("{NAMESPACE_PREFIX}s-{hex}")
+}
+
 /// What a package's declared quota and retention allow, within Dupin's maxima.
 pub(crate) fn limits(quota_bytes: u64, retention_days: Option<u32>) -> Limits {
     let quota = quota_bytes.clamp(1, MAX_QUOTA_BYTES);
@@ -82,18 +95,41 @@ impl Namespace {
     }
 }
 
+/// What the host does for a namespace that may sync: which name a package syncs under, and
+/// opening it under the vault key while sync is on.
+pub trait SyncHost: Send + Sync {
+    fn synced_name(&self, package: &crate::PackageId) -> Option<String>;
+    /// `namespace` opened to sync as `synced`, or `None` while sync is off, when it opens on
+    /// this Mac alone.
+    fn open(
+        &self,
+        storage: &dupin_storage::Storage,
+        namespace: &str,
+        synced: &str,
+        limits: Limits,
+    ) -> Option<Result<Store, Error>>;
+    /// The store opened to sync, for the sync worker to carry.
+    fn opened(&self, namespace: &str, synced: &str, store: &Arc<Store>);
+    /// `synced` no longer syncs on this Mac: its grant was revoked.
+    fn left(&self, synced: &str);
+}
+
 /// Packages' namespaces under one [`dupin_storage::Storage`], each opened on first use and kept
 /// open, with a sweeper applying its retention while nothing is written.
 pub struct PackageStorage {
     storage: Arc<dupin_storage::Storage>,
     open: Mutex<HashMap<String, Opened>>,
     on_error: ErrorSink,
+    sync: Option<Arc<dyn SyncHost>>,
 }
 
 struct Opened {
     namespace: Arc<Namespace>,
     limits: Limits,
     sweeper: Sweeper,
+    /// The name it was asked to sync under: the package holds `storage:sync`. Whether it does
+    /// sync then follows whether sync is on.
+    synced: Option<String>,
 }
 
 impl PackageStorage {
@@ -104,7 +140,64 @@ impl PackageStorage {
             storage: storage.into(),
             open: Mutex::default(),
             on_error: Arc::new(|_, _| {}),
+            sync: None,
         }
+    }
+
+    /// Lets granted packages' namespaces sync through `host`.
+    pub fn with_sync(mut self, host: Arc<dyn SyncHost>) -> Self {
+        self.sync = Some(host);
+        self
+    }
+
+    /// Closes `namespace` so its next request opens it again, under the key sync now calls
+    /// for. A call holding it waits for the switch.
+    pub fn reopen(&self, namespace: &str) {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(opened) = open.remove(namespace) {
+            drop(opened.sweeper);
+            drop(
+                opened
+                    .namespace
+                    .store
+                    .write()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take(),
+            );
+        }
+    }
+
+    /// Closes every namespace a granted package asked to sync, so each reopens under the key
+    /// sync now calls for: sync was turned on or off.
+    pub fn reopen_synced(&self) {
+        let names: Vec<String> = self
+            .open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(_, opened)| opened.synced.is_some())
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in names {
+            self.reopen(&name);
+        }
+    }
+
+    fn open_store(
+        &self,
+        namespace: &str,
+        limits: Limits,
+        synced: Option<&str>,
+    ) -> Result<(Arc<Store>, Option<String>), Failure> {
+        if let (Some(host), Some(synced)) = (&self.sync, synced)
+            && let Some(opened) = host.open(&self.storage, namespace, synced, limits)
+        {
+            let store = Arc::new(opened.map_err(failure)?);
+            host.opened(namespace, synced, &store);
+            return Ok((store, Some(synced.to_owned())));
+        }
+        let store = Arc::new(self.storage.open(namespace, limits).map_err(failure)?);
+        Ok((store, synced.map(str::to_owned)))
     }
 
     /// Where a background sweep's failure goes, with the namespace it was in.
@@ -115,8 +208,46 @@ impl PackageStorage {
 }
 
 impl crate::services::Storage for PackageStorage {
-    fn open(&self, namespace: &str, limits: Limits) -> Result<Arc<Namespace>, Failure> {
+    fn synced_name(&self, package: &crate::PackageId) -> Option<String> {
+        self.sync.as_ref()?.synced_name(package)
+    }
+
+    fn open(&self, namespace: &str, limits: Limits, synced: Option<&str>) -> Result<Arc<Namespace>, Failure> {
         let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        // A grant given or revoked since it opened: open it again under the other key.
+        let wants = synced.filter(|_| self.sync.is_some());
+        if let Some(opened) = open.get(namespace)
+            && opened.synced.as_deref() != wants
+        {
+            let Opened {
+                namespace: held,
+                sweeper,
+                synced: was,
+                ..
+            } = open.remove(namespace).expect("present above");
+            drop(sweeper);
+            let mut store = held.store.write().unwrap_or_else(PoisonError::into_inner);
+            drop(store.take());
+            if let (Some(host), Some(was), None) = (&self.sync, was, wants) {
+                host.left(&was);
+            }
+            let (reopened, now) = self.open_store(namespace, limits, wants)?;
+            *store = Some(reopened.clone());
+            drop(store);
+            let (on_error, name) = (self.on_error.clone(), namespace.to_owned());
+            let sweeper = Sweeper::spawn(&reopened, SWEEP_EVERY, move |error| on_error(&name, error))
+                .map_err(|error| failure(Error::Io(error)))?;
+            open.insert(
+                namespace.to_owned(),
+                Opened {
+                    namespace: held.clone(),
+                    limits,
+                    sweeper,
+                    synced: now,
+                },
+            );
+            return Ok(held);
+        }
         if let Some(opened) = open.get_mut(namespace) {
             if opened.limits != limits {
                 opened.namespace.with(|store| store.set_limits(limits))?;
@@ -127,7 +258,7 @@ impl crate::services::Storage for PackageStorage {
             }
             return Ok(opened.namespace.clone());
         }
-        let store = Arc::new(self.storage.open(namespace, limits).map_err(failure)?);
+        let (store, now) = self.open_store(namespace, limits, wants)?;
         let (on_error, name) = (self.on_error.clone(), namespace.to_owned());
         let sweeper = Sweeper::spawn(&store, SWEEP_EVERY, move |error| on_error(&name, error))
             .map_err(|error| failure(Error::Io(error)))?;
@@ -140,6 +271,7 @@ impl crate::services::Storage for PackageStorage {
                 namespace: opened.clone(),
                 limits,
                 sweeper,
+                synced: now,
             },
         );
         Ok(opened)
@@ -249,7 +381,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage = package_storage(dir.path());
         let name = namespace(&PackageId::new("notes").unwrap(), Origin::User);
-        let opened = storage.open(&name, limits(1024, None)).unwrap();
+        let opened = storage.open(&name, limits(1024, None), None).unwrap();
 
         let (started, wait_started) = std::sync::mpsc::channel();
         let (go, wait_go) = std::sync::mpsc::channel::<()>();
@@ -285,7 +417,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage = package_storage(dir.path());
         let name = namespace(&PackageId::new("notes").unwrap(), Origin::User);
-        let stale = storage.open(&name, limits(1024, None)).unwrap();
+        let stale = storage.open(&name, limits(1024, None), None).unwrap();
         stale
             .with(|store| store.put_within_limits(record("old")))
             .unwrap();
@@ -298,7 +430,93 @@ mod tests {
         assert_eq!(refused.code, "unavailable");
         assert!(!dir.path().join(&name).exists(), "nothing was written");
 
-        let fresh = storage.open(&name, limits(1024, None)).unwrap();
+        let fresh = storage.open(&name, limits(1024, None), None).unwrap();
         assert_eq!(fresh.with(|store| Ok(store.usage().entries)).unwrap(), 0);
+    }
+
+    /// Stands in for the host's sync: opens under one vault while `on`, and records what it
+    /// was told.
+    struct FakeSync {
+        on: std::sync::atomic::AtomicBool,
+        vault: dupin_storage::VaultKey,
+        log: Mutex<Vec<String>>,
+    }
+
+    impl SyncHost for FakeSync {
+        fn synced_name(&self, _package: &crate::PackageId) -> Option<String> {
+            Some("ext-s-portable".into())
+        }
+
+        fn open(
+            &self,
+            storage: &dupin_storage::Storage,
+            namespace: &str,
+            synced: &str,
+            limits: Limits,
+        ) -> Option<Result<Store, Error>> {
+            self.on
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then(|| storage.open_synced_as(namespace, synced, limits, &self.vault))
+        }
+
+        fn opened(&self, _namespace: &str, synced: &str, _store: &Arc<Store>) {
+            self.log.lock().unwrap().push(format!("opened {synced}"));
+        }
+
+        fn left(&self, synced: &str) {
+            self.log.lock().unwrap().push(format!("left {synced}"));
+        }
+    }
+
+    #[test]
+    fn a_granted_namespace_syncs_while_sync_is_on_and_leaves_when_revoked() {
+        use crate::services::Storage as _;
+        let dir = tempfile::tempdir().unwrap();
+        let vault =
+            dupin_storage::VaultKey::new([4; 16], 1, dupin_storage::DataKey::generate().unwrap()).unwrap();
+        let host = Arc::new(FakeSync {
+            on: std::sync::atomic::AtomicBool::new(false),
+            vault: vault.clone(),
+            log: Mutex::default(),
+        });
+        let storage = Arc::new(
+            PackageStorage::new(dupin_storage::Storage::new(
+                dir.path(),
+                dupin_storage::MemoryKey::random(),
+            ))
+            .with_sync(host.clone()),
+        );
+        let name = "ext-u-local".to_owned();
+        let local_id = |namespace: &Arc<Namespace>| namespace.with(|store| Ok(store.namespace_id())).unwrap();
+
+        let granted = storage
+            .open(&name, limits(1024, None), Some("ext-s-portable"))
+            .unwrap();
+        granted.with(|store| store.upsert("k", record("kept"))).unwrap();
+        assert_ne!(
+            local_id(&granted),
+            vault.namespace_id("ext-s-portable"),
+            "sync is off"
+        );
+        assert!(host.log.lock().unwrap().is_empty());
+
+        host.on.store(true, std::sync::atomic::Ordering::SeqCst);
+        storage.reopen_synced();
+        let synced = storage
+            .open(&name, limits(1024, None), Some("ext-s-portable"))
+            .unwrap();
+        assert_eq!(local_id(&synced), vault.namespace_id("ext-s-portable"));
+        assert_eq!(
+            synced.with(|store| Ok(store.usage().entries)).unwrap(),
+            1,
+            "re-sealed, not lost"
+        );
+
+        let revoked = storage.open(&name, limits(1024, None), None).unwrap();
+        assert_ne!(local_id(&revoked), vault.namespace_id("ext-s-portable"));
+        assert_eq!(
+            *host.log.lock().unwrap(),
+            ["opened ext-s-portable", "left ext-s-portable"]
+        );
     }
 }

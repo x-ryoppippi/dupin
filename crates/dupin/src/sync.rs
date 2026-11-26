@@ -638,7 +638,7 @@ impl Worker {
         let owned = crate::synced::open_stores();
         let mut namespaces: Vec<dupin_sync::Namespace<'_>> = owned
             .iter()
-            .filter(|(name, _, _)| self.config.includes(name))
+            .filter(|(name, _, _)| self.config.includes(name) || name.starts_with("ext-s-"))
             .map(|(name, mode, store)| dupin_sync::Namespace {
                 name,
                 store,
@@ -655,14 +655,24 @@ impl Worker {
             });
         }
         let all: Vec<&str> = crate::synced::SYNCED.iter().map(|(name, _)| *name).collect();
-        let switched_off: Vec<&str> = all
+        let revoked = crate::synced::leaving_extensions();
+        let mut switched_off: Vec<&str> = all
             .iter()
             .copied()
             .filter(|name| !self.config.includes(name))
             .collect();
+        switched_off.extend(revoked.iter().map(String::as_str));
+        let mut every: Vec<&str> = all.clone();
+        every.extend(
+            owned
+                .iter()
+                .map(|(name, _, _)| name.as_str())
+                .filter(|name| name.starts_with("ext-s-")),
+        );
+        every.extend(revoked.iter().map(String::as_str));
         let result = match leaving {
             false => engine.run(&namespaces, &switched_off),
-            true => engine.run(&[], &all),
+            true => engine.run(&[], &every),
         };
         drop(namespaces);
         drop(owned);
@@ -673,6 +683,9 @@ impl Worker {
                     if name != USAGE {
                         crate::synced::changed(name);
                     }
+                }
+                for name in &report.left {
+                    crate::synced::left_extension(name);
                 }
                 let left = all.iter().all(|name| report.left.iter().any(|left| left == name));
                 let reminted = report.reminted;

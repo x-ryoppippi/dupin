@@ -96,11 +96,20 @@ pub trait Exec: Send + Sync {
 /// [`crate::PackageStorage`]; the bridge picks the namespace and the limits from the permit.
 pub trait Storage: Send + Sync {
     /// `namespace`, open with `limits`, which apply at once if they changed since it opened.
+    /// With `synced`, the package holds `storage:sync` and its namespace syncs under that name
+    /// while sync is on; without, it stays on this Mac.
     fn open(
         &self,
         namespace: &str,
         limits: dupin_storage::Limits,
+        synced: Option<&str>,
     ) -> Result<Arc<crate::storage::Namespace>, Failure>;
+    /// The name `package`'s namespace syncs under on every Mac, when it has one: only a
+    /// package installed from Git, whose source names it the same everywhere.
+    fn synced_name(&self, package: &crate::PackageId) -> Option<String> {
+        let _ = package;
+        None
+    }
     /// Deletes `namespace` and everything in it.
     fn discard(&self, namespace: &str) -> Result<(), Failure>;
 }
@@ -110,8 +119,13 @@ impl<T: Storage> Storage for Arc<T> {
         &self,
         namespace: &str,
         limits: dupin_storage::Limits,
+        synced: Option<&str>,
     ) -> Result<Arc<crate::storage::Namespace>, Failure> {
-        T::open(self, namespace, limits)
+        T::open(self, namespace, limits, synced)
+    }
+
+    fn synced_name(&self, package: &crate::PackageId) -> Option<String> {
+        T::synced_name(self, package)
     }
 
     fn discard(&self, namespace: &str) -> Result<(), Failure> {
@@ -233,6 +247,7 @@ impl Storage for Unavailable {
         &self,
         _namespace: &str,
         _limits: dupin_storage::Limits,
+        _synced: Option<&str>,
     ) -> Result<Arc<crate::storage::Namespace>, Failure> {
         Err(self.failure())
     }

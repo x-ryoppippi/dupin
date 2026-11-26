@@ -33,6 +33,7 @@ fn scope_keys_round_trip_through_their_written_form() {
         "exec:git-status",
         "script:open-in-zed",
         "storage",
+        "storage:sync",
         "clipboard:read",
         "clipboard:write",
         "clipboard:watch",

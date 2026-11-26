@@ -122,9 +122,18 @@ pub fn open(platform: Platform) -> Bridge {
             runner: platform.runner,
         }),
         storage: match shared_storage() {
-            Some(storage) => Box::new(PackageStorage::new(storage).on_error(|namespace, error| {
-                crate::log::warn(&format!("extension storage {namespace}: {error}"));
-            })),
+            Some(storage) => {
+                let sync = crate::synced::ExtensionSync::new();
+                let packages = Arc::new(
+                    PackageStorage::new(storage)
+                        .on_error(|namespace, error| {
+                            crate::log::warn(&format!("extension storage {namespace}: {error}"));
+                        })
+                        .with_sync(sync.clone()),
+                );
+                sync.serve(&packages);
+                Box::new(packages)
+            }
             None => Box::new(services::Unavailable(
                 "extension storage needs XDG_DATA_HOME or HOME",
             )),
