@@ -128,6 +128,8 @@ pub struct Ui {
     /// and the web searches bindings name that answer, when the shortcuts were last applied,
     /// since a `target = "dupin"` binding registers once what it addresses is there.
     bound_against: Option<BoundAgainst>,
+    /// The row a shortcut chose that waits for its package's consent, to run once granted.
+    bound_waiting: Option<hotkeys::Waiting>,
     pub icons: HashMap<dupin_core::Icon, Image>,
     /// The images extension rows name, made off the panel's thread.
     pub(crate) thumbnails: thumbnails::Thumbnails,
@@ -320,6 +322,7 @@ impl Ui {
             acknowledged_config: config.clone(),
             bindings_applied: false,
             bound_against: None,
+            bound_waiting: None,
             session: registration.session,
             query,
             config_problem: None,

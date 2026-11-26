@@ -35,6 +35,7 @@ Other keys: [Keys](../usage.md#keys).
 - A binding whose command isn't available, because its feature is off, no extension that is on has that package name, no web search answers to its keyword, or its system command needs **System Command Automation** or isn't in this build, is skipped with a notice that names it; the rest of the configuration applies. Turning the feature, the extension or the setting on makes the shortcut work without a restart.
 - Restart, Shut Down, Log Out and Empty Trash never run straight from a shortcut: it shows their row in the main search, and <kbd>↩</kbd> asks as it always does. A row of an extension's that asks first, or opens a list or a view, shows its package's command with the row's title typed, the same way.
 - An extension's row is looked up when you press the shortcut, so a row the package no longer lists is reported then.
+- When an extension's row needs access its package hasn't been given, such as Accessibility for Window Management, the shortcut shows the panel in that package's command with the request above the results. Once you allow it, the row runs, as long as that is within two minutes of the press; **Deny** drops it.
 - Up to four shell commands can run at a time.
 - Edits reload automatically.
 

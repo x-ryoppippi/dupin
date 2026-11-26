@@ -1,7 +1,11 @@
 use dupin_core::config::{Address, AliasTarget};
 use dupin_core::script::OutputMode;
+use std::sync::Arc;
+
 use dupin_core::{Action, CommandId, Config, Effect, Item};
 use rune::Tx;
+
+use crate::extensions::Extension;
 
 use super::Ui;
 
@@ -144,7 +148,7 @@ impl Ui {
             let deadline = std::time::Instant::now() + crate::extensions::QUERY_DEADLINE;
             let found = crate::extensions::catalogue_row(&extension, &row, deadline, &call);
             me.update(move |ui, tx| match found {
-                Ok(Some(item)) => ui.run_bound_row(&extension, item, tx),
+                Ok(Some(item)) => ui.run_bound_row(extension, item, tx),
                 Ok(None) => ui.show_notice(
                     format!(
                         "Couldn't run {keys}'s command: {} lists no row `{row}`.",
@@ -162,31 +166,84 @@ impl Ui {
         });
     }
 
-    /// Runs `item`'s primary action as choosing it does. One that asks first, or opens
-    /// something to choose from, shows the panel in its package's command with the row's
-    /// title typed instead, for ↩ to go on from there.
-    fn run_bound_row(&mut self, extension: &crate::extensions::Extension, item: Item, tx: &mut Tx) {
-        let action = item.primary.as_deref().and_then(|primary| {
+    /// Runs `item`'s primary action as choosing it does: the one place a shortcut's row is
+    /// either run without the panel or shown in it. A row that asks first, opens something to
+    /// choose from, or whose package waits for consent shows the panel in its package's
+    /// command with the row's title typed instead, for ↩ or the consent row to go on from there;
+    /// a row held for consent runs once it is granted.
+    pub(super) fn run_bound_row(&mut self, extension: Arc<Extension>, item: Item, tx: &mut Tx) {
+        let bridge = &self.extensions.bridge;
+        let asking = !bridge.pending(Some(&extension.package)).is_empty()
+            || bridge.asked_while_off(&extension.package);
+        let step = item.primary.as_deref().and_then(|primary| {
             let confirms = item.item_action(primary)?.confirmation().is_some();
-            item.action(primary)
-                .filter(|action| runs_unattended(confirms, action))
+            Some(bound_step(confirms, item.action(primary)?, asking))
         });
-        let Some(action) = action.cloned() else {
-            let command = crate::features::aliases::command(&extension.id, &self.session.command_ids());
-            return match command {
-                Ok(command) => self.show_bound(Some(&command), item.display_title(), tx),
-                Err(problem) => {
-                    self.show_notice(format!("Couldn't open {}: it {problem}.", extension.name), tx)
-                }
-            };
+        match step {
+            Some(BoundStep::Run) => {}
+            Some(BoundStep::AskConsent) => {
+                self.bound_waiting = Some(Waiting {
+                    hold: Hold {
+                        package: extension.package.clone(),
+                        since: tx.clock(),
+                    },
+                    extension: extension.clone(),
+                    item: item.clone(),
+                });
+                return self.show_bound_package(&extension, &item, tx);
+            }
+            Some(BoundStep::ShowRow) | None => return self.show_bound_package(&extension, &item, tx),
+        }
+        self.bound_waiting = None;
+        let Some(action) = item
+            .primary
+            .as_deref()
+            .and_then(|primary| item.action(primary))
+            .cloned()
+        else {
+            return;
         };
         self.dismiss(tx);
         match action {
             Action::Extension {
-                extension,
+                extension: package,
                 request: dupin_core::ExtensionRequest::Run { action, data },
-            } => self.run_bound_extension_action(extension, action, data.unwrap_or_default()),
+            } => self.run_bound_extension_action(package, action, data.unwrap_or_default(), item),
             action => self.apply(vec![Effect::Run(action)], tx),
+        }
+    }
+
+    /// Shows the panel in `extension`'s command with `item`'s title typed.
+    fn show_bound_package(&mut self, extension: &Extension, item: &Item, tx: &mut Tx) {
+        match crate::features::aliases::command(&extension.id, &self.session.command_ids()) {
+            Ok(command) => self.show_bound(Some(&command), item.display_title(), tx),
+            Err(problem) => self.show_notice(format!("Couldn't open {}: it {problem}.", extension.name), tx),
+        }
+    }
+
+    /// Runs the row held for `package`'s consent, once nothing it asked for is waiting and the
+    /// user granted it recently enough that running it is still what they meant.
+    pub(super) fn resume_bound_row(&mut self, package: &dupin_extension_bridge::PackageId, tx: &mut Tx) {
+        let bridge = &self.extensions.bridge;
+        let asking = !bridge.pending(Some(package)).is_empty() || bridge.asked_while_off(package);
+        let Some(waiting) = self.bound_waiting.take() else {
+            return;
+        };
+        match waiting.hold.resumes(package, asking, tx.clock()) {
+            Resume::Run => self.run_bound_row(waiting.extension, waiting.item, tx),
+            Resume::Wait => self.bound_waiting = Some(waiting),
+            Resume::Drop => {}
+        }
+    }
+
+    /// Forgets the row held for `package`'s consent, which the user refused.
+    pub(super) fn drop_bound_row(&mut self, package: &dupin_extension_bridge::PackageId) {
+        if self
+            .bound_waiting
+            .as_ref()
+            .is_some_and(|waiting| waiting.hold.package == *package)
+        {
+            self.bound_waiting = None;
         }
     }
 
@@ -332,8 +389,68 @@ impl Ui {
     }
 }
 
+/// How long a row a shortcut chose waits for its package's consent before granting it no
+/// longer runs it.
+const CONSENT_WAIT_SECS: f64 = 120.0;
+
+/// A row a shortcut chose, held until its package's consent is granted.
+pub(super) struct Waiting {
+    hold: Hold,
+    extension: Arc<Extension>,
+    item: Item,
+}
+
+/// Whose consent a held row waits for, and since when on the panel's clock.
+struct Hold {
+    package: dupin_extension_bridge::PackageId,
+    since: f64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Resume {
+    Run,
+    Wait,
+    Drop,
+}
+
+impl Hold {
+    /// What a change to `package`'s access at `now` does to the held row, with `asking` whether
+    /// the package still waits for an answer.
+    fn resumes(&self, package: &dupin_extension_bridge::PackageId, asking: bool, now: f64) -> Resume {
+        if now - self.since > CONSENT_WAIT_SECS {
+            Resume::Drop
+        } else if self.package != *package || asking {
+            Resume::Wait
+        } else {
+            Resume::Run
+        }
+    }
+}
+
+/// What a shortcut does with the row it chose.
+#[derive(Debug, PartialEq, Eq)]
+enum BoundStep {
+    /// Runs it without the panel.
+    Run,
+    /// Shows it in the panel, for ↩ to go on.
+    ShowRow,
+    /// Shows its package's consent rows, and runs it once they are answered.
+    AskConsent,
+}
+
 /// Whether choosing `action` needs nothing more of the user than the press of a shortcut: no
-/// confirmation, no list to choose from and no page to read.
+/// confirmation, no list to choose from, no page to read and, with `asking`, no consent its
+/// package waits for.
+fn bound_step(confirms: bool, action: &Action, asking: bool) -> BoundStep {
+    if !runs_unattended(confirms, action) {
+        BoundStep::ShowRow
+    } else if asking {
+        BoundStep::AskConsent
+    } else {
+        BoundStep::Run
+    }
+}
+
 fn runs_unattended(confirms: bool, action: &Action) -> bool {
     !confirms
         && !matches!(
@@ -416,4 +533,41 @@ fn a_bound_row_runs_unattended_unless_it_asks_or_opens_something() {
             context: None,
         })
     ));
+}
+
+#[test]
+fn a_bound_row_waits_for_consent_its_package_asks_and_runs_once_granted() {
+    let run = Action::Extension {
+        extension: "window-management".into(),
+        request: dupin_core::ExtensionRequest::Run {
+            action: "arrange".into(),
+            data: Some("left-half".into()),
+        },
+    };
+    assert_eq!(bound_step(false, &run, false), BoundStep::Run);
+    assert_eq!(bound_step(false, &run, true), BoundStep::AskConsent);
+    assert_eq!(
+        bound_step(true, &run, true),
+        BoundStep::ShowRow,
+        "a confirmation asks first"
+    );
+
+    let package = &dupin_extension_bridge::PackageId::new("window-management").unwrap();
+    let other = dupin_extension_bridge::PackageId::new("port").unwrap();
+    let waiting = Hold {
+        package: package.clone(),
+        since: 10.0,
+    };
+    assert_eq!(waiting.resumes(package, true, 20.0), Resume::Wait, "still asking");
+    assert_eq!(
+        waiting.resumes(&other, false, 20.0),
+        Resume::Wait,
+        "another package"
+    );
+    assert_eq!(waiting.resumes(package, false, 20.0), Resume::Run);
+    assert_eq!(
+        waiting.resumes(package, false, 10.0 + CONSENT_WAIT_SECS + 1.0),
+        Resume::Drop,
+        "a grant long after the press runs nothing"
+    );
 }
