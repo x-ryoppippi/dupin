@@ -49,6 +49,37 @@ impl Source for FsEvents {
     }
 }
 
+/// Reports nothing, so the worker reads what it watches once.
+pub(crate) struct Unwatched;
+
+impl Source for Unwatched {
+    fn watch(&mut self, _: &Roots, _: Files, _: Changed) -> Result<Box<dyn Send>, &'static str> {
+        Ok(Box::new(()))
+    }
+}
+
+impl<S: Source + ?Sized> Source for Box<S> {
+    fn watch(
+        &mut self,
+        roots: &Roots,
+        files: Files,
+        changed: Changed,
+    ) -> Result<Box<dyn Send>, &'static str> {
+        (**self).watch(roots, files, changed)
+    }
+}
+
+/// The launcher's source: FSEvents, or nothing in a headless run. Its scratch home doesn't
+/// change while it runs, and each stream it started or stopped would wait on fseventsd, which
+/// can take seconds to answer; a run held up that way at exit outlives its deadline.
+pub(crate) fn launcher() -> Box<dyn Source> {
+    if rune::tooling::is_headless() {
+        Box::new(Unwatched)
+    } else {
+        Box::new(FsEvents)
+    }
+}
+
 /// Changes a test reports by hand, so it waits on no daemon and no clock.
 #[cfg(test)]
 pub(crate) mod manual {

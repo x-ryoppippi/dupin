@@ -5,7 +5,7 @@ pub mod provider;
 pub mod runner;
 
 use crate::catalog_watch::{Depth, Watch};
-use crate::watch_source::{FsEvents, Source};
+use crate::watch_source::Source;
 
 fn watch_catalog(
     directory: std::path::PathBuf,
@@ -32,7 +32,7 @@ fn watch_catalog(
 
 pub fn watch(panel: rune::AppHandle<crate::ui::Ui>) -> Option<Watch> {
     let directory = crate::settings::path()?.parent()?.join("scripts");
-    match watch_catalog(directory, FsEvents, move |catalog| {
+    match watch_catalog(directory, crate::watch_source::launcher(), move |catalog| {
         panel.update(move |s, tx| s.scripts_catalog(catalog, tx));
     }) {
         Ok(watcher) => Some(watcher),

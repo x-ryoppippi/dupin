@@ -9,7 +9,7 @@ use dupin_mac::watcher::canonical_root;
 
 use super::layers::Layers;
 use super::{LockedKeys, Paths};
-use crate::watch_source::{FsEvents, Roots, Source};
+use crate::watch_source::{Roots, Source};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Update {
@@ -30,7 +30,7 @@ pub struct Service {
 
 impl Service {
     pub fn new(paths: Paths, callback: impl Fn(Update) + Send + 'static) -> Self {
-        Self::watching(paths, FsEvents, callback)
+        Self::watching(paths, crate::watch_source::launcher(), callback)
     }
 
     /// A service told of changes to the settings files by `source`.
