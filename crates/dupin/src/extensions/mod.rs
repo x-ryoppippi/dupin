@@ -482,6 +482,12 @@ fn host() -> &'static Host {
     )
 }
 
+/// The process ID and processor time of the helper that runs `extension`'s searches.
+#[cfg(test)]
+pub(crate) fn helper_processor_time(extension: &Extension) -> Option<(u32, std::time::Duration)> {
+    host().helper_processor_time(&extension.compiled)
+}
+
 /// Where the launcher reads the time it measures guests' timestamps against, such as how long
 /// ago a catalogue row is from: the clock its guests see, so a headless run shows the same any
 /// day, or else the wall clock.
