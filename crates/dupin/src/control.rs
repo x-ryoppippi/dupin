@@ -692,9 +692,10 @@ mod tests {
     fn simultaneous_stale_restarts_leave_one_live_listener() {
         let dir = std::env::temp_dir().join(format!("dupin-control-race-{}", std::process::id()));
         std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        // Left by a server that exited, as a stale socket is: one this process bound would stay
+        // listening in any child another test forks until that child execs.
+        subprocess("exit", &dir, "/unused-race");
         let path = dir.join("control.sock");
-        drop(UnixListener::bind(&path).unwrap());
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let barrier = Arc::new(std::sync::Barrier::new(4));
         let workers: Vec<_> = (0..4)
             .map(|_| {
