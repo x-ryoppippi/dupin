@@ -47,7 +47,7 @@ In the Script Output window:
 | -------------------------------- | ----------------------------------- |
 | <kbd>⌘.</kbd> (**Cancel**)       | Cancel the running script           |
 | <kbd>⌘R</kbd> (**Run again**)    | Run it again and select the new run |
-| <kbd>⌘⇧C</kbd> (**Copy output**) | Copy all retained lines             |
+| <kbd>⇧⌘C</kbd> (**Copy output**) | Copy all retained lines             |
 | <kbd>Esc</kbd>                   | Close the window                    |
 
 Other keys: [Keys](../usage.md#keys).

@@ -160,7 +160,8 @@ pub fn is_shared(key: &str) -> bool {
 }
 
 /// A key Dupin no longer reads. Settings wrote every key to each config.toml it saved, so a
-/// retired one is still accepted, whatever its value, and is dropped at the next save.
+/// retired one is still accepted, whatever its value. Settings never writes one, and a save
+/// leaves one already in the file as it is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Retired;
 

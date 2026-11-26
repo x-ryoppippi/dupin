@@ -42,6 +42,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
 toml = { workspace = true, features = ["display"] }
+toml_edit = { workspace = true }
 wgpu = { workspace = true }
 naga = { workspace = true }
 # Metal's own compiler and pipeline builder, which Rune links, to check a backdrop shader as

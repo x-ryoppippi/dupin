@@ -31,6 +31,21 @@ struct Owner {
 /// What a namespace that syncs is opened under while sync is on, set by the sync worker.
 static VAULT: RwLock<Option<VaultKey>> = RwLock::new(None);
 static OWNERS: Mutex<Vec<Owner>> = Mutex::new(Vec::new());
+/// Which namespaces this Mac's `[sync]` switches let sync carry.
+static SWITCHES: RwLock<Option<dupin_core::config::Sync>> = RwLock::new(None);
+
+/// This Mac's `[sync]` switches; owners reopen when the sync worker next sets the vault.
+pub fn set_switches(switches: dupin_core::config::Sync) {
+    *SWITCHES.write().unwrap_or_else(PoisonError::into_inner) = Some(switches);
+}
+
+fn switched_on(name: &str) -> bool {
+    SWITCHES
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_none_or(|switches| switches.includes(name))
+}
 
 fn mode(name: &str) -> Option<Mode> {
     SYNCED
@@ -43,7 +58,7 @@ fn mode(name: &str) -> Option<Mode> {
 /// Either way the storage re-seals what an earlier open left under the other key.
 pub fn open(storage: &Storage, name: &str, limits: Limits) -> Result<Arc<Store>, Error> {
     let vault = VAULT.read().unwrap_or_else(PoisonError::into_inner).clone();
-    let store = match vault.filter(|_| mode(name).is_some()) {
+    let store = match vault.filter(|_| mode(name).is_some() && switched_on(name)) {
         Some(vault) => storage.open_synced(name, limits, &vault)?,
         None => storage.open(name, limits)?,
     };

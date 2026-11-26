@@ -4,8 +4,8 @@ Snapshots save a finished calculation, search or extension view so you can read 
 
 ## Open it
 
-- <kbd>⌘⇧S</kbd> in the launcher: save the current view.
-- <kbd>⌘⇧O</kbd> in the launcher, **Snapshots** in Settings, or type `Snapshots` and choose its row: open the Snapshots window.
+- <kbd>⇧⌘S</kbd> in the launcher: save the current view.
+- <kbd>⇧⌘O</kbd> in the launcher, **Snapshots** in Settings, or type `Snapshots` and choose its row: open the Snapshots window.
 - `snap` <kbd>Space</kbd>: list saved snapshots in the launcher.
 
 ## What you see

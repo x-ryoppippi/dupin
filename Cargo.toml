@@ -51,6 +51,7 @@ memmap2 = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 # Rune's own wgpu, for the compositor that draws the query field's backdrop.
 wgpu = { version = "30.0.2", default-features = false }
 # The shader compiler Rune already links, to check a user's backdrop shader as Rune's Metal backend

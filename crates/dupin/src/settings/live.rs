@@ -408,7 +408,7 @@ fn save_to_disk(
         }))
     } else {
         let path = paths.base.as_deref().ok_or("config.toml has no path")?;
-        let source = toml::to_string(&current).map_err(|_| "could not encode config.toml")?;
+        let source = super::document::edit(layers.base_source(), &effective.config, &current)?;
         unchanged_since(paths, &layers)?;
         write(path, &source).map_err(|error| format!("could not save {}: {error}", path.display()))?;
         Ok(None)
@@ -770,6 +770,30 @@ script = "missing.sh"
         assert_eq!(
             Config::parse(&fs::read_to_string(config_path).unwrap()).unwrap(),
             desired
+        );
+    }
+
+    #[test]
+    fn settings_saves_keep_the_rest_of_a_hand_written_file() {
+        let root = TempDir::new();
+        let path = root.path().join("config.toml");
+        let source = "# Mine.\nfile_limit = 37   # few\n\n[bindings.\"alt+cmd+t\"]\ntarget = \"script\"\nscript = \"todo.sh\"\n\n[theme]\n# Wide.\npanel_width = 900\n";
+        fs::write(&path, source).unwrap();
+        let (updates, receiver) = mpsc::channel();
+        let service = Service::new(base_only(path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
+        let base = Config::parse(source).unwrap();
+        let mut desired = base.clone();
+        desired.file_limit = 58;
+        desired.bindings.clear();
+        desired.show_recent = false;
+        let saved = receive_revision(&receiver, service.save(&base, &desired).unwrap());
+        assert!(saved.save_problem.is_none(), "{:?}", saved.save_problem);
+        assert_eq!(saved.result.unwrap(), desired);
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            "# Mine.\nfile_limit = 58   # few\nshow_recent = false\n\n[theme]\n# Wide.\npanel_width = 900\n"
         );
     }
 
