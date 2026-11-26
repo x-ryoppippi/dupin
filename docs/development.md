@@ -426,14 +426,7 @@ Building and deploying go through `cf`, with the Cloudflare Vite plugin producin
 Icons are `icon-[set--name]` classes that ox-content turns into one self-hosted stylesheet from the `@iconify-json/*` collections installed in `website/`; add the collection before using a new set. For agents and crawlers the site also serves `/llms.txt`, a Markdown twin of each page (`/index.md`, `/download.md`), `sitemap.xml` and `robots.txt`; the Markdown is built in `website/src/markdown.ts` from the same data as the pages, and `website/public/_headers` sets their content types.
 
 The shared page head supplies canonical URLs, social cards and application JSON-LD.
-The 1200 × 630 social image is generated from `assets/social/og.svg`, which reuses
-the app logo. After editing the source, regenerate `website/public/og.png`:
-
-```sh
-nix shell --inputs-from . nixpkgs#resvg --command resvg --skip-system-fonts \
-  --use-fonts-dir "$(nix build --inputs-from . --no-link --print-out-paths nixpkgs#inter)/share/fonts" \
-  assets/social/og.svg website/public/og.png
-```
+Every page gets its own 1200 × 630 social image, drawn at build time by Takumi in `website/src/host/og.ts` from the page title (the home page shows the tagline) over the app logo, with Inter from `website/src/host/fonts/`. The cards are served at `/og/<page>.png`, and each page's `og:image` adds `?v=` and a hash of the card's pixels, so link previews fetch a changed card instead of keeping the cached one. To change the design, edit `markup` in `og.ts`; there is no image to regenerate.
 
 ## Deployment
 

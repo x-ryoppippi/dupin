@@ -32,6 +32,24 @@ import {
 	tagline,
 } from '../site.ts';
 
+import { ogImage, ogPath, type OgCard, type OgImage } from './og.ts';
+
+const homeCard = { title: siteName, subtitle: tagline, wordmark: true } satisfies OgCard;
+const downloadCard = { title: `Download ${siteName}`, subtitle: 'For Apple silicon Macs' };
+
+// The card of a docs page: its title over the section it sits in.
+const docCard = (page: DocPath, title: string): OgCard => ({
+	title,
+	subtitle: sections.find((section) => (section.pages as readonly string[]).includes(page))?.title,
+});
+
+const cardRoute = (pathname: string, card: OgCard): OxContentCustomHostRoute => ({
+	path: ogPath(pathname),
+	async render() {
+		return { body: (await ogImage(pathname, card)).png, contentType: 'image/png' };
+	},
+});
+
 // What a page needs of its render, which a not-found page in dev has too.
 type PageContext = Pick<OxContentCustomHostRenderContext, 'mode' | 'assets'>;
 
@@ -61,6 +79,7 @@ type Page = {
 	pathname: string;
 	markdown: string;
 	markdownPath?: string;
+	image: OgImage;
 };
 
 function renderPage<Name extends PageName>(
@@ -86,8 +105,8 @@ function renderDocument(
 ) {
 	const url = new URL(page.pathname, siteUrl).href;
 	const homeUrl = new URL('/', siteUrl).href;
-	const image = new URL('/og.png', siteUrl).href;
-	const imageAlt = escapeHtml(`${siteName}: ${tagline}`);
+	const image = page.image.url;
+	const imageAlt = escapeHtml(page.title);
 	const structuredData = {
 		'@context': 'https://schema.org',
 		'@graph': [
@@ -211,6 +230,7 @@ async function docsRoutes(root: string): Promise<OxContentCustomHostRoute[]> {
 							description: docDescription(source),
 							pathname: docRoute(page),
 							markdown: source,
+							image: await ogImage(docRoute(page), docCard(page, title)),
 							markdownPath: markdownRoute(page),
 						},
 						render(Docs, {
@@ -251,7 +271,10 @@ async function docsRoutes(root: string): Promise<OxContentCustomHostRoute[]> {
 			];
 		},
 	);
-	return [...pagesRoutes, ...imageRoutes];
+	const cardRoutes = docPaths.map((page) =>
+		cardRoute(docRoute(page), docCard(page, titles.get(page) ?? siteName)),
+	);
+	return [...pagesRoutes, ...imageRoutes, ...cardRoutes];
 }
 
 const llmsDocs = (titles: (page: DocPath) => string) =>
@@ -259,7 +282,7 @@ const llmsDocs = (titles: (page: DocPath) => string) =>
 		.map((page) => `- [${titles(page)}](${siteUrl}${markdownRoute(page)})`)
 		.join('\n')}\n`;
 
-function notFound(context: PageContext) {
+async function notFound(context: PageContext) {
 	const { source: _, ...page } = renderDocument(
 		context,
 		{
@@ -268,6 +291,8 @@ function notFound(context: PageContext) {
 			description: siteDescription,
 			pathname: '/404.html',
 			markdown: '# Page not found\n',
+			// Served at any address, so it shares the home page's card.
+			image: await ogImage('/', homeCard),
 		},
 		render(NotFound),
 		'',
@@ -278,7 +303,7 @@ function notFound(context: PageContext) {
 const staticRoutes: OxContentCustomHostRoute[] = [
 	{
 		path: '/',
-		render(context) {
+		async render(context) {
 			return {
 				...renderPage(
 					context,
@@ -288,6 +313,7 @@ const staticRoutes: OxContentCustomHostRoute[] = [
 						description: siteDescription,
 						pathname: '/',
 						markdown: homeMarkdown,
+						image: await ogImage('/', homeCard),
 					},
 					{},
 				),
@@ -297,7 +323,7 @@ const staticRoutes: OxContentCustomHostRoute[] = [
 	},
 	{
 		path: '/download',
-		render(context) {
+		async render(context) {
 			return {
 				...renderPage(
 					context,
@@ -308,6 +334,7 @@ const staticRoutes: OxContentCustomHostRoute[] = [
 							'Download Dupin for Apple silicon Macs: the app, Homebrew casks, or a Nix build.',
 						pathname: '/download/',
 						markdown: downloadMarkdown,
+						image: await ogImage('/download/', downloadCard),
 					},
 					{},
 				),
@@ -315,6 +342,8 @@ const staticRoutes: OxContentCustomHostRoute[] = [
 			};
 		},
 	},
+	cardRoute('/', homeCard),
+	cardRoute('/download/', downloadCard),
 	{
 		path: '/favicon.svg',
 		async render(context) {
@@ -327,7 +356,7 @@ const staticRoutes: OxContentCustomHostRoute[] = [
 	{
 		// Cloudflare serves it for any address the site has no file for.
 		path: '/404.html',
-		render: (context) => ({ ...notFound(context), status: 404 }),
+		render: async (context) => ({ ...(await notFound(context)), status: 404 }),
 	},
 ];
 
@@ -353,7 +382,7 @@ const host = {
 			...docs,
 		];
 	},
-	notFound: (context) => ({ ...notFound(context), status: 404 }),
+	notFound: async (context) => ({ ...(await notFound(context)), status: 404 }),
 } satisfies OxContentCustomHostModule;
 
 export default host;
