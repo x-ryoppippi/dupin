@@ -57,6 +57,8 @@ These are Dupin's choices about where a launcher's job ends. Each of them could 
 
 ## Fast, by rule
 
+Dupin competes on the distance from intent to result rather than on breadth of features, and CI measures that distance too: how many keystrokes it takes until what you want is first ([Search quality](./development.md#search-quality)).
+
 Dupin stays running in the background with no Dock icon, so the panel is there the moment you press the hotkey.
 
 CI measures how long a keystroke takes to reach the first frame that shows its results, on every change to the app. In recent runs the main search is under 3 ms at the 95th percentile, and every search measured is under 3.5 ms. A pull request's figures are compared with main's and any regression is reported on it; a shared runner's noise is larger than many real changes, so that comparison doesn't block a merge. What does is a bundled extension falling behind the native feature it replaced, or, for one with no native counterpart, going over its budget ([Keypress latency](./development.md#keypress-latency)).
