@@ -364,6 +364,35 @@ pub(in crate::extensions) struct HeadlessFixture {
     pub events: Vec<(usize, f64)>,
 }
 
+/// What a headless run that nobody handed a fixture finds in its extensions folder, such as a
+/// latency scenario's: `{ "name": <bundled package name>, "fixture": <file in that folder> }`.
+/// A file whose name starts with a dot is no extension, so the folder loads nothing else.
+const PLACED_FIXTURE: &str = ".headless-fixture.json";
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Placed {
+    name: String,
+    fixture: PathBuf,
+}
+
+/// The fixture placed in the extensions folder, for the bundled package it names at the
+/// revision this build ships.
+fn placed() -> Option<HeadlessFixture> {
+    let folder = super::super::directory()?;
+    let placed: Placed = serde_json::from_str(&std::fs::read_to_string(folder.join(PLACED_FIXTURE)).ok()?)
+        .inspect_err(|error| crate::log::warn(&format!("{PLACED_FIXTURE}: {error}")))
+        .ok()?;
+    let package = super::super::bundled::find(&super::super::bundled::directory()?, &placed.name)?;
+    let (_, revision, _) = super::super::declaration_of(&package).ok()?;
+    Some(HeadlessFixture {
+        fixture: folder.join(placed.fixture),
+        name: placed.name,
+        revision: revision.as_str().to_owned(),
+        events: Vec::new(),
+    })
+}
+
 /// The fixture a headless launcher renders: its replies answer every host request, and its
 /// consent and preferences are the replayed package's once the launcher installs it.
 pub(in crate::extensions) struct Headless {
@@ -390,8 +419,10 @@ pub(in crate::extensions) fn headless() -> Option<&'static Headless> {
     }
     HEADLESS
         .get_or_init(|| {
-            let handed: HeadlessFixture =
-                serde_json::from_str(&std::env::var(HEADLESS_FIXTURE).ok()?).ok()?;
+            let handed: HeadlessFixture = match std::env::var(HEADLESS_FIXTURE) {
+                Ok(handed) => serde_json::from_str(&handed).ok()?,
+                Err(_) => placed()?,
+            };
             Headless::open(handed)
                 .inspect_err(|diagnostic| crate::log::warn(&format!("render fixture: {diagnostic}")))
                 .ok()
