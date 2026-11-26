@@ -4,7 +4,8 @@
 //   stage wallpaper <image>  covers every screen with <image> below all windows until killed
 //   stage panel <pid>        prints the frame of <pid>'s largest on-screen window, in pixels
 //   stage displays           prints each display's size in points and pixels, and its modes
-//   stage hidpi              switches the main display to its largest 2x mode, if it has one
+//   stage scale              prints the main display's backing scale factor
+//   stage hidpi              makes a 2x virtual display the main one until killed
 //
 // The wallpaper is a window, so the desktop's own picture is never changed.
 import AppKit
@@ -88,18 +89,67 @@ func displays() -> Never {
     exit(0)
 }
 
-func hidpi() -> Never {
-    let display = CGMainDisplayID()
-    guard let mode = modes(display).filter(isHiDPI).max(by: { $0.width * $0.height < $1.width * $1.height }) else {
-        fail("display \(display) has no 2x mode")
-    }
-    var configuration: CGDisplayConfigRef?
-    guard CGBeginDisplayConfiguration(&configuration) == .success,
-          CGConfigureDisplayWithDisplayMode(configuration, display, mode, nil) == .success,
-          CGCompleteDisplayConfiguration(configuration, .forSession) == .success
-    else { fail("cannot switch display \(display) to \(mode.width)x\(mode.height) at 2x") }
-    print("\(mode.width)x\(mode.height) at 2x")
+func scale() -> Never {
+    guard let screen = NSScreen.screens.first else { fail("no screen") }
+    print(screen.backingScaleFactor)
     exit(0)
+}
+
+// A runner's display is a 1x framebuffer with no 2x mode, so this adds a virtual display (the
+// private CGVirtualDisplay, which needs no permission), makes it the main one and mirrors the
+// others to it. The display lasts as long as this process.
+func hidpi() -> Never {
+    func make(_ name: String) -> NSObject.Type {
+        guard let found = NSClassFromString(name) as? NSObject.Type else { fail("this macOS has no \(name)") }
+        return found
+    }
+    func allocated(_ type: NSObject.Type) -> AnyObject {
+        guard let object = (type as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() else {
+            fail("cannot allocate \(type)")
+        }
+        return object
+    }
+    let descriptor = make("CGVirtualDisplayDescriptor").init()
+    descriptor.setValue("Dupin recording", forKey: "name")
+    descriptor.setValue(UInt32(2880), forKey: "maxPixelsWide")
+    descriptor.setValue(UInt32(1800), forKey: "maxPixelsHigh")
+    descriptor.setValue(NSValue(size: NSSize(width: 286, height: 179)), forKey: "sizeInMillimeters")
+    descriptor.setValue(UInt32(0x4455), forKey: "vendorID")
+    descriptor.setValue(UInt32(0x0001), forKey: "productID")
+    descriptor.setValue(UInt32(1), forKey: "serialNum")
+    descriptor.setValue(DispatchQueue.main, forKey: "queue")
+
+    let modeClass = make("CGVirtualDisplayMode")
+    let initialiser = class_getMethodImplementation(modeClass, NSSelectorFromString("initWithWidth:height:refreshRate:"))
+    typealias ModeInit = @convention(c) (AnyObject, Selector, UInt32, UInt32, Double) -> Unmanaged<AnyObject>
+    let mode = unsafeBitCast(initialiser, to: ModeInit.self)(
+        allocated(modeClass),NSSelectorFromString("initWithWidth:height:refreshRate:"), 1440, 900, 60
+    ).takeUnretainedValue()
+    let settings = make("CGVirtualDisplaySettings").init()
+    settings.setValue(UInt32(1), forKey: "hiDPI")
+    settings.setValue([mode], forKey: "modes")
+
+    let displayClass = make("CGVirtualDisplay")
+    guard let display = allocated(displayClass).perform(NSSelectorFromString("initWithDescriptor:"), with: descriptor)?.takeUnretainedValue(),
+          display.perform(NSSelectorFromString("applySettings:"), with: settings) != nil,
+          let id = display.value(forKey: "displayID") as? UInt32, id != 0
+    else { fail("cannot create a virtual display") }
+
+    var count: UInt32 = 0
+    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    CGGetActiveDisplayList(16, &ids, &count)
+    var configuration: CGDisplayConfigRef?
+    guard CGBeginDisplayConfiguration(&configuration) == .success else { fail("cannot configure displays") }
+    CGConfigureDisplayOrigin(configuration, id, 0, 0)
+    for other in ids.prefix(Int(count)) where other != id {
+        CGConfigureDisplayMirrorOfDisplay(configuration, other, id)
+    }
+    guard CGCompleteDisplayConfiguration(configuration, .forSession) == .success else { fail("cannot apply the display configuration") }
+    signal(SIGTERM) { _ in exit(0) }
+    signal(SIGINT) { _ in exit(0) }
+    print("virtual display \(id)")
+    fflush(stdout)
+    dispatchMain()
 }
 
 let arguments = CommandLine.arguments.dropFirst()
@@ -112,9 +162,11 @@ case ("displays", nil):
     displays()
 case ("hidpi", nil):
     hidpi()
+case ("scale", nil):
+    scale()
 case ("panel", let pid?):
     guard let pid = Int32(pid) else { fail("not a process ID: \(pid)") }
     panel(pid)
 default:
-    fail("usage: stage preflight | displays | hidpi | wallpaper <image> | panel <pid>")
+    fail("usage: stage preflight | displays | scale | hidpi | wallpaper <image> | panel <pid>")
 }

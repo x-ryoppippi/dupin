@@ -105,13 +105,13 @@ def main [
         }
     }
     dark-mode
+    let retina = if ($env.CI? | default "") == "true" { retina-display $stage }
     print --stderr (^$stage displays)
-    if ($env.CI? | default "") == "true" {
-        let hidpi = ^$stage hidpi | complete
-        print --stderr $"2x display mode: ($hidpi.stdout | str trim) ($hidpi.stderr | str trim)"
-        sleep 2sec
-        print --stderr (^$stage displays)
-    }
+    print --stderr (
+        ^ffmpeg -hide_banner -f avfoundation -list_devices true -i ""
+        | complete
+        | get stderr
+    )
     let recorded = $clips | each {|clip|
         let chosen = $wallpaper | default ($clip.wallpaper? | default $manifest.wallpaper)
         record-clip $clip $manifest $binary $stage (wallpaper-image $chosen $tmp) $tmp
@@ -127,7 +127,24 @@ def main [
         $all | upsert $clip.image ($clip | select macos wallpaper scale)
     }
     {clips: $captured} | to json --tabs 1 | $"($in)\n" | save --force $GLASS
+    if $retina != null { job kill $retina }
     $recorded | select image bytes wallpaper scale
+}
+
+# A CI runner's display is a 1x framebuffer with no 2x mode, so its clips would be half the
+# resolution of a Retina Mac's. This makes a 2x virtual display the main one, which needs no
+# permission and lasts as long as its job, and returns that job, or null when there is none and
+# the clips stay at 1x. Never on a Mac in use, whose displays it would rearrange.
+def retina-display [stage: path]: nothing -> any {
+    let job = job spawn { ^$stage hidpi }
+    let ready = try {
+        wait-for "the 2x display" { (^$stage scale | into float) == 2.0 }
+        true
+    } catch { false }
+    if $ready { return $job }
+    print --stderr "no 2x display: recording at 1x"
+    job kill $job
+    null
 }
 
 # The panel is drawn in the system appearance, and the clips are of the dark one.
