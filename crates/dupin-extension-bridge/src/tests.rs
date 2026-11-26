@@ -210,6 +210,7 @@ impl World {
             &self.storage,
             &storage::namespace(&self.id, Origin::User),
             storage::limits(quota_bytes, retention_days),
+            None,
         )
         .unwrap();
         let records = store.with(|store| store.list(None, 200)).unwrap().records;

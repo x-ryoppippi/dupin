@@ -4,7 +4,7 @@ Dupin can keep your Macs in step through a folder that some other tool already s
 
 **What syncs today:** usage history, the ranking Dupin learns from what you open. Each Mac keeps its own log and every Mac ranks with all of them added together, so a Mac you rarely use still benefits from the others. Item paths under your home folder are compared relative to it, so the same file counts as one item on Macs with different user names; a path another Mac recorded is never checked on this one, and only affects ranking when a search here finds that item anyway.
 
-The [snippets](./snippets.md) you add in Dupin sync too, one per keyword: the later edit of a keyword wins, deleting one deletes it on every Mac, and `config.toml`'s snippets stay on each Mac, winning a keyword both hold. Settings saved over a read-only `config.toml`, such as one Home Manager writes, sync too: the keys every Mac shares (theme, web searches, keyword lists and the like) do, and device-local ones (hotkeys, display, permissions-related switches, `[sync]`) never leave the Mac. A writable `config.toml` is still each Mac's own. Extensions and, if you choose, clipboard history follow.
+The [snippets](./snippets.md) you add in Dupin sync too, one per keyword: the later edit of a keyword wins, deleting one deletes it on every Mac, and `config.toml`'s snippets stay on each Mac, winning a keyword both hold. Settings saved over a read-only `config.toml`, such as one Home Manager writes, sync too: the keys every Mac shares (theme, web searches, keyword lists and the like) do, and device-local ones (hotkeys, display, permissions-related switches, `[sync]`) never leave the Mac. A writable `config.toml` is still each Mac's own. Extensions you grant `storage:sync` on each Mac sync what they store ([Extensions](./extensions.md)). The list of installed extensions and, if you choose, clipboard history follow.
 
 ## Turning it on
 
@@ -33,7 +33,7 @@ Each Mac keeps its own copy of the key in its Keychain (this Mac only, never syn
 
 ## Status and other Macs
 
-`dupin sync status` shows the folder, how the key travels, this Mac's device ID, the other Macs with when they last synced, and anything wrong: files that failed to open (they are retried and never deleted), a Mac whose clock is more than five minutes ahead (its changes wait until the clocks agree), or a newer Dupin having written to the folder. `dupin sync now` syncs at once; otherwise Dupin syncs every five minutes. Add `--json` for scripts.
+`dupin sync status` shows the folder, how the key travels, this Mac's device ID, the other Macs with when they last synced, and anything wrong: files that failed to open (they are retried and never deleted), a Mac whose clock is more than five minutes ahead (its changes wait until the clocks agree), or a newer Dupin having written to the folder. A change goes to the folder about two seconds after you make it, and another Mac's changes are read as soon as the folder shows them, with a full pass every five minutes besides; `dupin sync now` syncs at once. Add `--json` for scripts.
 
 `dupin sync remove-device ID` removes a Mac you no longer use, for example one that has been away for more than 90 days: the other Macs take over what only it held, then its files leave the folder. If it comes back, it rejoins under a new device ID.
 
@@ -53,7 +53,12 @@ Dupin never follows a link inside the folder, so a link someone plants there can
 [sync]
 folder = "~/Library/Mobile Documents/com~apple~CloudDocs/Dupin" # wins over the folder chosen with `dupin sync on`
 allow_nfs = false
+usage = true # usage history
+snippets = true # the snippets you add in Dupin
+settings = true # shared settings stored over a read-only config.toml
 ```
+
+Settings → Sync has the same switches while sync is on. Turning one off makes this Mac leave that kind of data: it keeps what it has, stops sending and receiving it, and its files leave the folder once the other Macs have taken them over. Turning it back on rejoins, dropping what was deleted elsewhere meanwhile.
 
 With Home Manager, set `programs.dupin.settings.sync.folder`. A folder set this way still needs `dupin sync on` once on the first Mac and `dupin sync join` on the others, because the key can't come from Nix.
 

@@ -19,6 +19,11 @@ use serde_json::{Value, json};
 use crate::control::{Call, SyncAction};
 
 const FULL_SCAN_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How long after a write to a synced namespace its changes go out, so a burst of edits is one
+/// export.
+const EXPORT_AFTER: Duration = Duration::from_secs(2);
+/// How long after the folder changes it is read: the watcher already lets events settle.
+const IMPORT_AFTER: Duration = Duration::from_millis(500);
 const STATE_FILE: &str = "sync.json";
 /// The namespace usage history lives in, one record per device.
 const USAGE: &str = "usage";
@@ -145,6 +150,20 @@ enum Job {
     Config(dupin_core::config::Sync),
     Control(SyncAction, Reply),
     SaveUsage(History),
+    /// A synced namespace was written on this Mac.
+    Wrote,
+    /// Something changed in the sync folder.
+    FolderChanged,
+}
+
+/// The running worker's queue, so an owner can say it wrote without holding the service.
+static JOBS: std::sync::Mutex<Option<mpsc::Sender<Job>>> = std::sync::Mutex::new(None);
+
+/// An owner wrote to a namespace that syncs: export it shortly. Never blocks.
+pub fn wrote() {
+    if let Some(jobs) = &*JOBS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+        let _ = jobs.send(Job::Wrote);
+    }
 }
 
 /// The handle the UI keeps. Dropping it stops the worker.
@@ -164,10 +183,12 @@ impl SyncService {
         };
         let (jobs, receive) = mpsc::channel();
         let _ = jobs.send(Job::Config(config.clone()));
+        *JOBS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(jobs.clone());
         let notify: Notify = Arc::new(notify);
+        let own_jobs = jobs.clone();
         let spawned = std::thread::Builder::new()
             .name("dupin-sync".into())
-            .spawn(move || Worker::new(storage, notify).run(receive));
+            .spawn(move || Worker::new(storage, notify, own_jobs).run(receive));
         match spawned {
             Ok(_) => Self { jobs: Some(jobs) },
             Err(error) => {
@@ -281,11 +302,19 @@ struct Worker {
     last: Option<(u64, Report)>,
     problem: Option<String>,
     started: bool,
+    jobs: mpsc::Sender<Job>,
+    /// Watches the folder while the engine runs, so another Mac's changes are read at once.
+    watcher: Option<dupin_mac::watcher::PathWatcher>,
+    /// When the next pass is due before the five-minute full scan.
+    due: Option<std::time::Instant>,
 }
 
 impl Worker {
-    fn new(storage: Arc<Storage>, notify: Notify) -> Self {
+    fn new(storage: Arc<Storage>, notify: Notify, jobs: mpsc::Sender<Job>) -> Self {
         Self {
+            jobs,
+            watcher: None,
+            due: None,
             storage,
             notify,
             home: Home::new(),
@@ -301,9 +330,18 @@ impl Worker {
         }
     }
 
+    /// Asks for a pass within `after`, keeping an earlier one already due.
+    fn soon(&mut self, after: Duration) {
+        let at = std::time::Instant::now() + after;
+        self.due = Some(self.due.map_or(at, |due| due.min(at)));
+    }
+
     fn run(mut self, jobs: mpsc::Receiver<Job>) {
         loop {
-            match jobs.recv_timeout(FULL_SCAN_EVERY) {
+            let wait = self.due.map_or(FULL_SCAN_EVERY, |due| {
+                due.saturating_duration_since(std::time::Instant::now())
+            });
+            match jobs.recv_timeout(wait) {
                 Ok(Job::SaveUsage(mut own)) => {
                     // Later snapshots replace earlier ones; anything else waits its turn.
                     let mut after = Vec::new();
@@ -319,7 +357,10 @@ impl Worker {
                     }
                 }
                 Ok(job) => self.handle(job),
-                Err(mpsc::RecvTimeoutError::Timeout) => self.pass(),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    self.due = None;
+                    self.pass();
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
         }
@@ -338,6 +379,8 @@ impl Worker {
                 reply.send(result);
             }
             Job::SaveUsage(own) => self.save_usage(&own),
+            Job::Wrote => self.soon(EXPORT_AFTER),
+            Job::FolderChanged => self.soon(IMPORT_AFTER),
         }
     }
 
@@ -349,6 +392,7 @@ impl Worker {
         self.started = true;
         self.problem = None;
         self.engine = None;
+        self.watcher = None;
         self.vault = None;
         if let Some(state) = self.state.clone().filter(|state| !state.leaving)
             && let Some(vault) = unhex16(&state.vault)
@@ -364,6 +408,7 @@ impl Worker {
         if let Some(vault) = &self.vault {
             self.storage.hold_vault_key(vault.clone());
         }
+        crate::synced::set_switches(self.config.clone());
         crate::synced::set_vault(self.vault.clone());
         self.open_usage(first);
         self.pass();
@@ -378,7 +423,7 @@ impl Worker {
         if migrate && self.vault.is_none() && !recorded {
             return;
         }
-        let opened = match &self.vault {
+        let opened = match self.vault.as_ref().filter(|_| self.config.usage) {
             Some(vault) => self.storage.open_synced(USAGE, USAGE_LIMITS, vault),
             None => self.storage.open(USAGE, USAGE_LIMITS),
         };
@@ -464,7 +509,7 @@ impl Worker {
 
     fn write_usage(&mut self, own: &History) -> Result<(), String> {
         if self.usage.is_none() {
-            let opened = match &self.vault {
+            let opened = match self.vault.as_ref().filter(|_| self.config.usage) {
                 Some(vault) => self.storage.open_synced(USAGE, USAGE_LIMITS, vault),
                 None => self.storage.open(USAGE, USAGE_LIMITS),
             };
@@ -487,8 +532,9 @@ impl Worker {
     }
 
     fn save_usage(&mut self, own: &History) {
-        if let Err(error) = self.write_usage(own) {
-            crate::log::warn(&format!("couldn't save the usage history: {error}"));
+        match self.write_usage(own) {
+            Ok(()) => self.soon(EXPORT_AFTER),
+            Err(error) => crate::log::warn(&format!("couldn't save the usage history: {error}")),
         }
     }
 
@@ -538,8 +584,26 @@ impl Worker {
             })
             .and_then(|(folder, joined)| self.engine_for(folder, joined));
         match result {
-            Ok(engine) => self.engine = Some(engine),
+            Ok(engine) => {
+                self.watch(engine.folder_path());
+                self.engine = Some(engine);
+            }
             Err(error) => self.problem = Some(error),
+        }
+    }
+
+    /// Watches the folder for another Mac's changes. Without a watcher the five-minute scan
+    /// still finds them.
+    fn watch(&mut self, folder: &Path) {
+        let jobs = self.jobs.clone();
+        match dupin_mac::watcher::PathWatcher::start_scoped(Vec::new(), vec![folder.to_owned()], move |_| {
+            let _ = jobs.send(Job::FolderChanged);
+        }) {
+            Ok(watcher) => self.watcher = Some(watcher),
+            Err(error) => {
+                self.watcher = None;
+                crate::log::warn(&format!("couldn't watch the sync folder: {error}"));
+            }
         }
     }
 
@@ -574,6 +638,7 @@ impl Worker {
         let owned = crate::synced::open_stores();
         let mut namespaces: Vec<dupin_sync::Namespace<'_>> = owned
             .iter()
+            .filter(|(name, _, _)| self.config.includes(name) || name.starts_with("ext-s-"))
             .map(|(name, mode, store)| dupin_sync::Namespace {
                 name,
                 store,
@@ -581,7 +646,7 @@ impl Worker {
                 fold: None,
             })
             .collect();
-        if let Some(store) = &self.usage {
+        if let Some(store) = self.usage.as_ref().filter(|_| self.config.usage) {
             namespaces.push(dupin_sync::Namespace {
                 name: USAGE,
                 store,
@@ -590,9 +655,24 @@ impl Worker {
             });
         }
         let all: Vec<&str> = crate::synced::SYNCED.iter().map(|(name, _)| *name).collect();
+        let revoked = crate::synced::leaving_extensions();
+        let mut switched_off: Vec<&str> = all
+            .iter()
+            .copied()
+            .filter(|name| !self.config.includes(name))
+            .collect();
+        switched_off.extend(revoked.iter().map(String::as_str));
+        let mut every: Vec<&str> = all.clone();
+        every.extend(
+            owned
+                .iter()
+                .map(|(name, _, _)| name.as_str())
+                .filter(|name| name.starts_with("ext-s-")),
+        );
+        every.extend(revoked.iter().map(String::as_str));
         let result = match leaving {
-            false => engine.run(&namespaces, &[]),
-            true => engine.run(&[], &all),
+            false => engine.run(&namespaces, &switched_off),
+            true => engine.run(&[], &every),
         };
         drop(namespaces);
         drop(owned);
@@ -603,6 +683,9 @@ impl Worker {
                     if name != USAGE {
                         crate::synced::changed(name);
                     }
+                }
+                for name in &report.left {
+                    crate::synced::left_extension(name);
                 }
                 let left = all.iter().all(|name| report.left.iter().any(|left| left == name));
                 let reminted = report.reminted;
@@ -733,7 +816,9 @@ impl Worker {
         self.vault = Some(joined.key.clone());
         self.storage.hold_vault_key(joined.key.clone());
         crate::synced::set_vault(Some(joined.key.clone()));
-        self.engine = Some(self.engine_for(folder, joined)?);
+        let engine = self.engine_for(folder, joined)?;
+        self.watch(engine.folder_path());
+        self.engine = Some(engine);
         self.open_usage(false);
         self.pass();
         Ok(())
@@ -765,6 +850,7 @@ impl Worker {
         }
         self.state = None;
         self.engine = None;
+        self.watcher = None;
     }
 
     fn status(&self) -> Value {
@@ -807,7 +893,11 @@ impl Worker {
             }),
             "device": self.device_key(),
             "namespaces": match self.vault.is_some() {
-                true => crate::synced::SYNCED.iter().map(|(name, _)| *name).collect(),
+                true => crate::synced::SYNCED
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .filter(|name| self.config.includes(name))
+                    .collect(),
                 false => Vec::new(),
             },
             "problem": self.problem,

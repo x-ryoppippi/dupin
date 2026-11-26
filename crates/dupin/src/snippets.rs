@@ -323,6 +323,7 @@ impl Library {
     /// Hands the bundled package the snippets as they are now, before anything that changed
     /// them answers, then tells the listeners.
     fn changed(&self) {
+        crate::sync::wrote();
         let (preferences, _) = self.preferences();
         crate::features::snippets::hand_over(preferences);
         for listener in read(&self.changed).iter() {

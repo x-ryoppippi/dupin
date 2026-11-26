@@ -549,12 +549,7 @@ impl Session {
                 _ => return None,
             }
         };
-        let namespace = self
-            .bridge
-            .services
-            .storage
-            .open(&self.namespace, storage_limits(&permit).ok()?)
-            .ok()?;
+        let namespace = self.open_namespace(&permit).ok()?;
         namespace.with(|store| Ok(handle_for(store, path))).ok()
     }
 
@@ -588,11 +583,7 @@ impl Session {
                 }
             }
         };
-        let namespace = self
-            .bridge
-            .services
-            .storage
-            .open(&self.namespace, storage_limits(&permit)?)?;
+        let namespace = self.open_namespace(&permit)?;
         let result = match image {
             crate::ImageRef::Blob(handle) => {
                 let handle: dupin_storage::BlobHandle = handle
@@ -841,12 +832,24 @@ impl Session {
     /// The package's own namespace, open with the quota and retention the permit names.
     fn storage(&self, op: StorageOp) -> Result<(Permit, Arc<storage::Namespace>), Failure> {
         let permit = self.permit(&Request::Storage { op })?;
-        let store = self
-            .bridge
-            .services
-            .storage
-            .open(&self.namespace, storage_limits(&permit)?)?;
+        let store = self.open_namespace(&permit)?;
         Ok((permit, store))
+    }
+
+    /// The package's namespace with the permit's limits, syncing while the package holds
+    /// `storage:sync` on this Mac and has a name every Mac knows it by.
+    fn open_namespace(&self, permit: &Permit) -> Result<Arc<storage::Namespace>, Failure> {
+        let storage = &self.bridge.services.storage;
+        let synced = storage.synced_name(&self.package).filter(|_| {
+            let state = self.bridge.lock();
+            matches!(
+                state
+                    .broker
+                    .check(&self.package, &self.revision, &Request::StorageSync, self.trigger),
+                dupin_broker::Decision::Allow(_)
+            )
+        });
+        storage.open(&self.namespace, storage_limits(permit)?, synced.as_deref())
     }
 
     /// Asks the broker for `request` under this call's trigger.

@@ -629,9 +629,9 @@ impl services::Exec for Shared {
 
 impl services::Storage for Shared {
     /// Seeds the namespace with the fixture's records the first time a call opens it.
-    fn open(&self, namespace: &str, limits: Limits) -> Result<Arc<Namespace>, Failure> {
+    fn open(&self, namespace: &str, limits: Limits, synced: Option<&str>) -> Result<Arc<Namespace>, Failure> {
         let mut opened = lock(&self.0.opened);
-        let store = self.0.storage.open(namespace, limits)?;
+        let store = self.0.storage.open(namespace, limits, synced)?;
         if opened.is_none() {
             let seeded = self
                 .0

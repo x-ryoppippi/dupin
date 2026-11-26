@@ -5,11 +5,11 @@
 use std::path::PathBuf;
 
 use rune::{El, col, text};
-use rune_kit::{Button, Kit};
+use rune_kit::{Button, Kit, Switch};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use super::controls::{card, note, setting, tilde, value_button};
+use super::controls::{card, note, setting, setting_with_lock, tilde, value_button};
 use super::{DESCRIPTION, Prefs, ROW_PX};
 use crate::control::SyncAction;
 use crate::icons;
@@ -295,6 +295,9 @@ fn on_page(s: &Prefs, k: &Kit, hair: f32, status: &Value, leaving: bool) -> Vec<
         ));
     }
     let mut body = vec![card(k, hair, rows)];
+    if !leaving {
+        body.push(card(k, hair, switches(s, k)));
+    }
 
     let devices: Vec<&Value> = last
         .and_then(|last| last.get("devices"))
@@ -335,6 +338,51 @@ fn on_page(s: &Prefs, k: &Kit, hair: f32, status: &Value, leaving: bool) -> Vec<
         body.push(note(k, &line));
     }
     body
+}
+
+/// What this Mac syncs: a switch per kind of data, which `[sync]` keeps on this Mac only.
+fn switches(s: &Prefs, k: &Kit) -> Vec<El> {
+    let locked = s.locked("sync");
+    let row = |label: &'static str,
+               detail: &'static str,
+               on: bool,
+               set: fn(&mut dupin_core::config::Sync, bool)| {
+        let control = Switch::new(on)
+            .label(label)
+            .hide_label()
+            .disabled(locked)
+            .on_toggle(move |s: &mut Prefs| s.set(|c| set(&mut c.sync, !on)))
+            .build(k);
+        setting_with_lock(
+            k,
+            &icons::CLOUD,
+            label,
+            Some(detail),
+            control,
+            s.lock_note(locked),
+        )
+    };
+    let sync = &s.config.sync;
+    vec![
+        row(
+            "Usage history",
+            "What you open, so every Mac ranks with all of it",
+            sync.usage,
+            |sync, on| sync.usage = on,
+        ),
+        row(
+            "Snippets",
+            "The snippets you add in Dupin; config.toml's stay on each Mac",
+            sync.snippets,
+            |sync, on| sync.snippets = on,
+        ),
+        row(
+            "Settings",
+            "Settings every Mac shares, saved over a read-only config.toml",
+            sync.settings,
+            |sync, on| sync.settings = on,
+        ),
+    ]
 }
 
 /// What the last pass found wrong, in words.

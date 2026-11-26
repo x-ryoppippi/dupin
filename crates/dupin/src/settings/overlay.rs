@@ -123,6 +123,9 @@ impl Overlay {
                     blobs: Vec::new(),
                 },
             )?;
+            if shared {
+                crate::sync::wrote();
+            }
             open.stored.insert(key.clone(), (shared, value.clone()));
         }
         let removed: Vec<_> = open

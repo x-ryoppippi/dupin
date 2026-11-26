@@ -372,6 +372,7 @@ fn glyph(scope: &Scope) -> &'static Icon {
         Scope::Files { .. } => &icons::FOLDER,
         Scope::Exec { .. } | Scope::Script { .. } => &icons::KEYBOARD,
         Scope::Storage { .. } => &icons::FILES,
+        Scope::StorageSync => &icons::CLOUD,
         Scope::Clipboard { .. } => &icons::CLIPBOARD,
         Scope::Dictionary => &icons::LANGUAGES,
         Scope::Calculator => &icons::CALCULATOR,

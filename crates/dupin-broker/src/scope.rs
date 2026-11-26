@@ -399,6 +399,9 @@ pub enum Scope {
         quota_bytes: u64,
         retention_days: Option<u32>,
     },
+    /// Copying what the package stores, encrypted, to the sync folder and the user's other
+    /// Macs. Granted on each Mac.
+    StorageSync,
     Clipboard {
         access: ClipboardAccess,
     },
@@ -432,6 +435,7 @@ impl Scope {
             Self::Exec { name, .. } => ScopeKey::Exec(name.clone()),
             Self::Script { name, .. } => ScopeKey::Script(name.clone()),
             Self::Storage { .. } => ScopeKey::Storage,
+            Self::StorageSync => ScopeKey::StorageSync,
             Self::Clipboard { access } => ScopeKey::Clipboard(*access),
             Self::Dictionary => ScopeKey::Dictionary,
             Self::Calculator => ScopeKey::Calculator,
@@ -492,6 +496,7 @@ impl Scope {
             }
             (Self::Clipboard { access }, Self::Clipboard { access: a }) => access == a,
             (Self::Dictionary, Self::Dictionary)
+            | (Self::StorageSync, Self::StorageSync)
             | (Self::Calculator, Self::Calculator)
             | (Self::Snippets, Self::Snippets) => true,
             (
@@ -592,6 +597,9 @@ impl fmt::Display for Scope {
                 }
                 Ok(())
             }
+            Self::StorageSync => {
+                f.write_str("copy what it stores, encrypted, to your sync folder and your other Macs")
+            }
             Self::Clipboard { access } => match access {
                 ClipboardAccess::Read => f.write_str("read the clipboard"),
                 ClipboardAccess::Write => f.write_str("write to the clipboard"),
@@ -637,6 +645,7 @@ pub enum ScopeKey {
     Exec(ScopeName),
     Script(ScopeName),
     Storage,
+    StorageSync,
     Clipboard(ClipboardAccess),
     Dictionary,
     Calculator,
@@ -656,6 +665,7 @@ impl fmt::Display for ScopeKey {
             Self::Exec(name) => write!(f, "exec:{name}"),
             Self::Script(name) => write!(f, "script:{name}"),
             Self::Storage => f.write_str("storage"),
+            Self::StorageSync => f.write_str("storage:sync"),
             Self::Clipboard(access) => write!(f, "clipboard:{}", access.as_str()),
             Self::Dictionary => f.write_str("dictionary"),
             Self::Calculator => f.write_str("calculator"),
@@ -687,6 +697,7 @@ impl FromStr for ScopeKey {
             Some(("files", name)) => Self::Files(ScopeName::new(name)?),
             Some(("exec", name)) => Self::Exec(ScopeName::new(name)?),
             Some(("script", name)) => Self::Script(ScopeName::new(name)?),
+            Some(("storage", "sync")) => Self::StorageSync,
             Some(("clipboard", "read")) => Self::Clipboard(ClipboardAccess::Read),
             Some(("clipboard", "write")) => Self::Clipboard(ClipboardAccess::Write),
             Some(("clipboard", "watch")) => Self::Clipboard(ClipboardAccess::Watch),

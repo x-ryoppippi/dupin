@@ -501,10 +501,16 @@ impl Parser {
     }
 
     fn storage(&mut self, value: &Value, field: &str) -> Vec<Scope> {
-        let Some(object) = self.fields(value, field, &["quotaBytes", "retentionDays"], &["quotaBytes"])
-        else {
+        let Some(object) = self.fields(
+            value,
+            field,
+            &["quotaBytes", "retentionDays", "sync"],
+            &["quotaBytes"],
+        ) else {
             return Vec::new();
         };
+        let object = object.clone();
+        let sync = self.boolean(object.get("sync"), &format!("{field}.sync"));
         let quota = object
             .get("quotaBytes")
             .and_then(|quota| self.integer(quota, &format!("{field}.quotaBytes"), 1..=MAX_QUOTA_BYTES));
@@ -515,10 +521,16 @@ impl Parser {
                 .map(|days| Some(days as u32)),
         };
         match (quota, retention) {
-            (Some(quota_bytes), Some(retention_days)) => vec![Scope::Storage {
-                quota_bytes,
-                retention_days,
-            }],
+            (Some(quota_bytes), Some(retention_days)) => {
+                let mut scopes = vec![Scope::Storage {
+                    quota_bytes,
+                    retention_days,
+                }];
+                if sync {
+                    scopes.push(Scope::StorageSync);
+                }
+                scopes
+            }
             _ => Vec::new(),
         }
     }
