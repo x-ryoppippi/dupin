@@ -34,7 +34,7 @@ Free ⌘Space first ([how](./docs/features/hotkeys.md#freeing-the-hotkey)). More
 
 ---
 
-[GPL-3.0-or-later](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Sponsor](https://github.com/sponsors/ryoppippi)
+[GPL-3.0-or-later](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Telemetry](./docs/features/telemetry.md) · [Sponsor](https://github.com/sponsors/ryoppippi)
 
 <p align="center">
     <a href="https://coderabbit.link/ryoppippi"><picture><source media="(prefers-color-scheme: dark)" srcset="./docs/public/coderabbit-logo-dark.svg"><img src="./docs/public/coderabbit-logo.svg" alt="CodeRabbit" width="140"></picture></a>

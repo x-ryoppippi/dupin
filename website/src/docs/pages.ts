@@ -31,6 +31,7 @@ export const sections = [
 			'features/storage.md',
 			'features/sync.md',
 			'features/updates.md',
+			'features/telemetry.md',
 			'features/advanced.md',
 		],
 	},

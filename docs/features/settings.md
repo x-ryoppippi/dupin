@@ -31,6 +31,7 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 | Settings → Keywords                                        | Lists every keyword, records the [shortcut](./keywords.md#shortcuts) that opens each command, and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords |
 | Settings → Snippets                                        | Lists every [snippet](./snippets.md#adding-and-editing), adds, edits and deletes the ones stored in Dupin, and shows `config.toml`'s read-only                                        |
 | **Launch at login**                                        | Starts Dupin at login; see [Launch at login](#launch-at-login)                                                                                                                        |
+| **Anonymous usage ping**                                   | Turns off the one anonymous ping a day an official release sends; **Details** opens [Telemetry](./telemetry.md)                                                                       |
 | **Relaunch**                                               | Restarts Dupin, installing a staged update first                                                                                                                                      |
 | **Open config.toml**                                       | Opens the file in its default editor                                                                                                                                                  |
 | **Open Config Folder**                                     | Shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist                                                                   |
@@ -67,7 +68,7 @@ Dupin.app carries the notices as `Contents/Resources/ThirdPartyNotices.txt`; `du
 
 ## First run
 
-The first launch opens Settings with a short welcome: choose the hotkey, turn on launch at login, and see which keys switch modes.
+The first launch opens Settings with a short welcome: choose the hotkey, turn on launch at login, see what the [anonymous usage ping](./telemetry.md) sends and turn it off if you like, and see which keys switch modes.
 
 > [!TIP]
 > <kbd>⌘Space</kbd> is Spotlight's shortcut too. To give it to Dupin, turn off Show Spotlight search in System Settings → Keyboard → Keyboard Shortcuts → Spotlight, or choose another hotkey. When another app holds the chord you press, Dupin names it.

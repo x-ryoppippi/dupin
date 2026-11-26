@@ -118,6 +118,7 @@ With `settings` set, `config.toml` links into the Nix store. To change a locked 
 - [Snippets](./features/snippets.md#configuration)
 - [Sync](./features/sync.md#configuration): `[sync]`, the folder this Mac syncs through
 - [System commands](./features/system-commands.md#configuration)
+- [Telemetry](./features/telemetry.md#configuration): `telemetry`, the anonymous daily usage ping
 - [Updates](./features/updates.md#configuration)
 - [Web searches](./features/web-searches.md#configuration)
 - [Window management](./features/window-management.md#configuration)
