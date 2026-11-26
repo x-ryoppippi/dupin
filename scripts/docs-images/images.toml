@@ -445,8 +445,7 @@ steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "
 [[clips]]
 page = "home"
 name = "files"
-# Not `glass`: the real app on the runner listed no Recent items from the scratch home's
-# history, so there was no folder to browse; this stays headless over Flow.
+glass = true
 backdrop = "flow"
 themes = ["dark"]
 scale = 2

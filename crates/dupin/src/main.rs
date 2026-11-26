@@ -23,6 +23,7 @@ mod notices;
 mod out;
 mod prefs;
 mod receivers;
+mod recording;
 mod scripts;
 mod settings;
 mod shader;

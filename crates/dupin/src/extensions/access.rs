@@ -44,6 +44,10 @@ pub fn shared_storage() -> Option<Arc<dupin_storage::Storage>> {
             // release build ignores the variable.
             let storage = match std::env::var_os(DEBUG_KEY_FILE_ENV).filter(|_| cfg!(debug_assertions)) {
                 Some(path) => dupin_storage::Storage::new(root, dupin_storage::FileKey::new(path)),
+                // A recording must neither read nor add the Keychain's data key.
+                None if crate::recording::active() => {
+                    dupin_storage::Storage::new(root, dupin_storage::MemoryKey::random())
+                }
                 None => dupin_storage::Storage::new(root, dupin_mac::keychain::KeychainKey),
             };
             Some(Arc::new(match dupin_mac::machine::platform_uuid() {

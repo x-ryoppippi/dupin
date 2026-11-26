@@ -105,6 +105,13 @@ def main [
         }
     }
     dark-mode
+    print --stderr (^$stage displays)
+    if ($env.CI? | default "") == "true" {
+        let hidpi = ^$stage hidpi | complete
+        print --stderr $"2x display mode: ($hidpi.stdout | str trim) ($hidpi.stderr | str trim)"
+        sleep 2sec
+        print --stderr (^$stage displays)
+    }
     let recorded = $clips | each {|clip|
         let chosen = $wallpaper | default ($clip.wallpaper? | default $manifest.wallpaper)
         record-clip $clip $manifest $binary $stage (wallpaper-image $chosen $tmp) $tmp
@@ -179,7 +186,9 @@ def record-clip [
     let runtime = $tmp | path join $"($name)-runtime"
     mkdir $runtime
     ^chmod 700 $runtime
-    let environment = $environment | merge {XDG_RUNTIME_DIR: $runtime}
+    # A launch with this scratch home lists only the fixture apps and keeps its history in a
+    # scratch store, as a headless run does, so nothing of this Mac shows.
+    let environment = $environment | merge {XDG_RUNTIME_DIR: $runtime, DUPIN_RECORDING: "1"}
     let log = $tmp | path join $"($name).log"
     let backdrop = job spawn { ^$stage wallpaper $wallpaper }
     let dupin = job spawn { with-env $environment { ^$binary o+e> $log } }
