@@ -654,3 +654,56 @@ fn a_missing_or_non_executable_target_is_reported_before_spawning() {
     }
     assert!(spawner.launches.borrow().is_empty());
 }
+
+#[test]
+fn only_a_profile_that_asks_for_the_ssh_agent_receives_its_socket() {
+    let make = |ssh_agent| {
+        Profile::new(
+            "ssh",
+            Target::parse("/usr/bin/true").unwrap(),
+            &["{host}"],
+            inputs([("host", text(64))]),
+            Options {
+                ssh_agent,
+                ..Options::default()
+            },
+        )
+        .unwrap()
+    };
+    let names = |profile: &Profile| {
+        let launch = profile
+            .prepare(&values([("host", Value::Text("web1".into()))]), &FakeScripts)
+            .unwrap();
+        let Environment::Minimal(environment) = launch.environment else {
+            panic!("executables get a minimal environment");
+        };
+        environment.into_iter().map(|(name, _)| name).collect::<Vec<_>>()
+    };
+    assert!(!names(&make(false)).iter().any(|name| name == SSH_AGENT_VARIABLE));
+    let with_agent = names(&make(true));
+    assert!(with_agent.iter().all(|name| {
+        name == "PATH" || name == SSH_AGENT_VARIABLE || PASSED_VARIABLES.contains(&name.as_str())
+    }));
+    assert_eq!(
+        with_agent.iter().any(|name| name == SSH_AGENT_VARIABLE),
+        std::env::var_os(SSH_AGENT_VARIABLE).is_some_and(|value| !value.is_empty()),
+        "the socket is passed when Dupin has one, and never invented"
+    );
+
+    let description = make(true).describe();
+    assert!(description.contains("only PATH, HOME, TMPDIR, LANG, USER and SSH_AUTH_SOCK set"));
+    assert!(description.contains("every key your SSH agent holds"));
+    assert!(!make(false).describe().contains("SSH_AUTH_SOCK"));
+
+    let script = Profile::new(
+        "notify",
+        Target::parse("@script:notify.sh").unwrap(),
+        &[],
+        BTreeMap::new(),
+        Options {
+            ssh_agent: true,
+            ..Options::default()
+        },
+    );
+    assert!(matches!(script, Err(ExecError::InvalidProfile(_))));
+}

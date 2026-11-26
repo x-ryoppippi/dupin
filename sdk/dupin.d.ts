@@ -561,9 +561,10 @@ declare module 'dupin' {
 		/**
 		 * Up to 16 named profiles: an argument template whose `{input}` placeholders take one line
 		 * of text each, run with a program the user picks; or `@script:<name>` for one of the
-		 * user's script commands. `output` asks to receive stdout and stderr.
+		 * user's script commands. `output` asks to receive stdout and stderr; `sshAgent` hands a
+		 * picked program `SSH_AUTH_SOCK`, so `ssh` can use the user's agent.
 		 */
-		exec?: Record<string, { args?: string[]; output?: boolean }>;
+		exec?: Record<string, { args?: string[]; output?: boolean; sshAgent?: boolean }>;
 		/**
 		 * Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until
 		 * deleted. `sync` asks for `storage:sync`: once the user grants it on a Mac, a package installed

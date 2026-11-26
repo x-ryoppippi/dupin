@@ -440,15 +440,21 @@ impl Parser {
                 continue;
             }
             let name = self.name(&key, &field);
-            let Some(object) = self.fields(entry, &field, &["args", "output"], &["args"]) else {
+            let Some(object) = self.fields(entry, &field, &["args", "output", "sshAgent"], &["args"]) else {
                 continue;
             };
             let output = self.boolean(object.get("output"), &format!("{field}.output"));
+            let ssh_agent = self.boolean(object.get("sshAgent"), &format!("{field}.sshAgent"));
             let args = object
                 .get("args")
                 .and_then(|args| self.args(args, &format!("{field}.args")));
             if let (Some(name), Some(args)) = (name, args) {
-                scopes.push(Scope::Exec { name, args, output });
+                scopes.push(Scope::Exec {
+                    name,
+                    args,
+                    output,
+                    ssh_agent,
+                });
             }
         }
         scopes

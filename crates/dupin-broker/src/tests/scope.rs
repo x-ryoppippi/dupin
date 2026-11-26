@@ -102,14 +102,20 @@ fn an_approval_covers_the_same_or_a_narrower_declaration_only() {
             .covers(&files(FilesKind::Directory, &[FilesAccess::Read]))
     );
 
-    let exec = |args: &[&str], output| Scope::Exec {
+    let exec = |args: &[&str], output, ssh_agent| Scope::Exec {
         name: name("git"),
         args: args.iter().map(|arg| arg.to_string()).collect(),
         output,
+        ssh_agent,
     };
-    assert!(exec(&["status"], true).covers(&exec(&["status"], false)));
-    assert!(!exec(&["status"], false).covers(&exec(&["status"], true)));
-    assert!(!exec(&["status"], true).covers(&exec(&["push"], true)));
+    assert!(exec(&["status"], true, false).covers(&exec(&["status"], false, false)));
+    assert!(!exec(&["status"], false, false).covers(&exec(&["status"], true, false)));
+    assert!(!exec(&["status"], true, false).covers(&exec(&["push"], true, false)));
+    assert!(exec(&["status"], false, true).covers(&exec(&["status"], false, false)));
+    assert!(
+        !exec(&["status"], false, false).covers(&exec(&["status"], false, true)),
+        "handing over the SSH agent widens the profile"
+    );
 
     let script = |output| Scope::Script {
         name: name("zed"),
@@ -192,6 +198,7 @@ fn exec_consent_shows_where_each_argument_starts_and_ends() {
             name: ScopeName::new("run").unwrap(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
             output: false,
+            ssh_agent: false,
         }
         .to_string()
     };
@@ -199,6 +206,16 @@ fn exec_consent_shows_where_each_argument_starts_and_ends() {
     assert_eq!(
         exec(&["a`, and nothing else", "--install-extension", "x"]),
         "run the program you pick for “run” with \"a`, and nothing else\" \"--install-extension\" \"x\""
+    );
+    let agent = Scope::Exec {
+        name: ScopeName::new("ssh").unwrap(),
+        args: vec!["{host}".into()],
+        output: true,
+        ssh_agent: true,
+    };
+    assert_eq!(
+        agent.to_string(),
+        "run the program you pick for “ssh” with \"{host}\", using the keys your SSH agent holds, and read its output"
     );
 }
 

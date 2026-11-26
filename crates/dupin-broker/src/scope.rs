@@ -390,6 +390,10 @@ pub enum Scope {
         name: ScopeName,
         args: Vec<String>,
         output: bool,
+        /// The program also receives `SSH_AUTH_SOCK`, so it can use the keys the user's SSH agent
+        /// holds.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ssh_agent: bool,
     },
     Script {
         name: ScopeName,
@@ -467,13 +471,19 @@ impl Scope {
                 },
             ) => name == n && kind == k && access.is_superset(a),
             (
-                Self::Exec { name, args, output },
+                Self::Exec {
+                    name,
+                    args,
+                    output,
+                    ssh_agent,
+                },
                 Self::Exec {
                     name: n,
                     args: a,
                     output: o,
+                    ssh_agent: s,
                 },
-            ) => name == n && args == a && (*output || !o),
+            ) => name == n && args == a && (*output || !o) && (*ssh_agent || !s),
             (Self::Script { name, output }, Self::Script { name: n, output: o }) => {
                 name == n && (*output || !o)
             }
@@ -569,11 +579,19 @@ impl fmt::Display for Scope {
                 });
                 write!(f, "{access} the {kind} you pick for “{name}”")
             }
-            Self::Exec { name, args, output } => {
+            Self::Exec {
+                name,
+                args,
+                output,
+                ssh_agent,
+            } => {
                 write!(f, "run the program you pick for “{name}”")?;
                 for (index, arg) in args.iter().enumerate() {
                     f.write_str(if index == 0 { " with " } else { " " })?;
                     write!(f, "{arg:?}")?;
+                }
+                if *ssh_agent {
+                    f.write_str(", using the keys your SSH agent holds,")?;
                 }
                 if *output {
                     f.write_str(" and read its output")?;

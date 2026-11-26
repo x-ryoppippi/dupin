@@ -219,7 +219,7 @@ export async function search(query) {
 <details>
 <summary>Profiles, results and an example</summary>
 
-Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr. `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`.
+Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr, and `sshAgent: true` hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys; the extension never sees the socket or the keys. `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`.
 
 ```js
 import { exec } from 'dupin';
