@@ -1,6 +1,6 @@
 # The name
 
-<p align="center"><img src="https://raw.githubusercontent.com/x-ryoppippi/dupin/main/assets/logo/dupin.svg" alt="Dupin's mark: a pair of green spectacles" width="128" height="128" /></p>
+<p align="center"><img src="../assets/logo/dupin.svg" alt="Dupin's mark: a pair of green spectacles" width="128" height="128" /></p>
 
 Dupin is named after [C. Auguste Dupin](https://en.wikipedia.org/wiki/C._Auguste_Dupin), [Edgar Allan Poe](https://en.wikipedia.org/wiki/Edgar_Allan_Poe)'s detective. Mac search tools and launchers have a line of names that runs Sherlock → Watson → Alfred: a detective, his companion, a butler. Dupin is Alfred's successor, and the line continues in it. It takes its name from the detective at the line's source: Dupin came before [Sherlock Holmes](https://en.wikipedia.org/wiki/Sherlock_Holmes), and Holmes's author owed the detective story to Poe.
 
