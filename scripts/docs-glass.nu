@@ -92,27 +92,24 @@ def main [
             msg: $"no `glass = true` clip in ($MANIFEST | path basename) matches ($only)"
         }
     }
-    let tmp = mktemp --directory | path expand
+    # Kept when a recording fails, with each instance's log and the raw recording.
+    let tmp = "target/docs-glass" | path expand
+    rm --recursive --force $tmp
+    mkdir $tmp
     let stage = $tmp | path join stage
     # The system's Swift with the system SDK, not the dev shell's Nix one, which has no Swift.
     ^env -u SDKROOT -u DEVELOPER_DIR /usr/bin/swiftc -O -framework AppKit $STAGE -o $stage
     if (^$stage preflight | complete).exit_code != 0 {
-        rm --recursive --force $tmp
         error make {
             msg: "this terminal may not record the screen: allow it in System Settings → Privacy & Security → Screen Recording, then run this again"
         }
     }
     dark-mode
-    let recorded = try {
-        $clips | each {|clip|
-            let chosen = $wallpaper | default ($clip.wallpaper? | default $manifest.wallpaper)
-            record-clip $clip $manifest $binary $stage (wallpaper-image $chosen $tmp) $tmp
-            | insert wallpaper $chosen
-            | insert macos $macos
-        }
-    } catch {|error|
-        rm --recursive --force $tmp
-        error make $error.raw
+    let recorded = $clips | each {|clip|
+        let chosen = $wallpaper | default ($clip.wallpaper? | default $manifest.wallpaper)
+        record-clip $clip $manifest $binary $stage (wallpaper-image $chosen $tmp) $tmp
+        | insert wallpaper $chosen
+        | insert macos $macos
     }
     rm --recursive --force $tmp
     let captured = if ($GLASS | path exists) {
@@ -131,7 +128,7 @@ def main [
 def dark-mode [] {
     let style = ^defaults read -g AppleInterfaceStyle | complete
     if ($style.stdout | str trim) == Dark { return }
-    if ($env.CI? | default "") != true {
+    if ($env.CI? | default "") != "true" {
         error make {
             msg: "switch this Mac to Dark in System Settings → Appearance; the clips show the dark panel"
         }
