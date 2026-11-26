@@ -203,8 +203,7 @@ impl Preference {
 }
 
 fn chosen() -> &'static RwLock<HashMap<String, Map<String, Value>>> {
-    static CHOSEN: OnceLock<RwLock<HashMap<String, Map<String, Value>>>> = OnceLock::new();
-    CHOSEN.get_or_init(RwLock::default)
+    launcher_wide!(RwLock<HashMap<String, Map<String, Value>>>, RwLock::default())
 }
 
 fn lock_read() -> std::sync::RwLockReadGuard<'static, HashMap<String, Map<String, Value>>> {
@@ -228,8 +227,7 @@ pub(crate) fn choose(package: &str, values: Map<String, Value>) -> bool {
 pub(crate) type Settings = dupin_js_runtime::Preferences;
 
 fn held() -> &'static RwLock<HashMap<String, Arc<Settings>>> {
-    static HELD: OnceLock<RwLock<HashMap<String, Arc<Settings>>>> = OnceLock::new();
-    HELD.get_or_init(RwLock::default)
+    launcher_wide!(RwLock<HashMap<String, Arc<Settings>>>, RwLock::default())
 }
 
 fn none() -> &'static Arc<Settings> {

@@ -473,10 +473,13 @@ pub(crate) fn headless_ready() {
 }
 
 /// The one extension host every JavaScript extension shares, which starts a trust domain's
-/// helper on that domain's first query.
+/// helper on that domain's first query. Every bundled package's calls queue for one helper, and
+/// the wait counts against each call's deadline.
 fn host() -> &'static Host {
-    static HOST: OnceLock<Host> = OnceLock::new();
-    HOST.get_or_init(|| Host::fixed(Box::new(helper_command), headless_environment()))
+    launcher_wide!(
+        Host,
+        Host::fixed(Box::new(helper_command), headless_environment())
+    )
 }
 
 /// Where the launcher reads the time it measures guests' timestamps against, such as how long
