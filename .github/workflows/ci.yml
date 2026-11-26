@@ -97,6 +97,31 @@ jobs:
           path: ${{ runner.temp }}/Dupin.app.tar.gz
           if-no-files-found: error
 
+      # Size is informational (scripts/size.nu), so none of its steps can fail the build. Main's
+      # `size` artifacts are what pull requests compare with; size-comment.yml comments with it.
+      - name: Measure the app's size
+        continue-on-error: true
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/size.nu measure result/Applications/Dupin.app
+          --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/size/size.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
+        with:
+          name: size
+          path: ${{ runner.temp }}/size/size.json
+          if-no-files-found: error
+      - name: Compare the app's size with main
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/size.nu report "$RUNNER_TEMP/size/size.json"
+          --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+
   # The extension host confines itself with sandbox_init, which macOS refuses inside the Nix
   # build sandbox, so lint-and-test skips the tests that start it. They run here natively, where
   # DUPIN_REQUIRE_EXTENSION_HOST turns any such skip into a failure. Every crate with such a test
