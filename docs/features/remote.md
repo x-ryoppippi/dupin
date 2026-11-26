@@ -2,6 +2,9 @@
 
 Dupin lists the processes, listening ports, recent log lines and files of the machines you reach over SSH, from what it last fetched, so typing never waits on the network.
 
+> [!NOTE]
+> Remote is experimental. It is off by default, setting it up means allowing each of its commands in Settings → Extensions, and it refreshes only when you ask it to.
+
 ## Open it
 
 Switch on **Remote** in Settings → Extensions and allow its scopes there (see [Configuration](#configuration)), then type `remote` <kbd>Space</kbd>. Type a host's name after it, such as `remote web1`, and a sub-scope after that: `ps`, `ports`, `logs` or `files`, then any words, such as `remote web1 ps nginx`.
