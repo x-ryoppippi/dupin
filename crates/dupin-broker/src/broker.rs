@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::manifest::Capabilities;
 use crate::request::{Request, Resolved};
 use crate::scope::{OsPermission, PackageId, Revision, Scope, ScopeKey};
-use crate::store::{self, Base, BasePackage, Local, LocalPackage, Record, StoreError};
+use crate::store::{Base, BasePackage, Local, LocalPackage, LocalStore, Record, StoreError};
 
 /// What prompted an operation. Only the host sets this, from input it received itself; guest
 /// code can't claim an activation.
@@ -556,10 +556,10 @@ impl Broker {
         ids
     }
 
-    /// Takes the user's decisions as read again from their file, which another Dupin process,
-    /// such as `dupin ext remove`, may have changed since. Each installed package is reconciled
-    /// with its declaration as [`Broker::install`] does. Returns the packages whose decisions
-    /// changed, whose in-flight work is dropped.
+    /// Takes the user's decisions once they are read, after starting from unreadable ones while
+    /// the store was opened. Each installed package is reconciled with its declaration as
+    /// [`Broker::install`] does. Returns the packages whose decisions changed, whose in-flight
+    /// work is dropped.
     pub fn replace_local(&mut self, local: Local) -> Vec<PackageId> {
         let previous = std::mem::replace(&mut self.local, local);
         let installed: Vec<_> = self
@@ -752,32 +752,52 @@ impl Broker {
             .collect()
     }
 
-    /// Writes the user's decisions to `path`, replacing it whole.
-    pub fn save(&self, path: &Path) -> Result<(), StoreError> {
-        store::write_atomically(path, &self.local.to_toml()?)
+    /// The user's decisions as they stand, to pass to [`Broker::save`] after a change.
+    pub fn decisions(&self) -> Local {
+        self.local.clone()
     }
 
-    /// Makes `change` to the user's decisions and saves them to `path`. If either step fails,
-    /// the decisions are left as they were, so the broker never enforces a choice the file
+    /// Writes to `store` the record of each package whose decisions changed since `before`.
+    pub fn save(&self, store: &mut dyn LocalStore, before: &Local) -> Result<(), StoreError> {
+        let changes = self.local.changes(before)?;
+        if changes.is_empty() {
+            return Ok(());
+        }
+        store.write(changes).map_err(StoreError::Write)
+    }
+
+    /// Makes `change` to the user's decisions and saves them to `store`. If either step fails,
+    /// the decisions are left as they were, so the broker never enforces a choice the store
     /// doesn't hold.
     pub fn change_saved<T>(
         &mut self,
-        path: &Path,
+        store: &mut dyn LocalStore,
         change: impl FnOnce(&mut Self) -> Result<T, BrokerError>,
     ) -> Result<T, SaveError> {
         let before = self.local.clone();
-        let changed = change(self)
-            .map_err(SaveError::Refused)
-            .and_then(|value| self.save(path).map(|()| value).map_err(SaveError::Store));
+        let changed = change(self).map_err(SaveError::Refused).and_then(|value| {
+            self.save(store, &before)
+                .map(|()| value)
+                .map_err(SaveError::Store)
+        });
         if changed.is_err() {
             self.local = before;
         }
         changed
     }
 
-    #[cfg(test)]
-    pub(crate) fn local_toml(&self) -> Result<String, StoreError> {
-        self.local.to_toml()
+    /// Forgets the user's decisions about `id`, as removing the package does, while it stays
+    /// loaded. A package that later takes the name starts afresh.
+    pub fn forget(&mut self, id: &PackageId) -> Result<(), BrokerError> {
+        let packages = self
+            .local
+            .packages
+            .as_mut()
+            .ok_or(BrokerError::GrantsUnreadable)?;
+        if packages.remove(id).is_some() {
+            self.bump(id);
+        }
+        Ok(())
     }
 
     fn os_access(&self, permission: OsPermission) -> OsAccess {

@@ -935,7 +935,6 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
- "tempfile",
  "toml",
 ]
 
@@ -1012,7 +1011,6 @@ dependencies = [
  "serde_json",
  "sha1_smol",
  "tempfile",
- "toml",
 ]
 
 [[package]]

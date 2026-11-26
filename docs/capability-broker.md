@@ -67,34 +67,34 @@ Every installed package has a generation, which also stamps its cached results a
 
 The broker owns grants, keyed by package ID, scope and the approved revision (the package's content hash).
 
-| Layer   | Where                                         | Role                                                                                              |
-| ------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Base    | A read-only file, such as Home Manager writes | Declared grants, denials, bindings and enablement. Grants apply only to the `revision` they name. |
-| Local   | `grants.toml` in the writable data directory  | The user's consents, with the scope as approved, and revocations and enablement.                  |
-| Bundled | Registered by the app                         | First-party packages that ship in Dupin.                                                          |
+| Layer   | Where                                                                        | Role                                                                                              |
+| ------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Base    | A read-only file, such as Home Manager writes                                | Declared grants, denials, bindings and enablement. Grants apply only to the `revision` they name. |
+| Local   | The `extension-grants` namespace of [encrypted storage](features/storage.md) | The user's consents, with the scope as approved, and revocations and enablement.                  |
+| Bundled | Registered by the app                                                        | First-party packages that ship in Dupin.                                                          |
 
 A scope's standing is decided in this order: a local revocation, a base denial, a local grant for this revision that covers the declaration, a base grant for this revision, a bundled pre-grant, then undecided (or changed, if an older approval no longer covers it). The base can grant and deny; local choices can always take authority away and can add it only where the base is silent. A base denial is locked: consent to it is refused. Enablement follows the same rule: a base `enabled = false` locks the package off for every revision, like a denial, while `enabled = true` applies only to the `revision` it names, if it names one. `Broker::is_enabled` answers whether a package is on; `Broker::is_turned_off` only whether the user or the base turned it off, for packages that run until someone does, and it treats unreadable grants as off.
 
 - **Revisions.** `Broker::install` loads or updates a package's declaration and never grants. Approvals the new declaration doesn't widen carry over, narrowed to what it declares. Widened approvals need consent again. Grants of scopes it no longer declares are forgotten, but revocations are kept, so a later revision that declares the scope again stays revoked rather than getting a base or bundled pre-grant back.
 - **Bundled packages.** While the installed revision is exactly the bundled one, the package is on by default and its scopes are granted, except files and exec scopes, which need a path the user picks. OS access is still requested on enable or first use. A modified copy has another revision, so it is third-party: off, with nothing granted. Because `install` carries approvals across revisions of one package ID, the app gives bundled packages IDs of their own (`bundled:<name>`), so a folder package reusing a bundled name never inherits a grant or binding made for it.
 - **Reloading the base.** A base read while running takes away at once what it no longer grants, but grants nothing new until the next launch: a configuration reload must never grant. The one exception is a fixed file replacing an unusable one (below), which restores the bundled pre-grants the unusable file withheld.
-- **Unreadable grants.** If the local file exists but can't be read, the bridge passes `Local::unreadable()`: nothing is granted, bundled pre-grants are suspended, and saving is refused rather than overwriting the file.
+- **Unreadable grants.** Until the local grants are read, and whenever they can't be (a locked Keychain, data sealed with another key, a record this build can't read), the broker holds `Local::unreadable()`: nothing is granted, bundled pre-grants are suspended, and saving is refused rather than overwriting what is stored.
 
-`Broker::save` writes the local layer atomically. `Broker::change_saved` makes a change and saves it, and undoes the change if either fails, so the broker never enforces a decision the file doesn't hold.
+The crate keeps no file of its own: the host hands it a `LocalStore`, which keeps one record per package with any decision. `Local::load` reads and checks every record; `Broker::save` writes the record of each package whose decisions changed since a given point, and deletes the record of one left with none. `Broker::change_saved` makes a change and saves it, and undoes the change if either fails, so the broker never enforces a decision the store doesn't hold. The app's store is the `extension-grants` namespace, which the running launcher owns; `dupin ext remove`, a fresh `dupin ext install` or `dupin ext eject` asks the launcher to forget a package's grants (`Bridge::forget_grants`) while it runs, and forgets them in the namespace itself otherwise.
 
-```toml
-version = 1
-
-[packages.bookmarks]
-enabled = true
-
-[packages.bookmarks.scopes."http:https://api.github.com"]
-decision = "granted"
-revision = "sha256:…"
-approved = { type = "http", origin = "https://api.github.com", methods = ["GET"] }
-
-[packages.bookmarks.scopes."clipboard:read"]
-decision = "revoked"
+```json
+{
+	"package": "bookmarks",
+	"enabled": true,
+	"scopes": {
+		"http:https://api.github.com": {
+			"decision": "granted",
+			"revision": "sha256:…",
+			"approved": { "type": "http", "origin": "https://api.github.com", "methods": ["GET"] }
+		},
+		"clipboard:read": { "decision": "revoked" }
+	}
+}
 ```
 
 The base names packages the same way:
@@ -137,7 +137,7 @@ For each request the session:
 
 `NeedsConsent` fails the request with `needs-consent` and keeps a `ConsentRequest`, the revision and declared scope to show, for the panel and Settings; a request while the package is off fails with `disabled` and is remembered the same way. Allow passes that revision and scope back to `Broker::consent` and turns the package on; it re-runs nothing, and the panel only takes the answered row away. Deny revokes the scope. A guest result is shown only while the generation it started at is current, so a revocation mid-call drops the rows it produced.
 
-The bridge owns the grant files: the base `extension-grants.toml` beside `config.toml`, which Home Manager writes keyed by each package's `package.json` name with the revision `dupin ext revision` prints, and the local `grants.toml` in the data directory, saved after every decision and never overwritten when it couldn't be read. Other processes write both files too, so before each call, each request, each delivered clipboard change and each save the bridge reads again a file whose modification time, size or inode moved, with `Broker::replace_base` and `Broker::replace_local`; a save therefore never writes back decisions another process removed. `extensions.lock` keeps no grants; `dupin ext list` reads them from these files, and `dupin ext remove`, like a fresh `dupin ext install` of a name, forgets the package's. A package's revision is a BLAKE3 hash of its `package.json` and every module Dupin runs.
+The bridge owns the grants: the base `extension-grants.toml` beside `config.toml`, which Home Manager writes keyed by each package's `package.json` name with the revision `dupin ext revision` prints, and the local grants in the `extension-grants` namespace, saved after every decision and never overwritten when they couldn't be read. A Home Manager switch rewrites the base, so before each call, each request, each delivered clipboard change and each save the bridge reads it again if its modification time, size or inode moved, with `Broker::replace_base`. The launcher alone writes the local grants while it runs: it reads them once, with `Bridge::open_grants` on a thread of its own at launch (and again when the panel shows while they couldn't be read), and `Broker::replace_local` takes them in. The installed extensions list keeps no grants; `dupin ext list` asks the running launcher for each package's granted scopes, or reads the namespace itself when the launcher isn't running, and `dupin ext remove`, like a fresh `dupin ext install` of a name, forgets the package's the same way. A package's revision is a BLAKE3 hash of its `package.json` and every module Dupin runs.
 
 The app reports OS access as each Settings → Permissions row reads it, at startup, when the panel shows and when Settings regains focus, without prompting, and lists `os_consumers` by name on those rows. Clipboard watches subscribe only while the package is on, holds `clipboard:watch` and macOS allows the pasteboard, and coalesce a burst of copies to the newest. Tests run guest JavaScript through the sandboxed helper against in-memory services and never touch the network, the clipboard, calendars or OS permissions.
 
