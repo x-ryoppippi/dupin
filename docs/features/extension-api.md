@@ -758,12 +758,12 @@ The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io
 
 The engine has modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`, and no files, network, processes, clipboard, timers or console of its own; [imports](./extension-manifest.md#modules-and-typescript) reach only its own folder and the host module `dupin`.
 
-| `dupin` export                                                                                                 | What it is                                                                           |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `apiVersion`                                                                                                   | `5`                                                                                  |
-| `DupinError`                                                                                                   | What a failed request rejects with; see [Errors](./extension-permissions.md#errors). |
-| `items`                                                                                                        | Its `invalidate()` is called from an action or event handler.                        |
-| `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows` | One object per capability, whose functions return promises.                          |
+| `dupin` export                                                                                                            | What it is                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `apiVersion`                                                                                                              | `5`                                                                                  |
+| `DupinError`                                                                                                              | What a failed request rejects with; see [Errors](./extension-permissions.md#errors). |
+| `items`                                                                                                                   | Its `invalidate()` is called from an action or event handler.                        |
+| `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows`, `context` | One object per capability, whose functions return promises.                          |
 
 Each capability works only for what the package declares and you allow, from `search`, `items`, actions and events alike. Each query, `items` call, view, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](./extension-permissions.md#security-model).
 

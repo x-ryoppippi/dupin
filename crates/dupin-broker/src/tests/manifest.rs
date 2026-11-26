@@ -292,6 +292,35 @@ fn windows_declares_read_and_arrange_only() {
 }
 
 #[test]
+fn context_declares_frontmost_and_document_only() {
+    for (declared, expected) in [
+        (
+            json!({ "context": ["selection"] }),
+            ("invalid-value", "capabilities.context[0]"),
+        ),
+        (json!({ "context": [] }), ("empty", "capabilities.context")),
+        (
+            json!({ "context": ["frontmost", "frontmost"] }),
+            ("duplicate", "capabilities.context[1]"),
+        ),
+        (
+            json!({ "context": "document" }),
+            ("invalid-type", "capabilities.context"),
+        ),
+        (
+            json!({ "context": { "frontmost": true } }),
+            ("invalid-type", "capabilities.context"),
+        ),
+    ] {
+        assert_eq!(
+            problem(declared.clone()),
+            (expected.0, expected.1.into()),
+            "{declared}"
+        );
+    }
+}
+
+#[test]
 fn every_problem_is_reported_at_once_with_hints_where_useful() {
     let diagnostics = Capabilities::parse(&json!({
         "http": [{ "origin": "http://a.example", "methods": ["GET"] }],

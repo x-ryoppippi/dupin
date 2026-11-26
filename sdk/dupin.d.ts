@@ -599,6 +599,11 @@ declare module 'dupin' {
 		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
 		windows?: ('read' | 'arrange')[];
 		/**
+		 * `frontmost` reads which app was in front when the panel opened; `document` reads the
+		 * file its focused window showed. Neither needs an action the user chose.
+		 */
+		context?: ('frontmost' | 'document')[];
+		/**
 		 * The fields of each kind of row Dupin's own sources find that the package's filters and
 		 * kind actions may receive. Another extension's rows never reach them.
 		 */
@@ -975,5 +980,34 @@ declare module 'dupin' {
 		 * the user chose.
 		 */
 		setFrame(frame: WindowFrame): Promise<WindowFrame>;
+	};
+
+	export interface FrontmostApp {
+		readonly name: string;
+		readonly bundleId: string | null;
+		/** Its process ID. */
+		readonly pid: number;
+	}
+
+	export interface FrontDocument {
+		/** An absolute path. */
+		readonly path: string;
+	}
+
+	/**
+	 * `context` capability: what Dupin noted, as the panel opened, about where the user was. The
+	 * same answer holds until the panel next opens. Text selected there reaches the package as
+	 * the query, when the user opens Dupin with the Selection hotkey.
+	 */
+	export const context: {
+		/** The app that was in front, or `null` when Dupin itself was. Needs `frontmost`. */
+		frontmost(): Promise<FrontmostApp | null>;
+		/**
+		 * The local file that app's focused window showed, as the app reports it through
+		 * Accessibility, or `null`: when the app names none, as terminals and browsers don't, or
+		 * while Dupin hasn't been allowed Accessibility for another feature. Dupin never asks for
+		 * that access for this. Needs `document`.
+		 */
+		document(): Promise<FrontDocument | null>;
 	};
 }

@@ -27,7 +27,7 @@ pub use broker::{
 pub use manifest::{Capabilities, Diagnostic};
 pub use request::Request;
 pub use scope::{
-    ClipboardAccess, FilesAccess, FilesKind, Method, Origin, OsPermission, PackageId, Revision, RowField,
-    RowKind, Scope, ScopeKey, ScopeName, StorageOp, WindowsAccess, displayable,
+    ClipboardAccess, ContextAccess, FilesAccess, FilesKind, Method, Origin, OsPermission, PackageId,
+    Revision, RowField, RowKind, Scope, ScopeKey, ScopeName, StorageOp, WindowsAccess, displayable,
 };
 pub use store::{Base, Local, LocalStore, MemoryLocal, StoreError};

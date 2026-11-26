@@ -23,7 +23,7 @@ use dupin_extension_bridge::{
     Revision, Scope,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, exec, windows};
+use dupin_host_services::{calendar, context, exec, windows};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
 use serde_json::Value;
@@ -78,6 +78,7 @@ struct State {
     stored: Mutex<Vec<Value>>,
     effects: Mutex<Effects>,
     windows: Option<windows::Service<windows::Fixture>>,
+    context: Option<context::Service<context::Fixture>>,
     /// The snippets the fixture hands the package, which its `snippets` calls change.
     snippets: Mutex<Snippets>,
     /// What watches the clipboard, by subscription, which a headless launcher hands the
@@ -187,6 +188,7 @@ impl Replier {
         let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::new(key))
             .with_clock(FixtureClock(now));
         let windows = replies.windows.as_ref().map(window_fixture).transpose()?;
+        let context = replies.context.as_ref().map(context_fixture).transpose()?;
         let state = Arc::new(State {
             replies: replies.clone(),
             now,
@@ -195,6 +197,7 @@ impl Replier {
             stored: Mutex::new(replies.storage.clone()),
             effects: Mutex::default(),
             windows,
+            context,
             snippets: Mutex::new(Snippets::seeded(preferences)),
             watchers: Mutex::default(),
             subscriptions: AtomicU64::default(),
@@ -214,6 +217,7 @@ impl Replier {
             snippets: shared(),
             calendar: shared(),
             windows: shared(),
+            context: shared(),
         }
     }
 
@@ -497,6 +501,20 @@ fn window_fixture(reply: &fixture::WindowsReply) -> Result<windows::Service<wind
     Ok(windows::Service::new(windows::Fixture::new(displays, focused)))
 }
 
+/// The context service a fixture's `replies.context` describes, read as the service's own
+/// shapes.
+fn context_fixture(reply: &fixture::ContextReply) -> Result<context::Service<context::Fixture>, Diagnostic> {
+    let invalid = |field: &str, error: serde_json::Error| {
+        Diagnostic::new("invalid-fixture", error.to_string()).field(format!("replies.context.{field}"))
+    };
+    Ok(context::Service::new(context::Fixture {
+        frontmost: serde_json::from_value(reply.frontmost.clone())
+            .map_err(|error| invalid("frontmost", error))?,
+        document: serde_json::from_value(reply.document.clone())
+            .map_err(|error| invalid("document", error))?,
+    }))
+}
+
 /// Each record's data, oldest first; blobs are left out.
 fn records(store: &Store) -> Result<Vec<Value>, dupin_storage::Error> {
     let mut records = Vec::new();
@@ -767,6 +785,13 @@ impl Shared {
             .as_ref()
             .ok_or_else(|| missing("reading or moving windows".into()))
     }
+
+    fn context(&self) -> Result<&context::Service<context::Fixture>, Failure> {
+        self.0
+            .context
+            .as_ref()
+            .ok_or_else(|| missing("reading what you were using".into()))
+    }
 }
 
 fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
@@ -784,6 +809,16 @@ impl services::Windows for Shared {
 
     fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
         encoded(self.windows()?.set_frame(frame)?)
+    }
+}
+
+impl services::Context for Shared {
+    fn frontmost(&self) -> Result<Value, Failure> {
+        encoded(self.context()?.frontmost())
+    }
+
+    fn document(&self) -> Result<Value, Failure> {
+        encoded(self.context()?.document())
     }
 }
 
