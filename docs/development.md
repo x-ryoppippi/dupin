@@ -386,6 +386,9 @@ Hawk archive and its analysis compiler together in `nix/cargo-hawk.nix`.
 from closed-workspace visibility decisions. Those libraries define plugin and
 host contracts, including consumers in separate experiment workspaces, so this
 workspace's callers cannot establish their complete public API requirements.
+`dupin-telemetry` is excluded for the same reason: its `Ping` is the wire contract
+with the collector in `telemetry/`, which reads every field through the generated
+schema rather than through Rust.
 
 ## Third-party code and data
 
