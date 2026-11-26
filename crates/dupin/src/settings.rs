@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use dupin_core::Config;
 
+mod document;
 mod layers;
 mod live;
 pub mod overlay;

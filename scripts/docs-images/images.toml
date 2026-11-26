@@ -238,3 +238,76 @@ steps = [{ type = "d" }, { key = "space" }, { type = "serendipity", burst = true
 page = "tutorial"
 name = "keywords"
 steps = [{ type = "?" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "calculator"
+name = "clip"
+steps = [{ type = "12*3" }, { wait = 0.6 }, { key = "a", cmd = true }, { type = "5 km to mi" }]
+
+[[clips]]
+page = "calendar"
+name = "clip"
+fixtures = "scripts/headless/calendar.json"
+steps = [{ type = "cal" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "clipboard"
+name = "clip"
+fixtures = "scripts/headless/clipboard-images.json"
+steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "dictionary"
+name = "clip"
+steps = [
+	{ type = "define" },
+	{ key = "space" },
+	{ type = "serendipity", burst = true },
+	{ key = "right" },
+]
+
+[[clips]]
+page = "emoji"
+name = "clip"
+fixtures = "scripts/headless/emoji.json"
+steps = [{ type = "emoji" }, { key = "space" }, { type = "thumbs", burst = true }]
+
+[[clips]]
+page = "snippets"
+name = "clip"
+fixtures = "scripts/headless/snippets.json"
+steps = [{ type = "snip" }, { key = "space" }, { key = "down" }, { type = "sig" }]
+
+[[clips]]
+page = "snippets"
+name = "add"
+fixtures = "scripts/headless/snippets-add.json"
+steps = [
+	{ type = "snip" },
+	{ key = "space" },
+	{ key = "enter" },
+	{ type = "Meeting note" },
+	{ key = "tab" },
+	{ type = "mtg" },
+	{ key = "tab" },
+	{ type = "Notes for {date}" },
+	{ key = "enter", cmd = true },
+]
+
+[[clips]]
+page = "web-searches"
+name = "clip"
+steps = [
+	{ type = "gh" },
+	{ key = "space" },
+	{ type = "dupin" },
+	{ wait = 0.6 },
+	{ key = "a", cmd = true },
+	{ type = "?" },
+]
+
+[[clips]]
+page = "window-management"
+name = "clip"
+fixtures = "scripts/headless/window-management.json"
+steps = [{ type = "left half" }, { key = "down" }]

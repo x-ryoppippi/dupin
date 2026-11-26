@@ -15,12 +15,12 @@
 	"replies": {
 		"storage": [
 			{
-				"copiedAt": 1795942800000,
+				"copiedAt": 1795424400000,
 				"kind": "text",
 				"text": "cargo clippy --workspace --all-targets -- -D warnings"
 			},
 			{
-				"copiedAt": 1796021600000,
+				"copiedAt": 1795503200000,
 				"files": [
 					{
 						"folder": "/Users/Shared/Fixtures",
@@ -33,7 +33,7 @@
 				"kind": "files"
 			},
 			{
-				"copiedAt": 1796024000000,
+				"copiedAt": 1795505600000,
 				"files": [
 					{
 						"folder": "/Users/Shared/Fixtures",
@@ -46,12 +46,12 @@
 				"kind": "files"
 			},
 			{
-				"copiedAt": 1796027300000,
+				"copiedAt": 1795508900000,
 				"kind": "text",
 				"text": "Meeting moved to Thursday at 14:00.\nRoom: Baker Street 221B\nBring the printed agenda."
 			},
 			{
-				"copiedAt": 1796028000000,
+				"copiedAt": 1795509600000,
 				"height": 720,
 				"kind": "image",
 				"size": 912345,
@@ -59,7 +59,7 @@
 				"width": 1280
 			},
 			{
-				"copiedAt": 1796028795000,
+				"copiedAt": 1795510395000,
 				"kind": "text",
 				"text": "The game is afoot."
 			}

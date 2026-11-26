@@ -84,7 +84,7 @@ With the Nix package or the home-manager module, `dupin` is on `PATH`, so `"comm
 claude mcp add --scope user dupin -- dupin mcp
 ```
 
-The server is a thin client of the same local control socket as the [`dupin` commands](../../README.md#local-cli). It starts no window and holds no state of its own, and each agent session starts its own `dupin mcp` process.
+The server is a thin client of the same local control socket as the [`dupin` commands](./cli.md). It starts no window and holds no state of its own, and each agent session starts its own `dupin mcp` process.
 
 </details>
 

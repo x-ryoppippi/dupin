@@ -15,6 +15,11 @@ units or the approximation label. Turn Calculator off in **Settings → Search**
 <img alt="The panel with “5 km to mi” typed and the answer, approx. 3.1068559612 mi." src="../images/calculator/units-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/calculator/clip-dark.webp" />
+<img alt="Typing 12*3 shows 36 as the first result; ⌘A and typing “5 km to mi” converts it to 3.11 miles." src="../images/calculator/clip-light.webp" width="680" />
+</picture>
+
 Calculator is a [bundled extension](./extensions.md#bundled-extensions), `calculator`,
 that works each calculation out with Dupin's calculator. Dupin hands it what you type
 in the main search only when it has a digit in it, so names and words never reach it.

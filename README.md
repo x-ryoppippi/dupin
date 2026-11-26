@@ -1,119 +1,43 @@
 <div align="center">
-    <img src="./assets/logo/dupin.svg" alt="Dupin logo" width="128" height="128">
+    <img src="./assets/logo/dupin.svg" alt="Dupin logo" width="112" height="112">
     <h1>Dupin</h1>
+    <p><strong>type a keyword, reach anything</strong></p>
+    <p>A light, always-ready Mac launcher: Alfred's successor, with extensions your agent can write.</p>
+    <p>
+        <a href="https://dupin.app">Website</a> ·
+        <a href="https://dupin.app/docs/">Docs</a> ·
+        <a href="https://dupin.app/download/">Download</a> ·
+        <a href="https://github.com/x-ryoppippi/dupin/releases">Releases</a>
+    </p>
+    <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="./docs/images/keywords/list-dark.png">
+        <img src="./docs/images/keywords/list-light.png" alt="The Dupin panel with ? typed, listing commands and their keywords: cal for Calendar, clip for Clipboard History, d and define for Dictionary, in for File Contents, Space for Files, maps for Apple Maps." width="560">
+    </picture>
 </div>
 
-<p align="center">
-    <a href="https://dupin.app">dupin.app</a>
-</p>
+## Why Dupin
 
-<div align="center">
-    <a href="https://dupin.app"><img src="./docs/public/website.png" alt="dupin.app: Press ⌘Space. It's there." width="720"></a>
-</div>
+- **Fast.** The panel is already drawn when you press the hotkey, and app search shows its results under 3 ms after each keystroke (p95, measured in CI on every change to the app).
+- **Built for searching, and simple.** Type a keyword, reach anything; the launcher stays a launcher.
+- **Extensible by anyone, agents included.** Extensions are plain TypeScript you write, test and install from Git, sandboxed with the permissions you grant.
 
-> A lightweight, resident launcher for Apple silicon Macs.
-
-Named after C. Auguste Dupin, Poe's detective: the source of the line of Mac launchers that runs Sherlock → Watson → Alfred ([why](./docs/name.md)).
-
-- Fuzzy-search and open apps, by any name macOS knows them by
-- Space on an empty query searches files with Spotlight; `in` and Space search inside them; `define` and Space looks up a word in macOS dictionaries
-- A hotkey (⌘Space by default) shows the panel at once, on Liquid Glass
-- An optional shader animates behind the panel and reacts to typing; bring your own WGSL, as with Ghostty's custom shaders ([examples](./examples/shaders))
-
-## Quick start
-
-Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/features/hotkeys.md#freeing-the-hotkey)). Then install it with Homebrew (`dupin@nightly` for builds of `main`); it [updates itself](./docs/features/updates.md#updates):
+## Install
 
 ```sh
-brew install --cask x-ryoppippi/tap/dupin
+brew install --cask x-ryoppippi/tap/dupin@nightly
+nix profile install github:x-ryoppippi/dupin
 ```
 
-Or build it with Nix:
+Free ⌘Space first ([how](./docs/features/hotkeys.md#freeing-the-hotkey)). More ways to install, and everything else, are in the docs.
 
-```sh
-nix build .#dupin
-open result/Applications/Dupin.app
-```
+**Read the docs at [dupin.app/docs](https://dupin.app/docs/).**
 
-## Documentation
+---
 
-See [docs/](./docs/README.md) for using, configuring and developing Dupin.
-
-## Major Sponsors
+[GPL-3.0-or-later](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Sponsor](https://github.com/sponsors/ryoppippi)
 
 <p align="center">
-    <a href="https://coderabbit.link/ryoppippi">
-        <picture>
-            <source media="(prefers-color-scheme: dark)" srcset="./docs/public/coderabbit-logo-dark.svg">
-            <img src="./docs/public/coderabbit-logo.svg" alt="CodeRabbit" width="320">
-        </picture>
-    </a>
-    &nbsp;&nbsp;&nbsp;&nbsp;
-    <a href="https://blacksmith.sh">
-        <picture>
-            <source media="(prefers-color-scheme: dark)" srcset="./docs/public/blacksmith-logo-dark.svg">
-            <img src="./docs/public/blacksmith-logo.svg" alt="CI powered by Blacksmith" width="320">
-        </picture>
-    </a>
+    <a href="https://coderabbit.link/ryoppippi"><picture><source media="(prefers-color-scheme: dark)" srcset="./docs/public/coderabbit-logo-dark.svg"><img src="./docs/public/coderabbit-logo.svg" alt="CodeRabbit" width="140"></picture></a>
+    &nbsp;&nbsp;
+    <a href="https://blacksmith.sh"><picture><source media="(prefers-color-scheme: dark)" srcset="./docs/public/blacksmith-logo-dark.svg"><img src="./docs/public/blacksmith-logo.svg" alt="CI powered by Blacksmith" width="140"></picture></a>
 </p>
-
-## GitHub Sponsors
-
-<p align="center">
-    <a href="https://github.com/sponsors/ryoppippi">
-        <img src="https://sponsors.ryoppippi.com/sponsors.png" alt="Sponsors">
-    </a>
-</p>
-
-## License
-
-Dupin is licensed under [GPL-3.0-or-later](./LICENSE). Contributions need the [Contributor License Agreement](./CLA.md); see [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-## Local CLI
-
-With a resident Dupin instance, `dupin open --query 'Safari'` shows the panel without
-activating a result; Enter does nothing for half a second after it appears, so a key meant
-for another app can't choose one. `printf 'red\nblue\n' | dupin pick` opens a transient picker;
-Enter prints the original value and Esc exits unsuccessfully. For structured values,
-use `dupin pick --input-json` with a JSON array. Values are displayed as data, including
-objects containing paths or action names. Picker sessions never add history entries.
-
-`dupin config get --json` returns the current configuration. Save a copy as `base.json`,
-edit a second copy, then run `dupin config set base.json desired.json --json`.
-The base enables conflict detection against external edits. Changes use the settings
-service, including managed/read-only files and native shortcut validation; a successful
-reply follows reconciliation. `--json` emits JSON values on success and an `error` object
-on failure. `dupin --help`, `dupin --version` and `dupin --licenses` (the third-party
-notices Dupin.app carries) perform no app or configuration work.
-
-`dupin mcp` serves the same controls, with configuration reading and validation, to agents
-over the Model Context Protocol; see [MCP server](./docs/features/mcp.md).
-
-Pure headless examples (no resident instance required):
-
-```sh
-printf '%s' '{"kind":"text","title":"Hello","subtitle":"Headless fixture"}' > /tmp/dupin-view.json
-dupin snap /tmp/dupin-view.json /tmp/dupin-view.png --json
-dupin ext check examples/extensions/word-count-js --json
-dupin ext run examples/extensions/word-count-js --query 'two words' --json
-```
-
-`dupin ext check DIR` and `dupin ext run DIR --query QUERY` load an extension folder as the
-launcher does and print its answer; a failure exits non-zero with a diagnostic naming the
-code, file, field and a fix. `dupin ext test DIR` replays the folder's fixtures and
-`dupin ext snap DIR FIXTURE OUTPUT.png` renders a fixture's panel (see
-[Testing and snapshots](docs/features/extensions.md#testing-and-snapshots)). They test a
-folder on its own; the launcher loads
-[extensions](docs/features/extensions.md) from the configuration folder. Headless rendering
-shows the given text/detail/pair view without executing actions or loading configuration,
-history or application providers.
-
-Local control uses length-prefixed JSON, one correlated request/reply per connection,
-a 512 KiB frame cap, at most eight live connections and a five-minute request deadline.
-The socket lives in an owner-only Dupin directory under `XDG_RUNTIME_DIR` (or the system
-per-user temporary directory on macOS, independent of shell `TMPDIR`). A live instance
-is never replaced; an owner-only socket with no listener is recovered on restart.
-Picker and settings contention return Busy. Disconnecting cancels a pending picker.
-Use `dupin snapshots list --json` for saved Snapshot metadata, `dupin snapshots open
-[--id ID]` to show the separate window, and `dupin snapshots close` to hide it.
-See the [Snapshots usage guide](docs/features/snapshots.md#snapshots) for details.

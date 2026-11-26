@@ -6,7 +6,6 @@
 use std::sync::{Arc, RwLock};
 
 use dupin_core::config;
-use dupin_core::session::unix_now;
 use dupin_extension_bridge::{Bridge, Origin, PackageId};
 
 /// The bundled extension that keeps and lists the history.
@@ -180,7 +179,7 @@ pub fn headless_storage() -> Option<dupin_extension_bridge::PackageStorage> {
         .ok()?
         .keep();
     let storage = dupin_storage::Storage::new(root, dupin_storage::MemoryKey::random());
-    let records = fixture_records(unix_now() * 1000);
+    let records = fixture_records(crate::extensions::Clock::launcher().now_ms());
     if !records.is_empty() {
         let package = dupin_extension_bridge::PackageId::new(format!("bundled:{PACKAGE}")).ok()?;
         let namespace =

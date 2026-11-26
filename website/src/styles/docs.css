@@ -17,6 +17,16 @@
 	font-size: 14px;
 }
 
+.docs-toc > summary {
+	display: none;
+}
+
+/* On wide screens the list is always shown, so the closed state must not hide it. */
+.docs-toc::details-content {
+	content-visibility: visible;
+	display: block;
+}
+
 .docs-section {
 	margin: 20px 0 6px;
 	font-size: 12px;
@@ -111,6 +121,17 @@
 	border: 1px solid var(--border);
 }
 
+.docs-content kbd {
+	font-family: var(--font-mono);
+	font-size: 0.85em;
+	padding: 0.1em 0.4em;
+	border-radius: 4px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-bottom-width: 2px;
+	white-space: nowrap;
+}
+
 .docs-content pre {
 	overflow-x: auto;
 	padding: 16px;
@@ -181,6 +202,64 @@
 	.docs-sidebar {
 		position: static;
 		max-height: none;
+	}
+
+	.docs-toc {
+		margin-top: 8px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--bg-card);
+	}
+
+	.docs-toc > summary {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 14px;
+		cursor: pointer;
+		list-style: none;
+		color: var(--fg);
+		font-weight: 600;
+	}
+
+	.docs-toc > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.docs-toc > summary::after {
+		content: '';
+		margin-left: auto;
+		width: 8px;
+		height: 8px;
+		border-right: 2px solid var(--fg-dim);
+		border-bottom: 2px solid var(--fg-dim);
+		transform: rotate(45deg);
+	}
+
+	.docs-toc[open] > summary::after {
+		transform: rotate(-135deg);
+	}
+
+	.docs-toc-label {
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--fg-dim);
+	}
+
+	.docs-toc-current {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.docs-toc:not([open])::details-content {
+		content-visibility: hidden;
+	}
+
+	.docs-toc nav {
+		padding: 0 8px 12px;
 	}
 }
 /* The not-found page, which are rendered on the server only, so their components' styles never reach the client bundle. */

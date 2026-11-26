@@ -7,6 +7,11 @@
 <img alt="Dictionary mode with “serendipity” typed: the entry with its pronunciation, its noun sense with an example in italics, and its origin." src="../images/dictionary/entry-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/dictionary/clip-dark.webp" />
+<img alt="Typing define and Space enters Define; typing serendipity shows its pronunciation, meaning and origin, and → opens its actions." src="../images/dictionary/clip-light.webp" width="680" />
+</picture>
+
 Enter opens the word in Dictionary.app. Right Arrow, Cmd+K or the Actions link opens its action screen, with **Open in Dictionary**, **Copy Definition**, which copies the definition as the dictionary wrote it, and Send to….
 
 ## The bundled extension

@@ -12,6 +12,11 @@ Type `emoji`, then Space, to pick an emoji or symbol ("Emoji & Symbols"). With n
 <img alt="Emoji &amp; Symbols with “thumbs” typed: thumbs up selected with its name, Japanese name, code points and keywords, then thumbs down and crossed fingers." src="../images/emoji/search-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/emoji/clip-dark.webp" />
+<img alt="Typing emoji and Space lists emoji with the first one's details; typing thumbs leaves Thumbs up and Thumbs down, with Thumbs up’s details." src="../images/emoji/clip-light.webp" width="680" />
+</picture>
+
 The selected row shows the character, its name, its Japanese name, its code points and the keywords that find it. Enter copies the character and closes the panel. Right Arrow, ⌘K or the Actions link opens its other actions:
 
 | Action                             | Does                                                                                                                                                                                 |

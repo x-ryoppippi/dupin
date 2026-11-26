@@ -6,9 +6,11 @@ const MANIFEST = path self docs-images/images.toml
 const THEMES = [light dark]
 # Pages draw at twice their size, so `width` in the Markdown is half the PNG's.
 const SCALE = 2
-# Clips draw at 1.5 times their size: sharp on a Retina screen at about half the bytes of 2.
-const CLIP_SCALE = 1.5
-const CLIP_FPS = 15
+# Clips draw at 1.25 times their size and 10 frames a second: a clip's bytes go to the frames
+# that differ, so these keep a busy one, such as scrolling emoji, near 250 KB, and text stays
+# readable on a Retina screen.
+const CLIP_SCALE = 1.25
+const CLIP_FPS = 10
 # Clips render this many points tall, more than the panel ever is, and are cut to it.
 const CLIP_HEIGHT = 720
 # Room below the panel for the captions, so they never cover a row.

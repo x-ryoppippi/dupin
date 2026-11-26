@@ -12,6 +12,11 @@ hides Dupin.
 <img alt="The panel with “left half” typed, showing the Left Half command from Window Management." src="../images/window-management/commands-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/window-management/clip-dark.webp" />
+<img alt="Typing left half lists the Left Half window command first; ↓ moves to the next command." src="../images/window-management/clip-light.webp" width="680" />
+</picture>
+
 | Command                               | Puts the window                                                                                            |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Left Half, Right Half                 | On the left or right half of the display's usable area, outside the Dock and menu bar.                     |

@@ -385,10 +385,48 @@ fn host() -> &'static Host {
     HOST.get_or_init(|| Host::fixed(Box::new(helper_command), headless_environment()))
 }
 
+/// Where the launcher reads the time it measures guests' timestamps against, such as how long
+/// ago a catalogue row is from: the clock its guests see, so a headless run shows the same any
+/// day, or else the wall clock.
+#[derive(Clone, Copy)]
+pub(crate) struct Clock {
+    fixed: Option<i64>,
+    /// Unix milliseconds.
+    wall: fn() -> u64,
+}
+
+impl Clock {
+    pub(crate) fn launcher() -> Self {
+        Self {
+            fixed: headless_environment().map(|environment| environment.now),
+            wall: || dupin_core::session::unix_now() * 1000,
+        }
+    }
+
+    /// One that stands at `now`, in Unix milliseconds.
+    pub(crate) fn fixed(now: i64) -> Self {
+        Self {
+            fixed: Some(now),
+            ..Self::launcher()
+        }
+    }
+
+    /// Unix milliseconds.
+    pub(crate) fn now_ms(self) -> u64 {
+        self.fixed
+            .map_or_else(self.wall, |now| u64::try_from(now).unwrap_or(0))
+    }
+}
+
 /// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
 /// launcher it starts, or else the clock of the headless calendar fixtures, so guests see the
 /// same day the fixture events are laid out around. A launcher with a window never reads it.
 fn headless_environment() -> Option<dupin_js_runtime::Environment> {
+    static ENVIRONMENT: OnceLock<Option<dupin_js_runtime::Environment>> = OnceLock::new();
+    *ENVIRONMENT.get_or_init(read_headless_environment)
+}
+
+fn read_headless_environment() -> Option<dupin_js_runtime::Environment> {
     if !rune::tooling::is_headless() {
         return None;
     }

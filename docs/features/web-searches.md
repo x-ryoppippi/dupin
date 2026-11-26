@@ -12,6 +12,11 @@ Type `g rust lifetimes`, `gh dupin` or `yt piano` to search Google, GitHub or Yo
 <img alt="Every web search listed under a Web Search chip for “rust”: Google, GitHub, Apple Maps and YouTube, each with its keyword." src="../images/web-searches/every-search-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/web-searches/clip-dark.webp" />
+<img alt="Typing gh, Space and dupin offers a GitHub search for dupin; ⌘A and ? lists every web search with its keyword." src="../images/web-searches/clip-light.webp" width="680" />
+</picture>
+
 Typing a query sends no network request. Dupin encodes the query into the URL when it builds the result and opens the browser or Maps only on activation. Web results do not count towards usage ranking. Query recall behaves as it does for other app-mode searches. Send to… offers each web search for selected text.
 
 Set `web_searches` and optional `web_fallbacks` in [configuration](#configuration). Fallback searches appear only after ordinary providers finish without results. They are disabled by default. File and Dictionary modes keep their own providers.

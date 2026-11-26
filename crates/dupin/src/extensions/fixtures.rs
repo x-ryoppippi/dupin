@@ -173,10 +173,11 @@ impl Convert for Held<'_> {
 }
 
 impl<'a> Held<'a> {
-    fn new(extension: &'a Extension) -> Self {
+    /// Rows' times are measured against `now`, the fixture's clock in Unix milliseconds.
+    fn new(extension: &'a Extension, now: i64) -> Self {
         Self {
             extension,
-            cached: Cached::new(extension.matching),
+            cached: Cached::with_clock(extension.matching, super::Clock::fixed(now)),
             rows: RefCell::default(),
         }
     }

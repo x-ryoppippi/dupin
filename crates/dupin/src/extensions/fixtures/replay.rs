@@ -206,7 +206,7 @@ pub(super) fn replay(
             guest_environment(fixture).now,
         )?,
         preferences: Arc::new(fixture.preferences.clone()),
-        held: super::Held::new(extension),
+        held: super::Held::new(extension, guest_environment(fixture).now),
         cancelled,
         query: None,
         pages: Vec::new(),

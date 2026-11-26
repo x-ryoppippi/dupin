@@ -11,8 +11,8 @@
   <image href="../logo/dupin.svg" x="68" y="64" width="160" height="160"/>
   <g fill="#f4f1ea" font-family="Inter">
     <text x="88" y="340" font-size="112" font-weight="700" letter-spacing="-5">Dupin</text>
-    <text x="92" y="416" font-size="43" font-weight="450">A fast, open-source launcher</text>
-    <text x="92" y="474" font-size="43" font-weight="450">for Apple silicon Macs.</text>
+    <text x="92" y="416" font-size="43" font-weight="450">Type a keyword,</text>
+    <text x="92" y="474" font-size="43" font-weight="450">reach anything.</text>
     <text x="1108" y="550" text-anchor="end" font-size="27" opacity=".65">dupin.app</text>
   </g>
 </svg>

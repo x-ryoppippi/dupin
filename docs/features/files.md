@@ -1,12 +1,43 @@
 # Files
 
-Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results appear as Spotlight finds them, then improve as more candidates arrive. Ranking combines filename match quality, your usage and previous query choices, last-used and modified dates, and path depth. Cache and build directories are demoted by the configurable [file ranking rules](#file-ranking).
+Dupin searches files by name or by content through Spotlight.
 
-The list shows up to `file_limit` results (200 by default) from a bounded candidate pool. A selected file or an open action screen keeps its target while results reorder.
+## Open it
 
-`in` followed by Space switches to content search ("In files"). Every word must start a word in the text Spotlight indexed from inside the file.
+- <kbd>Space</kbd> on an empty query: search file names ("Files").
+- `in` <kbd>Space</kbd>: search inside files ("In files").
 
-Narrow either file mode with qualifiers:
+## What you see
+
+- A chip with the mode, and a chip for each valid [qualifier](#qualifiers).
+- Results as Spotlight finds them, improving as more candidates arrive, up to `file_limit` (200 by default).
+- File names rank by filename match quality, your usage and previous query choices, last-used and modified dates, and path depth; cache and build directories are demoted by the [file ranking rules](#file-ranking).
+
+## What you can do
+
+| Key / action                                 | What it does                            |
+| -------------------------------------------- | --------------------------------------- |
+| <kbd>↩</kbd>                                 | Open the file                           |
+| <kbd>⌘↩</kbd>                                | Reveal in Finder                        |
+| <kbd>⌘Y</kbd>                                | Quick Look                              |
+| <kbd>⇥</kbd> on a folder                     | [Browse](./folder-browsing.md) it       |
+| <kbd>→</kbd>, <kbd>⌘K</kbd> or <kbd>⌃K</kbd> | Show its [actions](./file-actions.md)   |
+| <kbd>⌫</kbd> on a qualifier chip             | Delete the whole chip; Undo restores it |
+| <kbd>⌫</kbd> on an empty query               | Return to app search                    |
+
+Other keys: [Keys](../usage.md#keys).
+
+## Notes
+
+- Both modes find only what Spotlight has indexed.
+- Files: every word of the query must appear in the file name or display name.
+- In files: every word must start a word in the text Spotlight indexed from inside the file.
+- You can paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.
+- A selected file or an open action screen keeps its target while results reorder.
+
+## Qualifiers
+
+Narrow either mode with qualifiers: `report kind:pdf modified:7d`.
 
 | Qualifier        | Meaning                                                                     |
 | ---------------- | --------------------------------------------------------------------------- |
@@ -15,25 +46,41 @@ Narrow either file mode with qualifiers:
 | `in:~/Documents` | Search within an absolute or home-relative folder                           |
 | `modified:7d`    | Modified within a positive number of hours (`h`), days (`d`) or weeks (`w`) |
 
-Combine different qualifiers, using each at most once: `report kind:pdf modified:7d`. Quote folder paths containing spaces, such as `in:"~/My Documents"`. Backslashes can escape spaces, quotes and backslashes in qualifier values. Unknown colon prefixes remain ordinary search text.
+<details>
+<summary>Qualifier rules</summary>
 
-Folder scopes resolve symlinks and require an existing directory. A missing path or a path to a file returns no results.
+- Combine different qualifiers, using each at most once.
+- Valid qualifiers appear as inline chips without changing the query text.
+- Quote folder paths containing spaces, such as `in:"~/My Documents"`. Backslashes can escape spaces, quotes and backslashes in qualifier values.
+- Unknown colon prefixes remain ordinary search text.
+- Folder scopes resolve symlinks and require an existing directory. A missing path or a path to a file returns no results.
+- Incomplete or invalid qualifiers show a syntax hint and return no results.
+- File-name search accepts qualifiers without ordinary terms; content search still requires a word to search for.
+- Copy and query recall retain the raw query.
 
-Valid qualifiers appear as inline chips without changing the query text. Backspace deletes a whole chip, and Undo restores it. Copy and query recall retain the raw query. Incomplete or invalid qualifiers show a syntax hint and return no results. File-name search accepts qualifiers without ordinary terms; content search still requires a word to search for.
+</details>
 
-Both modes search the Spotlight index, so they find only what Spotlight has indexed.
+## Configuration
 
-You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.
-
-[Folder browsing](./folder-browsing.md) · [File actions](./file-actions.md)
-
-## File ranking
+### File ranking
 
 ```toml
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 ```
 
-File-name search gathers up to four times `file_limit` candidates, ranks them, then applies the display limit. Both limits are capped at 10,000; zero displays no results. Better candidates can replace early results while the search runs. Selecting a row or opening its actions keeps that file available even if it falls below the normal display cut.
+| Key              | Default  | Meaning                                                                                    |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `file_limit`     | `200`    | The most results shown, from a bounded candidate pool; `0` displays none. Capped at 10,000 |
+| `file_demotions` | as above | Directories ranked lower without excluding them; `[]` turns this off                       |
 
-`file_demotions` lowers the rank of noisy directories without excluding them. Absolute paths and `~/` paths match directory prefixes; relative entries match directory-component sequences, ignoring case. Entries do not match file names, and an empty list disables these demotions. Edits reload automatically and refresh an active file-name search. Content search keeps Spotlight's order and does not use these rules.
+<details>
+<summary>Ranking details</summary>
+
+File-name search gathers up to four times `file_limit` candidates, ranks them, then applies the display limit. Both limits are capped at 10,000. Better candidates can replace early results while the search runs. Selecting a row or opening its actions keeps that file available even if it falls below the normal display cut.
+
+In `file_demotions`, absolute paths and `~/` paths match directory prefixes; relative entries match directory-component sequences, ignoring case. Entries do not match file names. Edits reload automatically and refresh an active file-name search. Content search keeps Spotlight's order and does not use these rules.
+
+</details>
+
+[Folder browsing](./folder-browsing.md) · [File actions](./file-actions.md)

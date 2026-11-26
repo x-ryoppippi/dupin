@@ -49,6 +49,7 @@ Shipped with Dupin as extensions, each one yours to eject and change.
 Write, install and test extensions of your own.
 
 - [Extensions](./features/extensions.md): writing and installing JavaScript extensions, and their limits
+- [Command line](./features/cli.md): `dupin open`, `pick`, `config`, `ext` and headless renders
 - [MCP server](./features/mcp.md): `dupin mcp`, for agents such as Claude Code
 
 ## Working on Dupin

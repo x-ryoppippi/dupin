@@ -7,6 +7,11 @@ Turn on clipboard history in Settings → Search (it is off by default; see [con
 <img alt="Clipboard history with a copied 1280×720 PNG selected, showing a preview of the image, its dimensions, size and the app it was copied from." src="../images/clipboard/history-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/clipboard/clip-dark.webp" />
+<img alt="Typing clip and Space lists the clipboard history with a copied image's preview; ↓ moves to the copied text entries." src="../images/clipboard/clip-light.webp" width="680" />
+</picture>
+
 Each kind of copy shows its own way:
 
 - **Text** shows its first words, up to 200 characters, with its line or character count. Words match anywhere in the text. Dupin holds at most 8 MB of a history's text in memory to match it: past that, the newest entries are still found by all their text and older ones by as much of their beginning as fits, and when even that runs short, their first words are shortened.

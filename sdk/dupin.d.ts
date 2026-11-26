@@ -564,8 +564,12 @@ declare module 'dupin' {
 		 * user's script commands. `output` asks to receive stdout and stderr.
 		 */
 		exec?: Record<string, { args?: string[]; output?: boolean }>;
-		/** Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until deleted. */
-		storage?: { quotaBytes: number; retentionDays?: number };
+		/**
+		 * Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until
+		 * deleted. `sync` asks for `storage:sync`: once the user grants it on a Mac, a package installed
+		 * from Git keeps the same records on every Mac that syncs, the later write of a key winning.
+		 */
+		storage?: { quotaBytes: number; retentionDays?: number; sync?: boolean };
 		/** `paste` lets a row's `paste` action paste into the front app; without it, Dupin copies. */
 		clipboard?: ('read' | 'write' | 'watch' | 'paste')[];
 		dictionary?: ['lookup'];

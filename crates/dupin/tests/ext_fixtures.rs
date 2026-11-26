@@ -4,6 +4,7 @@
 
 use std::path::Path;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
 
@@ -134,43 +135,72 @@ fn snap_renders_every_bundled_fixture_as_test_replays_it() {
         })
         .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
         .collect();
-    fixtures.sort();
     assert!(fixtures.len() > 9, "every bundled package has fixtures");
-    let mut wrong = Vec::new();
-    for fixture in &fixtures {
-        let package = fixture.parent().unwrap().parent().unwrap();
-        let png = root.path().join("panel.png");
-        let output = dupin(&[
-            "ext".as_ref(),
-            "snap".as_ref(),
-            package.as_os_str(),
-            fixture.as_os_str(),
-            png.as_os_str(),
-            "--json".as_ref(),
-        ]);
-        let name = fixture.strip_prefix(&bundled).unwrap().display().to_string();
-        if !output.status.success() {
-            wrong.push(format!("{name}: {}", String::from_utf8_lossy(&output.stdout)));
-            continue;
-        }
-        let shown: Vec<String> = serde_json::from_value(json(&output)["shown"].clone()).unwrap();
+    // A snap spends most of its time in headless launchers pacing keys to the wall clock, so
+    // the snaps run side by side, as many at once as there are cores, the most steps first so
+    // the longest doesn't start last.
+    let steps = |fixture: &Path| {
         let stated: Value = serde_json::from_slice(&std::fs::read(fixture).unwrap()).unwrap();
-        // What the last step that lists rows expects; an activation leaves the panel as it was.
-        let expected = stated["steps"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .rev()
-            .find_map(|step| step["expect"]["rows"].as_array())
-            .and_then(|rows| rows.first())
-            .and_then(|row| row["title"].as_str());
-        let unavailable = shown.iter().any(|text| text.ends_with("isn't available"));
-        let missing = expected.is_some_and(|title| !shown.iter().any(|text| text.contains(title)));
-        if unavailable || missing {
-            wrong.push(format!("{name}: expected {expected:?}, shows {shown:?}"));
-        }
-    }
+        stated["steps"].as_array().map_or(0, Vec::len)
+    };
+    fixtures.sort_by_cached_key(|fixture| (std::cmp::Reverse(steps(fixture)), fixture.clone()));
+    let next = AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(1, usize::from);
+    let mut wrong: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers.min(fixtures.len()))
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut wrong = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(fixture) = fixtures.get(index) else {
+                            return wrong;
+                        };
+                        let png = root.path().join(format!("panel-{index}.png"));
+                        wrong.extend(snapped_wrong(&bundled, fixture, &png));
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect()
+    });
+    wrong.sort();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// What is wrong with the panel `fixture` renders to `png`, if anything: a failed snap, the row
+/// Dupin shows while the package isn't available, or no first row the fixture expects there.
+fn snapped_wrong(bundled: &Path, fixture: &Path, png: &Path) -> Option<String> {
+    let package = fixture.parent().unwrap().parent().unwrap();
+    let output = dupin(&[
+        "ext".as_ref(),
+        "snap".as_ref(),
+        package.as_os_str(),
+        fixture.as_os_str(),
+        png.as_os_str(),
+        "--json".as_ref(),
+    ]);
+    let name = fixture.strip_prefix(bundled).unwrap().display().to_string();
+    if !output.status.success() {
+        return Some(format!("{name}: {}", String::from_utf8_lossy(&output.stdout)));
+    }
+    let shown: Vec<String> = serde_json::from_value(json(&output)["shown"].clone()).unwrap();
+    let stated: Value = serde_json::from_slice(&std::fs::read(fixture).unwrap()).unwrap();
+    // What the last step that lists rows expects; an activation leaves the panel as it was.
+    let expected = stated["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|step| step["expect"]["rows"].as_array())
+        .and_then(|rows| rows.first())
+        .and_then(|row| row["title"].as_str());
+    let unavailable = shown.iter().any(|text| text.ends_with("isn't available"));
+    let missing = expected.is_some_and(|title| !shown.iter().any(|text| text.contains(title)));
+    (unavailable || missing).then(|| format!("{name}: expected {expected:?}, shows {shown:?}"))
 }
 
 #[test]
