@@ -17,7 +17,7 @@ const MAX_CONFIG: usize = 64 * 1024;
 const INSTRUCTIONS: &str = "Dupin is a macOS launcher. These tools read and validate its config.toml and show its panel; \
      open_panel and pick need the launcher running, as do the snapshot tools, which only read saved snapshots or show \
      their window. They never write configuration, run scripts or open files. \
-     Started with --workspace, ext_check, ext_run, ext_test and ext_snap check, run, replay the fixtures of and render \
+     Started with --workspace, ext_check, ext_run, ext_test and ext_render check, run, replay the fixtures of and render \
      extension packages in that folder, offline and without writing to it.";
 
 const PARSE_ERROR: i64 = -32700;
@@ -481,7 +481,7 @@ fn extension_tools(read_only: &Value) -> [Value; 4] {
             "annotations": read_only,
         }),
         json!({
-            "name": "ext_snap",
+            "name": "ext_render",
             "title": "Render an extension's panel",
             "description": "Render the panel after a fixture's step (the last by default) with Dupin's own view, headless, and return it as a PNG. Needs a Dupin build with headless rendering.",
             "inputSchema": schema(json!({
@@ -572,7 +572,7 @@ fn extension_tool(
                 .map_err(diagnostic)?
                 .json,
         )),
-        "ext_snap" => {
+        "ext_render" => {
             let fixture = inside(&package, arguments.get("fixture"), "fixture")?;
             let step = match arguments.get("step") {
                 None => None,
@@ -583,14 +583,14 @@ fn extension_tool(
                 ),
             };
             let scratch = tempfile::Builder::new()
-                .prefix("dupin-mcp-snap-")
+                .prefix("dupin-mcp-render-")
                 .tempdir()
                 .map_err(|error| format!("couldn't make a scratch folder: {error}"))?;
             let output = scratch.path().join("panel.png");
-            let snapped = crate::extensions::snap(&package, &fixture, step, &output, None, &cancelled)
+            let rendered = crate::extensions::render(&package, &fixture, step, &output, None, &cancelled)
                 .map_err(diagnostic)?;
             let png = std::fs::read(&output).map_err(|error| format!("couldn't read the render: {error}"))?;
-            let mut described = crate::cli::snapped_json(&snapped);
+            let mut described = crate::cli::rendered_json(&rendered);
             if let Some(described) = described.as_object_mut() {
                 described.remove("png");
             }
@@ -613,7 +613,7 @@ fn call_tool(
         "read_snapshot" | "open_snapshot" => &["id"],
         "ext_check" | "ext_test" => &["package"],
         "ext_run" => &["package", "query"],
-        "ext_snap" => &["package", "fixture", "step"],
+        "ext_render" => &["package", "fixture", "step"],
         _ => &[],
     };
     if let Some(unexpected) = arguments.keys().find(|key| !allowed.contains(&key.as_str())) {
@@ -1159,7 +1159,11 @@ mod tests {
                 call(5, "ext_check", json!({"package": "../"})),
                 call(6, "ext_check", json!({"package": "linked"})),
                 call(7, "ext_check", json!({"package": "/etc"})),
-                call(8, "ext_snap", json!({"package": "greeter", "fixture": "../../"})),
+                call(
+                    8,
+                    "ext_render",
+                    json!({"package": "greeter", "fixture": "../../"}),
+                ),
                 call(9, "ext_test", json!({"package": "greeter", "update": true})),
                 call(10, "ext_check", json!({"package": "greeter/fixtures"})),
             ]
@@ -1173,7 +1177,7 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        assert_eq!(&names[8..], ["ext_check", "ext_run", "ext_test", "ext_snap"]);
+        assert_eq!(&names[8..], ["ext_check", "ext_run", "ext_test", "ext_render"]);
         let result = |n: usize| &replies[n]["result"];
         assert_eq!(result(1)["structuredContent"]["keyword"], "greeter");
         assert_eq!(

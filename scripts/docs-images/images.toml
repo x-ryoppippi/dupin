@@ -2,8 +2,8 @@
 # each in light and dark, to docs/images/<page>/<name>-<theme>.png.
 #
 # An image is either an `extension`'s fixture (`fixture`, in its fixtures folder, rendered after
-# `step` or its last step by `dupin ext snap`), or a headless launcher `scenario` with the
-# sidecar fixtures scripts/snap.nu reads beside it, an optional `config` in place of its own, the
+# `step` or its last step by `dupin ext render`), or a headless launcher `scenario` with the
+# sidecar fixtures scripts/render.nu reads beside it, an optional `config` in place of its own, the
 # documents below in ~/Documents and the `recent` history below. A scenario with a `window` draws
 # that window, `width` points wide, instead of the panel.
 #
@@ -392,7 +392,7 @@ name = "clip"
 fixtures = "scripts/headless/extension-js.json"
 steps = [{ type = "wc" }, { key = "space" }, { type = "two words" }]
 
-# An extension's own fixture as a clip: `dupin ext snap --record` replays its steps, up to `step`,
+# An extension's own fixture as a clip: `dupin ext render --record` replays its steps, up to `step`,
 # at a pace a reader can follow, and the keys it presses are captioned from its script.
 [[clips]]
 page = "extensions"

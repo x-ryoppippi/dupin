@@ -1,8 +1,8 @@
-//! `dupin ext test` and `dupin ext snap`: a package's fixtures replayed through the same
+//! `dupin ext test` and `dupin ext render`: a package's fixtures replayed through the same
 //! extension host, bytecode and checks the launcher uses, with the fixture's clock, seed and time
 //! zone instead of the machine's. A query step answers as the launcher's keyword does: what
 //! `search` computes, then the `items()` catalogue matched natively, held across steps and
-//! updated as actions and events invalidate it. `snap` renders a step's panel with the launcher
+//! updated as actions and events invalidate it. `render` draws a step's panel with the launcher
 //! itself, headless, in a scratch home that holds only the package, answering its host requests
 //! from the fixture's `replies` as `test` does.
 
@@ -32,7 +32,7 @@ use replay::replay;
 
 pub(super) use services::headless;
 
-/// Passes a fixture's clock and seed to the headless launcher `snap` starts.
+/// Passes a fixture's clock and seed to the headless launcher `render` starts.
 pub(super) const HEADLESS_ENVIRONMENT: &str = "DUPIN_HEADLESS_EXTENSION_ENVIRONMENT";
 const ZONEINFO: &str = "/usr/share/zoneinfo";
 /// Each headless run's own limit; a realtime run of the longest fixture takes about a minute.
@@ -147,7 +147,7 @@ struct StepResult {
     differences: Vec<Difference>,
     /// Why the step couldn't run, such as selecting a row the answer doesn't have.
     problem: Option<String>,
-    /// What a person presses for the step, which `snap` replays in the headless launcher.
+    /// What a person presses for the step, which `render` replays in the headless launcher.
     presses: Vec<Press>,
 }
 
@@ -442,8 +442,8 @@ impl FixtureResult {
     }
 }
 
-/// What `dupin ext snap` rendered.
-pub struct Snapped {
+/// What `dupin ext render` rendered.
+pub struct Rendered {
     pub png: PathBuf,
     pub step: usize,
     pub width: u16,
@@ -458,14 +458,14 @@ pub struct Snapped {
 /// `output`. Activations aren't replayed: their effects never show in the panel, and the panel
 /// stays as it was when the action was chosen. Once `cancelled` answers true, the headless run
 /// is stopped.
-pub fn snap(
+pub fn render(
     folder: &Path,
     fixture_path: &Path,
     step: Option<usize>,
     output: &Path,
     frames: Option<&Path>,
     cancelled: &dyn Fn() -> bool,
-) -> Result<Snapped, Diagnostic> {
+) -> Result<Rendered, Diagnostic> {
     let extension = load_folder(folder)?;
     let name = fixture_path.display().to_string();
     let parsed = fixture::read(&name, fixture_path)?;
@@ -496,10 +496,10 @@ pub fn snap(
     })?;
     let render_failed = |message: String| {
         Diagnostic::new("render-failed", message)
-            .hint("`snap` runs this Dupin headless; a build without Rune's `tooling` feature can't.")
+            .hint("`render` runs this Dupin headless; a build without Rune's `tooling` feature can't.")
     };
     let scratch = tempfile::Builder::new()
-        .prefix("dupin-snap-")
+        .prefix("dupin-render-")
         .tempdir()
         .map_err(|error| render_failed(format!("couldn't make a scratch folder: {error}")))?;
     let root = scratch.path();
@@ -626,7 +626,7 @@ pub fn snap(
             &scale,
         )?;
     }
-    Ok(Snapped {
+    Ok(Rendered {
         png: output.to_owned(),
         step: last,
         width: environment.window.width,

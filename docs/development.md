@@ -19,7 +19,7 @@ just build       # nix build .#dupin
 just build-debug # cargo build -p dupin
 just run         # build the bundle, then open it
 just package     # a signed dist/Dupin.zip; see releasing
-just snap        # headless renders (see Headless renders)
+just render      # headless renders (see Headless renders)
 just docs-images # the images in docs/images (see Documentation images)
 just footprint   # the peak-footprint budget (see Peak memory)
 ```
@@ -161,12 +161,12 @@ On every pull request, the `autofix.ci` workflow runs `nix fmt` after the [Rune 
 
 ## Headless renders
 
-Every build of Dupin, the released app included, takes Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/snap.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
+Every build of Dupin, the released app included, takes Rune's headless flags (`--snap`, Rune's own name for writing the frame to a PNG, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/render.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
 
 ```sh
 cargo build -p dupin
-nu scripts/snap.nu
-nu scripts/snap.nu --only calendar --theme dark # one scenario, in one appearance
+nu scripts/render.nu
+nu scripts/render.nu --only calendar --theme dark # one scenario, in one appearance
 ```
 
 `--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead, and clipboard scenarios the history in `scripts/fixtures/clipboard.json`, or a scenario's own in `<name>.clipboard/history.json`, whose `image` entries name PNG files beside it. A scenario with a `<name>.snapshots/snapshots.json`, a list of snapshots, starts with them saved in scratch storage. A scenario with a `<name>.home/` folder runs with a copy of it as its home: apps in its `Applications` folder are found like any other, and its `Library/Application Support/Dupin/history.json` is the usage history, where `$HOME` in an app's path stands for the copy's path. A scenario's own snapshots, clipboard history, extensions, grants and home are read only beside its own `<name>.toml`. Headless renders draw the panel's plain card where a window shows Liquid Glass.
@@ -179,7 +179,7 @@ dupin.app/docs is this folder, rendered when the website builds (`just website::
 
 The images in `docs/images` are rendered, never taken by hand. `scripts/docs-images/images.toml` lists each one; `just docs-images` (`nu scripts/docs-images.nu` after `cargo build -p dupin`) renders every one in light and dark to `docs/images/<page>/<name>-<theme>.png`, compresses them losslessly with oxipng and deletes the images the list no longer has. `--only <text>` renders just the images whose `<page>/<name>` contains it. Re-run it after a change to anything an image shows, and commit the result.
 
-Every image comes from fixtures, so a render on any Mac shows nothing of that Mac's: a bundled or example extension's own fixture through `dupin ext snap`, or a headless scenario run in a scratch home that holds the fixture documents and usage history the list names, with the fixture clipboard history and snapshots, and with `DUPIN_HEADLESS_APPS=/System/Applications`. A headless run takes that `PATH`-style list in place of the app folders, so it lists only the stock apps; `dupin ext snap` sets it empty. Spotlight indexes nothing in a scratch home, and on some Macs not even a fresh disk image, so no image shows a Spotlight search: the file images start from Recent items. Settings pages are drawn from the `prefs` window (`--window prefs`).
+Every image comes from fixtures, so a render on any Mac shows nothing of that Mac's: a bundled or example extension's own fixture through `dupin ext render`, or a headless scenario run in a scratch home that holds the fixture documents and usage history the list names, with the fixture clipboard history and snapshots, and with `DUPIN_HEADLESS_APPS=/System/Applications`. A headless run takes that `PATH`-style list in place of the app folders, so it lists only the stock apps; `dupin ext render` sets it empty. Spotlight indexes nothing in a scratch home, and on some Macs not even a fresh disk image, so no image shows a Spotlight search: the file images start from Recent items. Settings pages are drawn from the `prefs` window (`--window prefs`).
 
 A page embeds an image as a `<picture>` whose `prefers-color-scheme: dark` source is the dark image, so GitHub shows the one matching the reader's theme:
 

@@ -19,10 +19,10 @@ dupin ext run . --query Dupin
 
 ```sh
 dupin ext test .
-dupin ext snap . fixtures/search.json search.png
+dupin ext render . fixtures/search.json search.png
 ```
 
-`fixtures/search.json` types a query, chooses an action and states what the extension should answer. `test` replays every fixture in `fixtures/` through the extension host, with the fixture's fixed clock, random seed, locale and time zone, and shows what differs; `--update` rewrites the expectations from what the extension answers now. `snap` renders the panel after a fixture's last step as a PNG.
+`fixtures/search.json` types a query, chooses an action and states what the extension should answer. `test` replays every fixture in `fixtures/` through the extension host, with the fixture's fixed clock, random seed, locale and time zone, and shows what differs; `--update` rewrites the expectations from what the extension answers now. `render` draws the panel after a fixture's last step as a PNG.
 
 `dupin.icon` in `package.json` is the icon on the keyword chip, in Settings and on rows without one of their own: an SF Symbol, such as `sf:puzzlepiece.extension`, or an image in the package, such as `assets/icon.png`.
 

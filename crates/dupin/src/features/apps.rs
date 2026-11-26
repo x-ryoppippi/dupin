@@ -10,7 +10,7 @@ pub(crate) const APPS: &str = "apps.search";
 pub(crate) const SOURCE: &str = "apps";
 
 /// The app folders a headless launcher scans in place of the standard ones, as a `PATH`-style
-/// list, so a render meant for other people shows none of this Mac's own apps: `dupin ext snap`
+/// list, so a render meant for other people shows none of this Mac's own apps: `dupin ext render`
 /// sets it empty, and the documentation images to `/System/Applications`.
 pub(crate) const HEADLESS_APPS: &str = "DUPIN_HEADLESS_APPS";
 

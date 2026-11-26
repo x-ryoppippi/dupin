@@ -39,7 +39,7 @@ use dupin_js_runtime::{
 
 use catalogue::Asking;
 
-pub use fixtures::{Snapped, snap, test};
+pub use fixtures::{Rendered, render, test};
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
 pub(crate) use provider::{hand_over_kinds, is_answered_consent_row, stands_in};
 
@@ -370,7 +370,7 @@ impl Extension {
     }
 }
 
-/// Starts the copies of the fixture `dupin ext snap` renders, once the headless launcher's
+/// Starts the copies of the fixture `dupin ext render` renders, once the headless launcher's
 /// first frame starts its script.
 pub(crate) fn headless_ready() {
     if let Some(fixture) = fixtures::headless() {
@@ -418,7 +418,7 @@ impl Clock {
     }
 }
 
-/// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
+/// The clock and seed of the fixture `dupin ext render` renders, which it hands the headless
 /// launcher it starts, or else the clock of the headless calendar fixtures, so guests see the
 /// same day the fixture events are laid out around. A launcher with a window never reads it.
 fn headless_environment() -> Option<dupin_js_runtime::Environment> {
@@ -901,7 +901,7 @@ pub fn watch(
         bundled: origin == Origin::Bundled,
         ..Scanner::default()
     };
-    // `dupin ext snap` starts typing a fixed moment after the launcher starts, which a first
+    // `dupin ext render` starts typing a fixed moment after the launcher starts, which a first
     // scan compiling every package on a worker can outlast; scanned here, before the first
     // frame, the packages are registered by then, and the worker's first scan finds them
     // unchanged.

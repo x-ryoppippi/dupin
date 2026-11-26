@@ -41,7 +41,7 @@ const KEYS = {
 # docs/images/<page>/<name>-<theme>.webp, animated, with the keys they press drawn below the panel.
 #
 # Each comes from fixtures only, never from this Mac: an extension's own fixture through
-# `dupin ext snap`, or a headless launcher scenario with a scratch home holding the fixture
+# `dupin ext render`, or a headless launcher scenario with a scratch home holding the fixture
 # documents in ~/Documents, the stock apps in /System/Applications and the fixture clipboard
 # history. Without `--only`, files of the kinds rendered that the manifest no longer lists are
 # deleted.
@@ -244,7 +244,7 @@ def render [
     {image: $id, files: $files}
 }
 
-# An extension's fixture, through `dupin ext snap`, with its theme set to each of ours.
+# An extension's fixture, through `dupin ext render`, with its theme set to each of ours.
 def render-extension [image: record, bin: path, tmp: path]: nothing -> list<string> {
     let fixture = $image.extension | path join fixtures $image.fixture
     let step = if $image.step? == null {
@@ -258,12 +258,12 @@ def render-extension [image: record, bin: path, tmp: path]: nothing -> list<stri
     image-paths $image | zip $THEMES | each {|pair|
         let themed = $tmp | path join $"(image-id $image | str replace --all / -)-($pair.1).json"
         open $fixture | upsert environment.theme $pair.1 | to json | save --force $themed
-        headless $bin ext snap $image.extension $themed $pair.0 ...$step
+        headless $bin ext render $image.extension $themed $pair.0 ...$step
         $pair.0
     }
 }
 
-# A headless launcher scenario, with its sidecar fixtures as scripts/snap.nu reads them. With a
+# A headless launcher scenario, with its sidecar fixtures as scripts/render.nu reads them. With a
 # `window`, that window is drawn instead of the panel, at `width` and the height of its content.
 def render-scenario [
     image: record
@@ -352,7 +352,7 @@ def finish-clip [
     }
 }
 
-# An extension's fixture played through `dupin ext snap --record`, up to `step` or its last
+# An extension's fixture played through `dupin ext render --record`, up to `step` or its last
 # step, as a clip: the replay's own keys, captioned from the script it records beside the
 # frames.
 def render-extension-clip [clip: record, bin: path, tmp: path]: nothing -> list<string> {
@@ -372,7 +372,7 @@ def render-extension-clip [clip: record, bin: path, tmp: path]: nothing -> list<
         open $fixture | upsert environment.theme $pair.1 | to json | save --force $themed
         let frames = $tmp | path join $"($name)-($pair.1)-frames"
         let still = $tmp | path join $"($name)-($pair.1).png"
-        headless $bin ext snap $clip.extension $themed $still ...$step --record $frames
+        headless $bin ext render $clip.extension $themed $still ...$step --record $frames
         let pngs = glob ($frames | path join frame_*.png) | sort
         let points = (^magick identify -format "%w" ($pngs | first) | into int) / $scale
         ^magick mogrify -resize $"($points * $CLIP_SCALE | math round)x" ...$pngs

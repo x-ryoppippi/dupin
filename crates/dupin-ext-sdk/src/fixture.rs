@@ -1,6 +1,6 @@
 //! Fixtures: JSON files in a package's `fixtures/` folder that replay input against the package
 //! and state what it should answer. `dupin ext test` runs every one through the extension host;
-//! `dupin ext snap` renders one step's panel. A fixture fixes everything a run could otherwise
+//! `dupin ext render` renders one step's panel. A fixture fixes everything a run could otherwise
 //! take from the machine: the clock, `Math.random`'s seed, the locale, the time zone, the theme
 //! and the window. Each host service an extension asks for is answered from the fixture's
 //! `replies`, never from the machine.

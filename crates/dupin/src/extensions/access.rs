@@ -74,7 +74,7 @@ pub struct Platform {
 /// that act on the Mac. Tests and headless runs get one that keeps grants in memory
 /// and reaches no service of the Mac's but a headless run's fixture calendar, as the built-in
 /// Calendar search reads it, and fixed definitions, as the bundled Dictionary renders them; a
-/// headless render may still declare a base beside its own config, and one `dupin ext snap`
+/// headless render may still declare a base beside its own config, and one `dupin ext render`
 /// starts answers from the fixture it renders.
 pub fn open(platform: Platform) -> Bridge {
     if cfg!(test) {

@@ -8,18 +8,18 @@ dupin ext dev greeter                      # keep a live copy in the extensions 
 dupin ext check greeter                    # load and compile it
 dupin ext run greeter --query 'Dupin'      # answer one query
 dupin ext test greeter                     # replay its fixtures
-dupin ext snap greeter greeter/fixtures/search.json search.png
+dupin ext render greeter greeter/fixtures/search.json search.png
 ```
 
-| Command                                                                                                    | Does                                                                              |
-| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [`dupin ext new <dir> [--ts \| --bundle]`](#creating-a-package)                                            | Creates a package in a new or empty folder.                                       |
-| [`dupin ext dev <dir> [--sourcemap]`](#developing-live)                                                    | Publishes a development copy to the extensions folder and keeps it current.       |
-| [`dupin ext check <dir>`](#checking-and-running)                                                           | Loads and compiles the package and says what it exports.                          |
-| [`dupin ext run <dir> --query Q [--json]`](#checking-and-running)                                          | Answers one query as the launcher would.                                          |
-| [`dupin ext test <dir> [--update] [--json]`](#testing-and-snapshots)                                       | Replays every fixture and compares each step with its `expect`.                   |
-| [`dupin ext snap <dir> <fixture> <output.png> [--step N] [--record DIR] [--json]`](#testing-and-snapshots) | Renders the panel after a fixture's step, and with `--record` records the replay. |
-| [`dupin ext build <dir> [--sourcemap]`](./extension-distribution.md#building-a-bundle)                     | Bundles a package with npm dependencies.                                          |
+| Command                                                                                                      | Does                                                                              |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| [`dupin ext new <dir> [--ts \| --bundle]`](#creating-a-package)                                              | Creates a package in a new or empty folder.                                       |
+| [`dupin ext dev <dir> [--sourcemap]`](#developing-live)                                                      | Publishes a development copy to the extensions folder and keeps it current.       |
+| [`dupin ext check <dir>`](#checking-and-running)                                                             | Loads and compiles the package and says what it exports.                          |
+| [`dupin ext run <dir> --query Q [--json]`](#checking-and-running)                                            | Answers one query as the launcher would.                                          |
+| [`dupin ext test <dir> [--update] [--json]`](#testing-and-rendering)                                         | Replays every fixture and compares each step with its `expect`.                   |
+| [`dupin ext render <dir> <fixture> <output.png> [--step N] [--record DIR] [--json]`](#testing-and-rendering) | Renders the panel after a fixture's step, and with `--record` records the replay. |
+| [`dupin ext build <dir> [--sourcemap]`](./extension-distribution.md#building-a-bundle)                       | Bundles a package with npm dependencies.                                          |
 
 <details>
 <summary>Packages and the host</summary>
@@ -92,7 +92,7 @@ dupin ext check examples/extensions/word-count-js
 dupin ext run examples/extensions/word-count-js --query 'two words'
 ```
 
-`check` compiles the package and says whether it exports `search` or `items`. `run` answers one query as the launcher would; host requests fail as `unavailable`, so use [`dupin ext test`](#testing-and-snapshots) to answer them from a fixture. Both exit non-zero on failure.
+`check` compiles the package and says whether it exports `search` or `items`. `run` answers one query as the launcher would; host requests fail as `unavailable`, so use [`dupin ext test`](#testing-and-rendering) to answer them from a fixture. Both exit non-zero on failure.
 
 <details>
 <summary>What they do</summary>
@@ -129,15 +129,15 @@ With `--json`, `run` prints the answer in the [protocol](../plugin-protocol.md)'
 
 </details>
 
-## Testing and snapshots
+## Testing and rendering
 
 ```sh
 dupin ext test greeter
 dupin ext test greeter --update
-dupin ext snap greeter greeter/fixtures/search.json search.png
+dupin ext render greeter greeter/fixtures/search.json search.png
 ```
 
-`dupin ext test` replays every [fixture](#fixtures) in `fixtures/` and compares each step with its `expect`; `--update` rewrites the expectations to what the steps produced. `dupin ext snap` renders the panel after step `N` (counting from 1), or the last step, as a PNG.
+`dupin ext test` replays every [fixture](#fixtures) in `fixtures/` and compares each step with its `expect`; `--update` rewrites the expectations to what the steps produced. `dupin ext render` renders the panel after step `N` (counting from 1), or the last step, as a PNG. Rendering only draws the panel to a file; it has nothing to do with [Snapshots](./snapshots.md), which save results in the launcher.
 
 ```text
 FAIL fixtures/search.json
@@ -163,13 +163,13 @@ Each difference names the path in the outcome and both values; something the out
 </details>
 
 <details>
-<summary>How snap renders</summary>
+<summary>How render draws</summary>
 
-`snap` answers host requests from the fixture's `replies`, through the broker and with the fixture's `consent`, exactly as `test` does, so `search` and `items` show what they would in the launcher.
+`render` answers host requests from the fixture's `replies`, through the broker and with the fixture's `consent`, exactly as `test` does, so `search` and `items` show what they would in the launcher.
 
-`snap` starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. A package Dupin ships for a built-in, such as Calendar or Calculator, answers that built-in as it does in the launcher: the render turns the built-in on, types the query after its keyword, or in the main search for one that answers there, and hands the package the fixture's `preferences` in place of the built-in's settings and only the grants the fixture's `consent` gives. It chooses a step's `push` and `run` actions from the row's action panel, fills in and submits forms and closes pages with the keys a person would press, so the panel shows the page an action opened and the toast it showed; a `clipboard` event reaches the package as a copy does, at its step. Copy, Paste, Open URL and Reveal actions and other events change nothing on screen and aren't replayed. To show what the package had stored before the first step, seed `replies.storage` with it.
+`render` starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. A package Dupin ships for a built-in, such as Calendar or Calculator, answers that built-in as it does in the launcher: the render turns the built-in on, types the query after its keyword, or in the main search for one that answers there, and hands the package the fixture's `preferences` in place of the built-in's settings and only the grants the fixture's `consent` gives. It chooses a step's `push` and `run` actions from the row's action panel, fills in and submits forms and closes pages with the keys a person would press, so the panel shows the page an action opened and the toast it showed; a `clipboard` event reaches the package as a copy does, at its step. Copy, Paste, Open URL and Reveal actions and other events change nothing on screen and aren't replayed. To show what the package had stored before the first step, seed `replies.storage` with it.
 
-The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, and Dupin says how long ago a row's `time` was by the same clock, so two renders of one fixture on one Mac are the same bytes on any day. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `snap` then fails with `render-failed`. `--json` prints `{ "png", "step", "width", "height", "scale", "shown" }`, where `shown` is every text the panel shows, in the order it lays them out.
+The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, and Dupin says how long ago a row's `time` was by the same clock, so two renders of one fixture on one Mac are the same bytes on any day. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `render` then fails with `render-failed`. `--json` prints `{ "png", "step", "width", "height", "scale", "shown" }`, where `shown` is every text the panel shows, in the order it lays them out.
 
 `--record DIR` also records the replay, up to the same step, as `DIR/frame_0000.png` and on, 10 frames a second at the fixture's scale and at least 720 points tall, so the panel has room to grow, with the keys it pressed in `DIR/script.json` (Rune's script format). A recording presses keys at a pace a reader can follow, slower than a still needs; the still at `output.png` is the same either way. `scripts/docs-images.nu` turns such a recording into a clip for these docs.
 
@@ -291,14 +291,14 @@ The fixture holds the catalogue from step to step as the launcher does, so an `a
 
 ### Environment
 
-| `environment` key | Default                        | Fixes                           |
-| ----------------- | ------------------------------ | ------------------------------- |
-| `now`             | `"2026-01-01T09:00:00Z"`       | The clock, which doesn't move.  |
-| `seed`            | `1`                            | `Math.random`.                  |
-| `timeZone`        | `"UTC"`                        | The extension host's time zone. |
-| `locale`          | `"en-GB"`                      | `LANG` for the headless render. |
-| `theme`           | `"dark"`                       | `snap`'s appearance.            |
-| `window`          | `{ "width": 680, "scale": 2 }` | `snap`'s panel size and scale.  |
+| `environment` key | Default                        | Fixes                            |
+| ----------------- | ------------------------------ | -------------------------------- |
+| `now`             | `"2026-01-01T09:00:00Z"`       | The clock, which doesn't move.   |
+| `seed`            | `1`                            | `Math.random`.                   |
+| `timeZone`        | `"UTC"`                        | The extension host's time zone.  |
+| `locale`          | `"en-GB"`                      | `LANG` for the headless render.  |
+| `theme`           | `"dark"`                       | `render`'s appearance.           |
+| `window`          | `{ "width": 680, "scale": 2 }` | `render`'s panel size and scale. |
 
 <details>
 <summary>Every key in full</summary>
@@ -309,8 +309,8 @@ The fixture holds the catalogue from step to step as the launcher does, so an `a
 | `seed`            | `1`                            | `Math.random`, which returns the same numbers for the same seed.                                           |
 | `timeZone`        | `"UTC"`                        | The extension host's time zone, a tz database name this Mac has, for local-time `Date` methods.            |
 | `locale`          | `"en-GB"`                      | `LANG` for the headless render. The guest has no `Intl`, so no answer depends on it yet.                   |
-| `theme`           | `"dark"`                       | `snap`'s appearance, `dark` or `light`.                                                                    |
-| `window`          | `{ "width": 680, "scale": 2 }` | `snap`'s panel width (400–1200 points), scale (1–3) and, optionally, `height` (60–2000 points).            |
+| `theme`           | `"dark"`                       | `render`'s appearance, `dark` or `light`.                                                                  |
+| `window`          | `{ "width": 680, "scale": 2 }` | `render`'s panel width (400–1200 points), scale (1–3) and, optionally, `height` (60–2000 points).          |
 
 </details>
 
@@ -340,11 +340,11 @@ Every request still goes through the broker, against the scopes `package.json` d
 
 ## Through MCP
 
-[`dupin mcp --workspace DIR`](./mcp.md#extension-tools) offers `ext_check`, `ext_run`, `ext_test` and `ext_snap` to an agent, for packages inside `DIR`.
+[`dupin mcp --workspace DIR`](./mcp.md#extension-tools) offers `ext_check`, `ext_run`, `ext_test` and `ext_render` to an agent, for packages inside `DIR`.
 
 <details>
 <summary>How they differ from the commands</summary>
 
-They are the commands above, offline: no build runs, nothing is written to the workspace (`ext_test` never updates), no grant you made applies and nothing asks macOS for access. `ext_snap` returns the PNG itself.
+They are the commands above, offline: no build runs, nothing is written to the workspace (`ext_test` never updates), no grant you made applies and nothing asks macOS for access. `ext_render` returns the PNG itself.
 
 </details>

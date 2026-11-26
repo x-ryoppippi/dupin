@@ -13,16 +13,16 @@ Add `dupin mcp` to your agent's MCP servers (see [Configuration](#configuration)
 
 ## What you can do
 
-| Key / action                                   | What it does                                                           |
-| ---------------------------------------------- | ---------------------------------------------------------------------- |
-| `read_config`, `validate_config`               | Return or check the configuration files, without the launcher.         |
-| `get_active_config`                            | Returns the values the launcher has applied.                           |
-| `open_panel`                                   | Shows the panel, optionally with a `query` typed in.                   |
-| `pick`                                         | Shows `values` in the panel and waits for you to choose one.           |
-| <kbd>↩</kbd> / <kbd>Esc</kbd> on a `pick`      | Hands the chosen value back, or dismisses it ("Cancelled").            |
-| `list_snapshots`, `read_snapshot`              | List the saved [snapshots](./snapshots.md), or read one's content.     |
-| `open_snapshot`                                | Shows the Snapshots window, optionally with one snapshot selected.     |
-| `ext_check`, `ext_run`, `ext_test`, `ext_snap` | Work on an extension package; see [Extension tools](#extension-tools). |
+| Key / action                                     | What it does                                                           |
+| ------------------------------------------------ | ---------------------------------------------------------------------- |
+| `read_config`, `validate_config`                 | Return or check the configuration files, without the launcher.         |
+| `get_active_config`                              | Returns the values the launcher has applied.                           |
+| `open_panel`                                     | Shows the panel, optionally with a `query` typed in.                   |
+| `pick`                                           | Shows `values` in the panel and waits for you to choose one.           |
+| <kbd>↩</kbd> / <kbd>Esc</kbd> on a `pick`        | Hands the chosen value back, or dismisses it ("Cancelled").            |
+| `list_snapshots`, `read_snapshot`                | List the saved [snapshots](./snapshots.md), or read one's content.     |
+| `open_snapshot`                                  | Shows the Snapshots window, optionally with one snapshot selected.     |
+| `ext_check`, `ext_run`, `ext_test`, `ext_render` | Work on an extension package; see [Extension tools](#extension-tools). |
 
 Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 
@@ -99,7 +99,7 @@ The server is a thin client of the same local control socket as the [`dupin` com
 
 ## Extension tools
 
-Started with `--workspace DIR`, the server also offers `ext_check`, `ext_run`, `ext_test` and `ext_snap` for packages inside that folder, so an agent can write a package and check it without the launcher. See [Testing and snapshots](./extension-testing.md#testing-and-snapshots).
+Started with `--workspace DIR`, the server also offers `ext_check`, `ext_run`, `ext_test` and `ext_render` for packages inside that folder, so an agent can write a package and check it without the launcher. `ext_render` draws the panel to a PNG; the snapshot tools above read results you saved. See [Testing and rendering](./extension-testing.md#testing-and-rendering).
 
 <details>
 <summary>The tools, their arguments and an example</summary>
@@ -115,12 +115,12 @@ Started with `--workspace DIR`, the server also offers `ext_check`, `ext_run`, `
 }
 ```
 
-| Tool        | Arguments                    | What it does                                                                                                                                                                                  |
-| ----------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ext_check` | `package`                    | Loads and compiles the package as `dupin ext check` does and returns its `id`, `name`, `version` and `keyword`.                                                                               |
-| `ext_run`   | `package`, `query`           | Asks it one query as `dupin ext run --json` does. Its host requests fail as `unavailable`.                                                                                                    |
-| `ext_test`  | `package`                    | Replays its fixtures as `dupin ext test --json` does and returns the report. It never rewrites them.                                                                                          |
-| `ext_snap`  | `package`, `fixture`, `step` | Renders the panel after a fixture's step as `dupin ext snap` does and returns the PNG as image content, with its `step`, `width`, `height` and `scale`. `fixture` is relative to the package. |
+| Tool         | Arguments                    | What it does                                                                                                                                                                                    |
+| ------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ext_check`  | `package`                    | Loads and compiles the package as `dupin ext check` does and returns its `id`, `name`, `version` and `keyword`.                                                                                 |
+| `ext_run`    | `package`, `query`           | Asks it one query as `dupin ext run --json` does. Its host requests fail as `unavailable`.                                                                                                      |
+| `ext_test`   | `package`                    | Replays its fixtures as `dupin ext test --json` does and returns the report. It never rewrites them.                                                                                            |
+| `ext_render` | `package`, `fixture`, `step` | Renders the panel after a fixture's step as `dupin ext render` does and returns the PNG as image content, with its `step`, `width`, `height` and `scale`. `fixture` is relative to the package. |
 
 `package` is a folder relative to the workspace. Without `--workspace`, these tools aren't listed and calling one is an unknown tool.
 

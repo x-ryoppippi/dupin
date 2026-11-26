@@ -522,7 +522,7 @@ fn clipboard_history_keeps_appending_once_storage_holds_more_than_it_lists() {
 }
 
 #[test]
-fn a_snap_answers_host_requests_from_the_fixture_it_renders() {
+fn a_render_answers_host_requests_from_the_fixture_it_renders() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_root, package) = capable(
         json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["watch"] }),
@@ -670,7 +670,7 @@ fn a_linked_fixture_is_refused() {
 }
 
 #[test]
-fn snap_scripts_type_each_query_and_move_to_each_selection() {
+fn render_scripts_type_each_query_and_move_to_each_selection() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);
     fs::write(

@@ -22,8 +22,8 @@ run: build
 package channel="nightly" identity="-":
     nu scripts/package-app.nu --channel {{ channel }} --identity "{{ identity }}"
 
-snap: build-debug
-    nu scripts/snap.nu
+render: build-debug
+    nu scripts/render.nu
 
 docs-images *args: build-debug
     nu scripts/docs-images.nu {{ args }}

@@ -4,7 +4,7 @@ use driver.nu [
     mentions
     poll
     press
-    snap
+    evidence
     type-text
     wait-frontmost
 ]
@@ -45,7 +45,7 @@ export def system-pane [out: path] {
     if $result.data?.match?.ref_id? == null {
         error make {msg: 'Bluetooth result has no actionable accessibility reference'}
     }
-    snap $out bluetooth-evidence-before
+    evidence $out bluetooth-evidence-before
     let log = $out | path join dupin.log
     cp $log ($out | path join bluetooth-evidence-before-trace.log)
     let failure = try {
@@ -70,10 +70,10 @@ export def system-pane [out: path] {
             --app
             'System Settings'
         )
-        snap --app 'System Settings' $out bluetooth-evidence-after
+        evidence --app 'System Settings' $out bluetooth-evidence-after
         null
     } catch {|error|
-        try { snap --app 'System Settings' $out bluetooth-evidence-failure }
+        try { evidence --app 'System Settings' $out bluetooth-evidence-failure }
         $error
     }
     let trace_failure = try {

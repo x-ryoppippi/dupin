@@ -56,7 +56,7 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 | Settings → Extensions → **Allow**, **Revoke**                     | Allows or revokes one scope. A files or exec scope is allowed here, where you pick the file, folder or program. |
 | `dupin ext install`, `list`, `update`, `remove`, `sync`, `search` | Install and manage packages.                                                                                    |
 | `dupin ext eject NAME`                                            | See [Overriding a built-in](#overriding-a-built-in).                                                            |
-| `dupin ext new`, `dev`, `check`, `run`, `test`, `snap`            | See [Developing and testing extensions](./extension-testing.md).                                                |
+| `dupin ext new`, `dev`, `check`, `run`, `test`, `render`          | See [Developing and testing extensions](./extension-testing.md).                                                |
 
 </details>
 
@@ -437,17 +437,17 @@ dupin ext dev word-count        # keeps extensions/word-count current while you 
 dupin ext run word-count --query 'two words'
 ```
 
-The reference pages cover: the manifest's icons, preferences, modules and TypeScript without a build; the API's catalogues, details, images and limits; capabilities for HTTP, files, programs, storage, clipboard, calendar, windows and more; `dupin ext check`, `run`, `test` and `snap`; and building a bundle, publishing, how installs resolve and check a package, and the installed extensions list.
+The reference pages cover: the manifest's icons, preferences, modules and TypeScript without a build; the API's catalogues, details, images and limits; capabilities for HTTP, files, programs, storage, clipboard, calendar, windows and more; `dupin ext check`, `run`, `test` and `render`; and building a bundle, publishing, how installs resolve and check a package, and the installed extensions list.
 
 </details>
 
-## Testing and snapshots
+## Testing and rendering
 
-`dupin ext test` replays the fixtures in a package's `fixtures/` folder against stated expectations, with host services answered from the fixture instead of this Mac, and `dupin ext snap` renders the panel a fixture produces as a PNG:
+`dupin ext test` replays the fixtures in a package's `fixtures/` folder against stated expectations, with host services answered from the fixture instead of this Mac, and `dupin ext render` renders the panel a fixture produces as a PNG:
 
 ```sh
 dupin ext test greeter
-dupin ext snap greeter greeter/fixtures/search.json search.png
+dupin ext render greeter greeter/fixtures/search.json search.png
 ```
 
-[Developing and testing extensions](./extension-testing.md#testing-and-snapshots) has the commands, the [fixture format](./extension-testing.md#fixtures) and the [MCP tools](./mcp.md#extension-tools) that run them for an agent.
+[Developing and testing extensions](./extension-testing.md#testing-and-rendering) has the commands, the [fixture format](./extension-testing.md#fixtures) and the [MCP tools](./mcp.md#extension-tools) that run them for an agent.

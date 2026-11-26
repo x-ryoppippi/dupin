@@ -1,5 +1,5 @@
-//! `dupin ext test` and `dupin ext snap` as an author runs them: the built executable, which
-//! starts itself as the extension host and, for `snap`, as a headless launcher.
+//! `dupin ext test` and `dupin ext render` as an author runs them: the built executable, which
+//! starts itself as the extension host and, for `render`, as a headless launcher.
 #![cfg(target_os = "macos")]
 
 use std::path::Path;
@@ -29,7 +29,7 @@ fn dimensions(png: &[u8]) -> (u32, u32) {
 }
 
 #[test]
-fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
+fn test_replays_fixtures_and_render_draws_the_same_bytes_every_time() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let root = tempfile::tempdir().unwrap();
     let package = root.path().join("greeter");
@@ -50,7 +50,7 @@ fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
             let png = root.path().join(format!("panel-{run}.png"));
             let output = dupin(&[
                 "ext".as_ref(),
-                "snap".as_ref(),
+                "render".as_ref(),
                 package.as_os_str(),
                 fixture.as_os_str(),
                 png.as_os_str(),
@@ -75,7 +75,7 @@ fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
         .current_dir(root.path())
         .args([
             "ext",
-            "snap",
+            "render",
             "greeter",
             "greeter/fixtures/search.json",
             "query.png",
@@ -103,7 +103,7 @@ fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
 
     let missing = dupin(&[
         "ext".as_ref(),
-        "snap".as_ref(),
+        "render".as_ref(),
         package.as_os_str(),
         fixture.as_os_str(),
         Path::new("unused.png").as_os_str(),
@@ -120,7 +120,7 @@ fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
 /// the package ships as shows it, and never the row Dupin shows while that package isn't
 /// available.
 #[test]
-fn snap_renders_every_bundled_fixture_as_test_replays_it() {
+fn render_draws_every_bundled_fixture_as_test_replays_it() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
     let root = tempfile::tempdir().unwrap();
@@ -136,8 +136,8 @@ fn snap_renders_every_bundled_fixture_as_test_replays_it() {
         .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
         .collect();
     assert!(fixtures.len() > 9, "every bundled package has fixtures");
-    // A snap spends most of its time in headless launchers pacing keys to the wall clock, so
-    // the snaps run side by side, as many at once as there are cores, the most steps first so
+    // A render spends most of its time in headless launchers pacing keys to the wall clock, so
+    // the renders run side by side, as many at once as there are cores, the most steps first so
     // the longest doesn't start last.
     let steps = |fixture: &Path| {
         let stated: Value = serde_json::from_slice(&std::fs::read(fixture).unwrap()).unwrap();
@@ -157,7 +157,7 @@ fn snap_renders_every_bundled_fixture_as_test_replays_it() {
                             return wrong;
                         };
                         let png = root.path().join(format!("panel-{index}.png"));
-                        wrong.extend(snapped_wrong(&bundled, fixture, &png));
+                        wrong.extend(rendered_wrong(&bundled, fixture, &png));
                     }
                 })
             })
@@ -171,13 +171,13 @@ fn snap_renders_every_bundled_fixture_as_test_replays_it() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// What is wrong with the panel `fixture` renders to `png`, if anything: a failed snap, the row
+/// What is wrong with the panel `fixture` renders to `png`, if anything: a failed render, the row
 /// Dupin shows while the package isn't available, or no first row the fixture expects there.
-fn snapped_wrong(bundled: &Path, fixture: &Path, png: &Path) -> Option<String> {
+fn rendered_wrong(bundled: &Path, fixture: &Path, png: &Path) -> Option<String> {
     let package = fixture.parent().unwrap().parent().unwrap();
     let output = dupin(&[
         "ext".as_ref(),
-        "snap".as_ref(),
+        "render".as_ref(),
         package.as_os_str(),
         fixture.as_os_str(),
         png.as_os_str(),
@@ -204,16 +204,16 @@ fn snapped_wrong(bundled: &Path, fixture: &Path, png: &Path) -> Option<String> {
 }
 
 #[test]
-fn snap_opens_views_and_fills_forms_as_the_fixture_does() {
+fn render_opens_views_and_fills_forms_as_the_fixture_does() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/notes-js");
     let fixture = package.join("fixtures/notes.json");
     let root = tempfile::tempdir().unwrap();
-    let snap = |step: &str, run: usize| {
+    let render = |step: &str, run: usize| {
         let png = root.path().join(format!("step-{step}-{run}.png"));
         let output = dupin(&[
             "ext".as_ref(),
-            "snap".as_ref(),
+            "render".as_ref(),
             package.as_os_str(),
             fixture.as_os_str(),
             png.as_os_str(),
@@ -227,14 +227,14 @@ fn snap_opens_views_and_fills_forms_as_the_fixture_does() {
             std::fs::read(&png).unwrap(),
         )
     };
-    let (list, list_png) = snap("1", 0);
-    let (form, form_png) = snap("4", 0);
-    let (detail, _) = snap("12", 0);
+    let (list, list_png) = render("1", 0);
+    let (form, form_png) = render("4", 0);
+    let (detail, _) = render("12", 0);
     assert!(
         form > list,
         "the filled form is taller than the list it opened from"
     );
     assert_ne!(detail, form, "the detail the note opened isn't the form");
     assert!(list_png != form_png);
-    assert!(snap("4", 1).1 == form_png, "two renders of one form differ");
+    assert!(render("4", 1).1 == form_png, "two renders of one form differ");
 }

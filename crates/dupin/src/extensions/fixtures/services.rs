@@ -6,7 +6,7 @@
 //! A `files` scope is bound to a scratch folder holding the fixture's files, and `storage` to
 //! a scratch store sealed with a throwaway key, seeded with the fixture's records.
 //!
-//! The headless launcher `dupin ext snap` starts answers from the same services, so the panel
+//! The headless launcher `dupin ext render` starts answers from the same services, so the panel
 //! it renders is the one `dupin ext test` replays.
 
 use std::collections::BTreeMap;
@@ -333,7 +333,7 @@ impl Replier {
     }
 }
 
-/// Hands the headless launcher `dupin ext snap` starts the fixture it renders, as JSON:
+/// Hands the headless launcher `dupin ext render` starts the fixture it renders, as JSON:
 /// `{ "fixture": <path>, "name": <package name>, "revision": <revision> }`.
 pub(in crate::extensions) const HEADLESS_FIXTURE: &str = "DUPIN_HEADLESS_EXTENSION_FIXTURE";
 
@@ -365,7 +365,7 @@ pub(in crate::extensions) struct Headless {
     played: AtomicBool,
 }
 
-/// The fixture `dupin ext snap` handed this headless launcher, if it handed one. A launcher
+/// The fixture `dupin ext render` handed this headless launcher, if it handed one. A launcher
 /// with a window never reads it.
 pub(in crate::extensions) fn headless() -> Option<&'static Headless> {
     static HEADLESS: OnceLock<Option<Headless>> = OnceLock::new();
@@ -377,7 +377,7 @@ pub(in crate::extensions) fn headless() -> Option<&'static Headless> {
             let handed: HeadlessFixture =
                 serde_json::from_str(&std::env::var(HEADLESS_FIXTURE).ok()?).ok()?;
             Headless::open(handed)
-                .inspect_err(|diagnostic| crate::log::warn(&format!("snap fixture: {diagnostic}")))
+                .inspect_err(|diagnostic| crate::log::warn(&format!("render fixture: {diagnostic}")))
                 .ok()
         })
         .as_ref()
