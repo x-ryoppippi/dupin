@@ -382,7 +382,7 @@ pub(crate) mod fixture {
 
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
     use std::time::Duration;
 
     use super::*;
@@ -408,11 +408,12 @@ pub(crate) mod fixture {
         }
     }
 
-    /// Answers every fetch with `body` after `delay`, recording each request.
+    /// Answers every fetch with `body`, recording each request. While `hold` is set, a fetch
+    /// waits until it receives a message or is cancelled.
     #[derive(Default)]
     pub(crate) struct Http {
         pub(crate) body: String,
-        pub(crate) delay: Mutex<Duration>,
+        pub(crate) hold: Mutex<Option<mpsc::Receiver<()>>>,
         pub(crate) requests: Mutex<Vec<http::Request>>,
         pub(crate) finished: AtomicUsize,
     }
@@ -425,13 +426,12 @@ pub(crate) mod fixture {
             cancel: &http::CancelToken,
         ) -> Result<http::Response, http::HttpError> {
             self.requests.lock().unwrap().push(request.clone());
-            let delay = *self.delay.lock().unwrap();
-            let until = std::time::Instant::now() + delay;
-            while std::time::Instant::now() < until {
-                if cancel.is_cancelled() {
-                    return Err(http::HttpError::Cancelled);
+            if let Some(hold) = &*self.hold.lock().unwrap() {
+                while let Err(mpsc::RecvTimeoutError::Timeout) = hold.recv_timeout(Duration::from_millis(2)) {
+                    if cancel.is_cancelled() {
+                        return Err(http::HttpError::Cancelled);
+                    }
                 }
-                std::thread::sleep(Duration::from_millis(2));
             }
             self.finished.fetch_add(1, Ordering::Relaxed);
             Ok(http::Response {
