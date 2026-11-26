@@ -126,7 +126,7 @@ a:hover .arrow {
 	stroke-width: 1.6;
 }
 
-/* The four design choices (components/docs/DesignChoices.svelte), shared by the home page and the docs. */
+/* The four design choices (components/docs/DesignChoices.svelte) in the docs; the home page lays them out as tiles. */
 .doc-choices {
 	list-style: none;
 	margin: 0;
