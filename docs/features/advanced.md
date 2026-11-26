@@ -1,6 +1,6 @@
 # Advanced composition
 
-`[advanced]` in `config.toml` changes how Dupin's searches are put together: which matcher and sorter a source uses, what the main search also searches, and which actions every row of a kind gets.
+`[advanced]` in `config.toml` changes how Dupin's searches are put together: which matcher and sorter a source uses, what the main search also searches, and which actions every row of a kind gets. This composition follows the model of Shougo Matsushita's [ddu.vim](https://github.com/Shougo/ddu.vim).
 
 ## Open it
 
