@@ -1,0 +1,1162 @@
+{
+	"fixture": 1,
+	"description": "A host ssh can't reach, or that refuses the agent's keys, is fetched no further: only its processes command runs, the row says why and its cached rows stay marked.",
+	"environment": {
+		"now": "2026-11-26T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"files": {
+			"ssh-config": "Host db1 old\n"
+		},
+		"exec": [
+			{
+				"profile": "processes",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-oBatchMode=yes",
+					"-oConnectTimeout=5",
+					"-oServerAliveInterval=5",
+					"-oServerAliveCountMax=2",
+					"-oStrictHostKeyChecking=yes",
+					"-oUpdateHostKeys=no",
+					"-oClearAllForwardings=yes",
+					"-oPermitLocalCommand=no",
+					"-oRemoteCommand=none",
+					"-oControlMaster=no",
+					"-oLogLevel=ERROR",
+					"db1",
+					"--",
+					"ps",
+					"-A",
+					"-o",
+					"pid=",
+					"-o",
+					"user=",
+					"-o",
+					"pcpu=",
+					"-o",
+					"pmem=",
+					"-o",
+					"etime=",
+					"-o",
+					"args="
+				],
+				"status": 255,
+				"stdout": "",
+				"stderr": "ssh: connect to host 10.0.0.12 port 22: Operation timed out\r\n"
+			},
+			{
+				"profile": "processes",
+				"args": [
+					"-n",
+					"-T",
+					"-a",
+					"-x",
+					"-oBatchMode=yes",
+					"-oConnectTimeout=5",
+					"-oServerAliveInterval=5",
+					"-oServerAliveCountMax=2",
+					"-oStrictHostKeyChecking=yes",
+					"-oUpdateHostKeys=no",
+					"-oClearAllForwardings=yes",
+					"-oPermitLocalCommand=no",
+					"-oRemoteCommand=none",
+					"-oControlMaster=no",
+					"-oLogLevel=ERROR",
+					"old",
+					"--",
+					"ps",
+					"-A",
+					"-o",
+					"pid=",
+					"-o",
+					"user=",
+					"-o",
+					"pcpu=",
+					"-o",
+					"pmem=",
+					"-o",
+					"etime=",
+					"-o",
+					"args="
+				],
+				"status": 255,
+				"stdout": "",
+				"stderr": "deploy@old: Permission denied (publickey).\r\n"
+			}
+		],
+		"storage": [
+			{
+				"allowTerminate": false,
+				"dirs": [],
+				"enabled": true,
+				"host": "db1",
+				"kind": "host",
+				"lines": 50,
+				"logs": [],
+				"units": []
+			},
+			{
+				"allowTerminate": false,
+				"dirs": [],
+				"enabled": true,
+				"host": "old",
+				"kind": "host",
+				"lines": 50,
+				"logs": [],
+				"units": []
+			},
+			{
+				"fetchedAt": 1795680000000,
+				"host": "db1",
+				"kind": "probe",
+				"probe": "ps",
+				"rows": [
+					{
+						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+						"cpu": "0.0",
+						"elapsed": "41-03:11:58",
+						"mem": "0.0",
+						"pid": "812",
+						"user": "root"
+					}
+				],
+				"state": "ok",
+				"truncated": false
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "db1",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795680000000
+							},
+							{
+								"tag": "online"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Show db1"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Refresh db1"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "db1",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "db1"
+									},
+									"view": "configure"
+								},
+								"title": "Configure db1…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "db1"
+								},
+								{
+									"label": "State",
+									"text": "online"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "—"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:db1",
+						"subtitle": "1 process",
+						"title": "db1"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795680000000
+							}
+						],
+						"actions": [
+							{
+								"copy": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"title": "Copy"
+							},
+							{
+								"copy": "812",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795680000000,
+										"host": "db1",
+										"index": 0,
+										"record": "767d68c9166e985f2f5dc072b0b9c99f"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "db1"
+								},
+								{
+									"label": "PID",
+									"text": "812"
+								},
+								{
+									"label": "User",
+									"text": "root"
+								},
+								{
+									"label": "CPU",
+									"text": "0.0%"
+								},
+								{
+									"label": "Memory",
+									"text": "0.0%"
+								},
+								{
+									"label": "Running for",
+									"text": "41-03:11:58"
+								},
+								{
+									"label": "Command",
+									"text": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:db1:812",
+						"subtitle": "db1 · PID 812 · root · 0.0% CPU · 0.0% memory · up 41-03:11:58",
+						"title": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Refresh db1",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "refresh",
+						"data": {
+							"host": "db1"
+						}
+					}
+				},
+				"invalidated": true,
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							},
+							{
+								"state": "offline"
+							},
+							{
+								"tag": "unreachable"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Show db1"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Refresh db1"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "db1",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "db1"
+									},
+									"view": "configure"
+								},
+								"title": "Configure db1…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "db1"
+								},
+								{
+									"label": "State",
+									"text": "unreachable"
+								},
+								{
+									"label": "Last error",
+									"text": "ssh: connect to host 10.0.0.12 port 22: Operation timed out"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "—"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:db1",
+						"subtitle": "ssh: connect to host 10.0.0.12 port 22: Operation timed out",
+						"title": "db1"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795680000000
+							},
+							{
+								"state": "offline"
+							}
+						],
+						"actions": [
+							{
+								"copy": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"title": "Copy"
+							},
+							{
+								"copy": "812",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795680000000,
+										"host": "db1",
+										"index": 0,
+										"record": "0bd257561ea91a274600f62da35b9018"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "db1"
+								},
+								{
+									"label": "PID",
+									"text": "812"
+								},
+								{
+									"label": "User",
+									"text": "root"
+								},
+								{
+									"label": "CPU",
+									"text": "0.0%"
+								},
+								{
+									"label": "Memory",
+									"text": "0.0%"
+								},
+								{
+									"label": "Running for",
+									"text": "41-03:11:58"
+								},
+								{
+									"label": "Command",
+									"text": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:db1:812",
+						"subtitle": "db1 · PID 812 · root · 0.0% CPU · 0.0% memory · up 41-03:11:58",
+						"title": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+					}
+				],
+				"selected": 0,
+				"storage": [
+					{
+						"allowTerminate": false,
+						"dirs": [],
+						"enabled": true,
+						"host": "db1",
+						"kind": "host",
+						"lines": 50,
+						"logs": [],
+						"units": []
+					},
+					{
+						"allowTerminate": false,
+						"dirs": [],
+						"enabled": true,
+						"host": "old",
+						"kind": "host",
+						"lines": 50,
+						"logs": [],
+						"units": []
+					},
+					{
+						"fetchedAt": 1795680000000,
+						"host": "db1",
+						"kind": "probe",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"cpu": "0.0",
+								"elapsed": "41-03:11:58",
+								"mem": "0.0",
+								"pid": "812",
+								"user": "root"
+							}
+						],
+						"state": "ok",
+						"truncated": false
+					},
+					{
+						"fetchedAt": 1795680000000,
+						"host": "db1",
+						"kind": "probe",
+						"message": "ssh: connect to host 10.0.0.12 port 22: Operation timed out",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"cpu": "0.0",
+								"elapsed": "41-03:11:58",
+								"mem": "0.0",
+								"pid": "812",
+								"user": "root"
+							}
+						],
+						"state": "unreachable",
+						"triedAt": 1795683600000
+					}
+				],
+				"toasts": ["db1: ssh: connect to host 10.0.0.12 port 22: Operation timed out"]
+			}
+		},
+		{
+			"query": "db1",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							},
+							{
+								"state": "offline"
+							},
+							{
+								"tag": "unreachable"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Show db1"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Refresh db1"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "db1",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "db1"
+									},
+									"view": "configure"
+								},
+								"title": "Configure db1…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "db1"
+								},
+								{
+									"label": "State",
+									"text": "unreachable"
+								},
+								{
+									"label": "Last error",
+									"text": "ssh: connect to host 10.0.0.12 port 22: Operation timed out"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "—"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:db1",
+						"subtitle": "ssh: connect to host 10.0.0.12 port 22: Operation timed out",
+						"title": "db1"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795680000000
+							},
+							{
+								"state": "offline"
+							}
+						],
+						"actions": [
+							{
+								"copy": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"title": "Copy"
+							},
+							{
+								"copy": "812",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795680000000,
+										"host": "db1",
+										"index": 0,
+										"record": "0bd257561ea91a274600f62da35b9018"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "db1"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "db1"
+								},
+								{
+									"label": "PID",
+									"text": "812"
+								},
+								{
+									"label": "User",
+									"text": "root"
+								},
+								{
+									"label": "CPU",
+									"text": "0.0%"
+								},
+								{
+									"label": "Memory",
+									"text": "0.0%"
+								},
+								{
+									"label": "Running for",
+									"text": "41-03:11:58"
+								},
+								{
+									"label": "Command",
+									"text": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:db1:812",
+						"subtitle": "db1 · PID 812 · root · 0.0% CPU · 0.0% memory · up 41-03:11:58",
+						"title": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "old",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "not fetched"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Show old"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Refresh old"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "old",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "old"
+									},
+									"view": "configure"
+								},
+								"title": "Configure old…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "old"
+								},
+								{
+									"label": "State",
+									"text": "not fetched"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "—"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:old",
+						"subtitle": "Not fetched yet: ⌘↩ fetches it",
+						"title": "old"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Refresh old",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "refresh",
+						"data": {
+							"host": "old"
+						}
+					}
+				},
+				"invalidated": true,
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							},
+							{
+								"state": "offline"
+							},
+							{
+								"tag": "auth failed"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Show old"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Refresh old"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "old",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "old"
+									},
+									"view": "configure"
+								},
+								"title": "Configure old…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "old"
+								},
+								{
+									"label": "State",
+									"text": "auth failed"
+								},
+								{
+									"label": "Last error",
+									"text": "SSH refused the keys your agent offered"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "—"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:old",
+						"subtitle": "SSH refused the keys your agent offered",
+						"title": "old"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							},
+							{
+								"state": "offline"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Refresh old"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"icon": "sf:exclamationmark.triangle",
+						"id": "problem:old:5e4e6e94",
+						"subtitle": "old",
+						"title": "Processes: SSH refused the keys your agent offered"
+					}
+				],
+				"selected": 0,
+				"storage": [
+					{
+						"allowTerminate": false,
+						"dirs": [],
+						"enabled": true,
+						"host": "db1",
+						"kind": "host",
+						"lines": 50,
+						"logs": [],
+						"units": []
+					},
+					{
+						"allowTerminate": false,
+						"dirs": [],
+						"enabled": true,
+						"host": "old",
+						"kind": "host",
+						"lines": 50,
+						"logs": [],
+						"units": []
+					},
+					{
+						"fetchedAt": 1795680000000,
+						"host": "db1",
+						"kind": "probe",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"cpu": "0.0",
+								"elapsed": "41-03:11:58",
+								"mem": "0.0",
+								"pid": "812",
+								"user": "root"
+							}
+						],
+						"state": "ok",
+						"truncated": false
+					},
+					{
+						"fetchedAt": 1795680000000,
+						"host": "db1",
+						"kind": "probe",
+						"message": "ssh: connect to host 10.0.0.12 port 22: Operation timed out",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"cpu": "0.0",
+								"elapsed": "41-03:11:58",
+								"mem": "0.0",
+								"pid": "812",
+								"user": "root"
+							}
+						],
+						"state": "unreachable",
+						"triedAt": 1795683600000
+					},
+					{
+						"fetchedAt": 1795683600000,
+						"host": "old",
+						"kind": "probe",
+						"message": "SSH refused the keys your agent offered",
+						"probe": "ps",
+						"rows": [],
+						"state": "auth"
+					}
+				],
+				"toasts": ["old: SSH refused the keys your agent offered"]
+			}
+		},
+		{
+			"query": "old",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							},
+							{
+								"state": "offline"
+							},
+							{
+								"tag": "auth failed"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "scope",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Show old"
+							},
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Refresh old"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"copy": "old",
+								"title": "Copy Host Name"
+							},
+							{
+								"push": {
+									"state": {
+										"host": "old"
+									},
+									"view": "configure"
+								},
+								"title": "Configure old…"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "old"
+								},
+								{
+									"label": "State",
+									"text": "auth failed"
+								},
+								{
+									"label": "Last error",
+									"text": "SSH refused the keys your agent offered"
+								},
+								{
+									"label": "Log units",
+									"text": "—"
+								},
+								{
+									"label": "Log files",
+									"text": "—"
+								},
+								{
+									"label": "Folders",
+									"text": "—"
+								},
+								{
+									"label": "Terminate",
+									"text": "Not allowed"
+								}
+							]
+						},
+						"icon": "sf:server.rack",
+						"id": "host:old",
+						"subtitle": "SSH refused the keys your agent offered",
+						"title": "old"
+					},
+					{
+						"accessories": [
+							{
+								"freshness": 1795683600000
+							},
+							{
+								"state": "offline"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "refresh",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Refresh old"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "old"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"icon": "sf:exclamationmark.triangle",
+						"id": "problem:old:5e4e6e94",
+						"subtitle": "old",
+						"title": "Processes: SSH refused the keys your agent offered"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

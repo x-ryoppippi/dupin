@@ -429,6 +429,10 @@ pub enum Scope {
         /// The most output it hands back per stream, when that is more than the default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output_bytes: Option<u32>,
+        /// The program also receives `SSH_AUTH_SOCK`, so it can use the keys the user's SSH agent
+        /// holds.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ssh_agent: bool,
     },
     Script {
         name: ScopeName,
@@ -517,6 +521,7 @@ impl Scope {
                     program,
                     catalogue,
                     output_bytes,
+                    ssh_agent,
                 },
                 Self::Exec {
                     name: n,
@@ -525,6 +530,7 @@ impl Scope {
                     program: p,
                     catalogue: c,
                     output_bytes: b,
+                    ssh_agent: s,
                 },
             ) => {
                 name == n
@@ -532,6 +538,7 @@ impl Scope {
                     && program == p
                     && (*output || !o)
                     && (*catalogue || !c)
+                    && (*ssh_agent || !s)
                     && output_limit(*output_bytes) >= output_limit(*b)
             }
             (Self::Script { name, output }, Self::Script { name: n, output: o }) => {
@@ -644,6 +651,7 @@ impl fmt::Display for Scope {
                 program,
                 catalogue,
                 output_bytes,
+                ssh_agent,
             } => {
                 match program {
                     Some(program) => write!(f, "run {program}")?,
@@ -652,6 +660,9 @@ impl fmt::Display for Scope {
                 for (index, arg) in args.iter().enumerate() {
                     f.write_str(if index == 0 { " with " } else { " " })?;
                     write!(f, "{arg:?}")?;
+                }
+                if *ssh_agent {
+                    f.write_str(", using the keys your SSH agent holds,")?;
                 }
                 match (output, output_bytes) {
                     (false, _) => {}

@@ -221,7 +221,7 @@ export async function search(query) {
 <details>
 <summary>Profiles, results and an example</summary>
 
-Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr, each up to `outputBytes` (64 KiB unless declared, 1 MiB at most). `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`.
+Each profile's `{input}` placeholders take one line of text. A script needs no pick. `output: true` asks to receive stdout and stderr, each up to `outputBytes` (64 KiB unless declared, 1 MiB at most), and `sshAgent: true` hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys; the extension never sees the socket or the keys. `exec.run` returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`.
 
 | Profile field | Value                                                                                                                                                                                                                                                                                                       |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -230,6 +230,7 @@ Each profile's `{input}` placeholders take one line of text. A script needs no p
 | `outputBytes` | With `output`, the most of each stream it receives: 1 byte to 1 MiB, 64 KiB without it.                                                                                                                                                                                                                     |
 | `program`     | A program of macOS's own, in `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/libexec` or `/System` outside `/System/Volumes`, which System Integrity Protection keeps from being replaced. Consent names it, and you pick nothing. A bundled extension that ships with it holds the profile from the start. |
 | `catalogue`   | `true` lets the profile run when Dupin asks for the extension's [catalogue](./extension-api.md#itemsctx), without an action of yours, so a list of what a program reports refreshes on its own. Its `search`, views and event handlers still can't run it, and an action still can.                         |
+| `sshAgent`    | `true` hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys.                                                                                                                                                                                                                          |
 
 A catalogue profile is how an extension lists what a program such as `ps` reports every few seconds while you look at it, without running a program as you type: Dupin asks for the catalogue on first use and then in the background each time its `ttl` passes.
 

@@ -1,0 +1,226 @@
+{
+	"name": "remote",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Remote",
+		"keyword": "remote",
+		"icon": "sf:server.rack",
+		"main": "main.ts",
+		"match": "words",
+		"capabilities": {
+			"files": {
+				"ssh-config": {
+					"kind": "file",
+					"access": [
+						"read"
+					]
+				},
+				"ssh-include": {
+					"kind": "directory",
+					"access": [
+						"read",
+						"list"
+					]
+				}
+			},
+			"exec": {
+				"processes": {
+					"args": [
+						"-n",
+						"-T",
+						"-a",
+						"-x",
+						"-oBatchMode=yes",
+						"-oConnectTimeout=5",
+						"-oServerAliveInterval=5",
+						"-oServerAliveCountMax=2",
+						"-oStrictHostKeyChecking=yes",
+						"-oUpdateHostKeys=no",
+						"-oClearAllForwardings=yes",
+						"-oPermitLocalCommand=no",
+						"-oRemoteCommand=none",
+						"-oControlMaster=no",
+						"-oLogLevel=ERROR",
+						"{host}",
+						"--",
+						"ps",
+						"-A",
+						"-o",
+						"pid=",
+						"-o",
+						"user=",
+						"-o",
+						"pcpu=",
+						"-o",
+						"pmem=",
+						"-o",
+						"etime=",
+						"-o",
+						"args="
+					],
+					"output": true,
+					"sshAgent": true
+				},
+				"ports": {
+					"args": [
+						"-n",
+						"-T",
+						"-a",
+						"-x",
+						"-oBatchMode=yes",
+						"-oConnectTimeout=5",
+						"-oServerAliveInterval=5",
+						"-oServerAliveCountMax=2",
+						"-oStrictHostKeyChecking=yes",
+						"-oUpdateHostKeys=no",
+						"-oClearAllForwardings=yes",
+						"-oPermitLocalCommand=no",
+						"-oRemoteCommand=none",
+						"-oControlMaster=no",
+						"-oLogLevel=ERROR",
+						"{host}",
+						"--",
+						"ss",
+						"-H",
+						"-l",
+						"-n",
+						"-t",
+						"-u",
+						"-p"
+					],
+					"output": true,
+					"sshAgent": true
+				},
+				"journal": {
+					"args": [
+						"-n",
+						"-T",
+						"-a",
+						"-x",
+						"-oBatchMode=yes",
+						"-oConnectTimeout=5",
+						"-oServerAliveInterval=5",
+						"-oServerAliveCountMax=2",
+						"-oStrictHostKeyChecking=yes",
+						"-oUpdateHostKeys=no",
+						"-oClearAllForwardings=yes",
+						"-oPermitLocalCommand=no",
+						"-oRemoteCommand=none",
+						"-oControlMaster=no",
+						"-oLogLevel=ERROR",
+						"{host}",
+						"--",
+						"journalctl",
+						"--no-pager",
+						"-q",
+						"-o",
+						"short-iso",
+						"-n",
+						"{lines}",
+						"-u",
+						"{unit}"
+					],
+					"output": true,
+					"sshAgent": true
+				},
+				"log-file": {
+					"args": [
+						"-n",
+						"-T",
+						"-a",
+						"-x",
+						"-oBatchMode=yes",
+						"-oConnectTimeout=5",
+						"-oServerAliveInterval=5",
+						"-oServerAliveCountMax=2",
+						"-oStrictHostKeyChecking=yes",
+						"-oUpdateHostKeys=no",
+						"-oClearAllForwardings=yes",
+						"-oPermitLocalCommand=no",
+						"-oRemoteCommand=none",
+						"-oControlMaster=no",
+						"-oLogLevel=ERROR",
+						"{host}",
+						"--",
+						"tail",
+						"-n",
+						"{lines}",
+						"--",
+						"{path}"
+					],
+					"output": true,
+					"sshAgent": true
+				},
+				"files": {
+					"args": [
+						"-n",
+						"-T",
+						"-a",
+						"-x",
+						"-oBatchMode=yes",
+						"-oConnectTimeout=5",
+						"-oServerAliveInterval=5",
+						"-oServerAliveCountMax=2",
+						"-oStrictHostKeyChecking=yes",
+						"-oUpdateHostKeys=no",
+						"-oClearAllForwardings=yes",
+						"-oPermitLocalCommand=no",
+						"-oRemoteCommand=none",
+						"-oControlMaster=no",
+						"-oLogLevel=ERROR",
+						"{host}",
+						"--",
+						"find",
+						"{dir}",
+						"-xdev",
+						"-mindepth",
+						"1",
+						"-maxdepth",
+						"2",
+						"-type",
+						"f"
+					],
+					"output": true,
+					"sshAgent": true
+				},
+				"terminate": {
+					"args": [
+						"-n",
+						"-T",
+						"-a",
+						"-x",
+						"-oBatchMode=yes",
+						"-oConnectTimeout=5",
+						"-oServerAliveInterval=5",
+						"-oServerAliveCountMax=2",
+						"-oStrictHostKeyChecking=yes",
+						"-oUpdateHostKeys=no",
+						"-oClearAllForwardings=yes",
+						"-oPermitLocalCommand=no",
+						"-oRemoteCommand=none",
+						"-oControlMaster=no",
+						"-oLogLevel=ERROR",
+						"{host}",
+						"--",
+						"kill",
+						"-s",
+						"TERM",
+						"{pid}"
+					],
+					"sshAgent": true
+				},
+				"terminal": {
+					"args": [
+						"-a",
+						"{app}",
+						"ssh://{host}"
+					]
+				}
+			},
+			"storage": {
+				"quotaBytes": 16777216
+			}
+		}
+	}
+}

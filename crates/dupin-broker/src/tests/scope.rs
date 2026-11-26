@@ -107,17 +107,23 @@ fn an_approval_covers_the_same_or_a_narrower_declaration_only() {
             .covers(&files(FilesKind::Directory, &[FilesAccess::Read]))
     );
 
-    let exec = |args: &[&str], output| Scope::Exec {
+    let exec = |args: &[&str], output, ssh_agent| Scope::Exec {
         name: name("git"),
         args: args.iter().map(|arg| arg.to_string()).collect(),
         output,
         program: None,
         catalogue: false,
         output_bytes: None,
+        ssh_agent,
     };
-    assert!(exec(&["status"], true).covers(&exec(&["status"], false)));
-    assert!(!exec(&["status"], false).covers(&exec(&["status"], true)));
-    assert!(!exec(&["status"], true).covers(&exec(&["push"], true)));
+    assert!(exec(&["status"], true, false).covers(&exec(&["status"], false, false)));
+    assert!(!exec(&["status"], false, false).covers(&exec(&["status"], true, false)));
+    assert!(!exec(&["status"], true, false).covers(&exec(&["push"], true, false)));
+    assert!(exec(&["status"], false, true).covers(&exec(&["status"], false, false)));
+    assert!(
+        !exec(&["status"], false, false).covers(&exec(&["status"], false, true)),
+        "handing over the SSH agent widens the profile"
+    );
 
     let named = |program: Option<&str>, catalogue, output_bytes| Scope::Exec {
         name: name("ps"),
@@ -126,6 +132,7 @@ fn an_approval_covers_the_same_or_a_narrower_declaration_only() {
         program: program.map(str::to_owned),
         catalogue,
         output_bytes,
+        ssh_agent: false,
     };
     let ps = Some("/bin/ps");
     assert!(named(ps, true, None).covers(&named(ps, false, None)));
@@ -259,6 +266,7 @@ fn exec_consent_shows_where_each_argument_starts_and_ends() {
             program: None,
             catalogue: false,
             output_bytes: None,
+            ssh_agent: false,
         }
         .to_string()
     };
@@ -274,10 +282,24 @@ fn exec_consent_shows_where_each_argument_starts_and_ends() {
         program: Some("/bin/ps".into()),
         catalogue: true,
         output_bytes: Some(1_048_576),
+        ssh_agent: false,
     };
     assert_eq!(
         named.to_string(),
         "run /bin/ps with \"-ax\" and read up to 1048576 bytes of its output, also when Dupin asks it for its list, without an action of yours"
+    );
+    let agent = Scope::Exec {
+        name: ScopeName::new("ssh").unwrap(),
+        args: vec!["{host}".into()],
+        output: true,
+        ssh_agent: true,
+        program: None,
+        catalogue: false,
+        output_bytes: None,
+    };
+    assert_eq!(
+        agent.to_string(),
+        "run the program you pick for “ssh” with \"{host}\", using the keys your SSH agent holds, and read its output"
     );
 }
 

@@ -583,7 +583,8 @@ declare module 'dupin' {
 		 * of text each, run with a program the user picks, or with `program`, one of macOS's own
 		 * in `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/libexec` or `/System`; or
 		 * `@script:<name>` for one of the user's script commands. `output` asks to receive stdout
-		 * and stderr, each up to `outputBytes` (64 KiB unless declared, 1 MiB at most).
+		 * and stderr, each up to `outputBytes` (64 KiB unless declared, 1 MiB at most); `sshAgent`
+		 * hands the program `SSH_AUTH_SOCK`, so `ssh` can use the user's agent.
 		 * `catalogue` lets the profile run when Dupin asks for the package's catalogue, without
 		 * an action of the user's; anywhere else it still needs one.
 		 */
@@ -595,6 +596,7 @@ declare module 'dupin' {
 				program?: string;
 				outputBytes?: number;
 				catalogue?: boolean;
+				sshAgent?: boolean;
 			}
 		>;
 		/**

@@ -20,6 +20,7 @@ fn every_capability_parses_into_its_scopes() {
                 program: None,
                 catalogue: false,
                 output_bytes: None,
+                ssh_agent: false,
             },
             Scope::Script {
                 name: name("open-in-zed"),
@@ -193,6 +194,32 @@ fn exec_profiles_need_well_formed_argument_templates() {
         problem(json!({ "exec": { "run": { "args": [], "output": "yes" } } })),
         ("invalid-type", "capabilities.exec.run.output".into())
     );
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "sshAgent": "yes" } } })),
+        ("invalid-type", "capabilities.exec.run.sshAgent".into())
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "@script:open": { "sshAgent": true } } })),
+        ("unknown-field", "capabilities.exec.@script:open.sshAgent".into()),
+        "a script already runs with Dupin's own environment"
+    );
+}
+
+#[test]
+fn an_exec_profile_may_ask_for_the_ssh_agent() {
+    let parsed = caps(json!({ "exec": { "ssh": { "args": ["{host}"], "sshAgent": true } } }));
+    assert_eq!(
+        parsed.scopes().cloned().collect::<Vec<_>>(),
+        [Scope::Exec {
+            name: name("ssh"),
+            args: vec!["{host}".into()],
+            output: false,
+            ssh_agent: true,
+            program: None,
+            catalogue: false,
+            output_bytes: None,
+        }]
+    );
 }
 
 #[test]
@@ -213,6 +240,7 @@ fn a_profile_names_only_a_program_of_macos_own_and_bounds_only_output_it_reads()
             program: Some("/bin/ps".into()),
             catalogue: true,
             output_bytes: Some(1_048_576),
+            ssh_agent: false,
         })
     );
     for bad in [

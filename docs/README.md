@@ -48,6 +48,7 @@ Shipped with Dupin as extensions, each one yours to eject and change.
 - [Web searches](./features/web-searches.md)
 - [Maps](./features/maps.md)
 - [Window management](./features/window-management.md)
+- [Remote](./features/remote.md)
 
 ## Your own extensions
 

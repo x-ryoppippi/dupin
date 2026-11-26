@@ -467,13 +467,21 @@ impl Parser {
             let Some(object) = self.fields(
                 entry,
                 &field,
-                &["args", "output", "program", "catalogue", "outputBytes"],
+                &[
+                    "args",
+                    "output",
+                    "program",
+                    "catalogue",
+                    "outputBytes",
+                    "sshAgent",
+                ],
                 &["args"],
             ) else {
                 continue;
             };
             let output = self.boolean(object.get("output"), &format!("{field}.output"));
             let catalogue = self.boolean(object.get("catalogue"), &format!("{field}.catalogue"));
+            let ssh_agent = self.boolean(object.get("sshAgent"), &format!("{field}.sshAgent"));
             let args = object
                 .get("args")
                 .and_then(|args| self.args(args, &format!("{field}.args")));
@@ -510,6 +518,7 @@ impl Parser {
                     program,
                     catalogue,
                     output_bytes,
+                    ssh_agent,
                 });
             }
         }

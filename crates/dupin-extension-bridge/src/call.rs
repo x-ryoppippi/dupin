@@ -1067,14 +1067,7 @@ fn profile(permit: &Permit, script: bool) -> Result<exec::Profile, Failure> {
             },
         )
         .map_err(unavailable),
-        Scope::Exec {
-            name,
-            args,
-            output,
-            program,
-            output_bytes,
-            ..
-        } if !script => {
+        scope @ Scope::Exec { program, .. } if !script => {
             let target = match program {
                 Some(program) => std::path::PathBuf::from(program),
                 None => permit
@@ -1082,39 +1075,58 @@ fn profile(permit: &Permit, script: bool) -> Result<exec::Profile, Failure> {
                     .ok_or_else(|| Failure::new("failed", "no program was picked for the profile"))?
                     .to_path_buf(),
             };
-            let inputs = args
-                .iter()
-                .filter_map(|arg| placeholder(arg))
-                .map(|name| {
-                    (
-                        name,
-                        exec::Input {
-                            kind: exec::InputKind::Text {
-                                max_bytes: MAX_INPUT_BYTES,
-                                multiline: false,
-                                option_like: false,
-                            },
-                            required: true,
-                        },
-                    )
-                })
-                .collect();
-            let template: Vec<&str> = args.iter().map(String::as_str).collect();
-            exec::Profile::new(
-                name.as_str(),
-                exec::Target::Executable(target),
-                &template,
-                inputs,
-                exec::Options {
-                    return_output: *output,
-                    output_bytes: output_bytes.map_or(exec::DEFAULT_OUTPUT_BYTES, |bytes| bytes as usize),
-                    ..exec::Options::default()
-                },
-            )
-            .map_err(unavailable)
+            exec_profile(scope, &target).map_err(unavailable)
         }
         _ => Err(Failure::new("failed", "the permit doesn't name a program")),
     }
+}
+
+/// The profile an `exec` scope declares, run with the program picked for it. Its placeholders
+/// become required one-line text inputs.
+pub fn exec_profile(scope: &Scope, program: &std::path::Path) -> Result<exec::Profile, exec::ExecError> {
+    let Scope::Exec {
+        name,
+        args,
+        output,
+        ssh_agent,
+        output_bytes,
+        ..
+    } = scope
+    else {
+        return Err(exec::ExecError::InvalidProfile(
+            "the scope doesn't run a program".into(),
+        ));
+    };
+    let inputs = args
+        .iter()
+        .filter_map(|arg| placeholder(arg))
+        .map(|name| {
+            (
+                name,
+                exec::Input {
+                    kind: exec::InputKind::Text {
+                        max_bytes: MAX_INPUT_BYTES,
+                        multiline: false,
+                        option_like: false,
+                    },
+                    required: true,
+                },
+            )
+        })
+        .collect();
+    let template: Vec<&str> = args.iter().map(String::as_str).collect();
+    exec::Profile::new(
+        name.as_str(),
+        exec::Target::Executable(program.to_path_buf()),
+        &template,
+        inputs,
+        exec::Options {
+            return_output: *output,
+            ssh_agent: *ssh_agent,
+            output_bytes: output_bytes.map_or(exec::DEFAULT_OUTPUT_BYTES, |bytes| bytes as usize),
+            ..exec::Options::default()
+        },
+    )
 }
 
 /// The input an argument template element names, as in `--count={count}`.
