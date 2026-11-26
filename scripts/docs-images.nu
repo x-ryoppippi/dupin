@@ -16,6 +16,10 @@ export const CLIP_FPS = 10
 const CLIP_HEIGHT = 720
 # Room below the panel for the captions, so they never cover a row.
 export const CAPTION_SPACE = 60
+# How tall the website's home demo frame is, in points, for a width of 680. A home clip is at
+# least this tall, so a backdrop shader, which draws only inside the panel, never leaves the
+# frame short of it.
+const HOME_FRAME_HEIGHT = 578
 # How a clip's steps are paced, in seconds.
 const CLIP_START = 0.6
 const CLIP_TYPING = 0.12
@@ -382,7 +386,8 @@ def render-clip [
         let video = if ($clip.video? | default false) {
             {poster: (poster-path $clip $theme), background: ($clip.background? | default "#000000")}
         }
-        finish-clip $pngs $captions $out ($tmp | path join $"($name)-captions") $scale $video
+        let min_height = if $clip.page == home { $HOME_FRAME_HEIGHT * $scale | math round }
+        finish-clip $pngs $captions $out ($tmp | path join $"($name)-captions") $scale $video $min_height
         [$out] | append ($video | get --optional poster | default [])
     } | flatten
 }
@@ -398,6 +403,7 @@ def finish-clip [
     folder: path
     scale: number
     video?: record
+    min_height?: number
 ]: nothing -> nothing {
     let bottom = ^magick ...$pngs -background none -layers merge -format "%@" info: | parse "{w}x{h}+{x}+{y}" | first | ($in.h | into int) + ($in.y | into int)
     let width = ^magick identify -format "%w" ($pngs | first) | into int
@@ -407,7 +413,10 @@ def finish-clip [
         $CAPTION_SPACE * $scale | math round
     }
     # H.264 takes only even sides.
-    let height = ($bottom + $space + 1) // 2 * 2
+    let height = ([
+        ($bottom + $space + 1)
+        ($min_height | default 0)
+    ] | math max) // 2 * 2
     ^magick mogrify -gravity north -background none -crop $"($width)x($bottom)+0+0" +repage -extent $"($width)x($height)" ...$pngs
     if $captions != null {
         caption $pngs $captions $folder $scale

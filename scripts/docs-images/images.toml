@@ -505,7 +505,7 @@ backdrop = "flow"
 themes = ["dark"]
 scale = 2
 video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
 
 [[clips]]
 page = "home"
@@ -514,7 +514,7 @@ backdrop = "shaders/aurora.wgsl"
 themes = ["dark"]
 scale = 2
 video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
 
 [[clips]]
 page = "home"
@@ -523,7 +523,7 @@ backdrop = "shaders/embers.wgsl"
 themes = ["dark"]
 scale = 2
 video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
 
 [[clips]]
 page = "home"
@@ -532,7 +532,7 @@ backdrop = "shaders/snow.wgsl"
 themes = ["dark"]
 scale = 2
 video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
 
 [[clips]]
 page = "home"
@@ -541,4 +541,4 @@ backdrop = "shaders/matrix.wgsl"
 themes = ["dark"]
 scale = 2
 video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
