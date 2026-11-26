@@ -32,6 +32,8 @@
             # Caption and encode the documentation clips scripts/docs-images.nu renders.
             imagemagick
             libwebp
+            # Encodes the website's clips as MP4.
+            ffmpeg-headless
           ]
           ++ config.pre-commit.settings.enabledPackages;
         # The captions' typeface, the same on every Mac.

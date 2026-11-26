@@ -1,5 +1,7 @@
 # Using Dupin
 
+Why Dupin works this way: [Philosophy](./philosophy.md).
+
 Dupin runs in the background with no Dock icon or menu bar. Press its hotkey (⌘Space by default; see [Configuration](./configuration.md)) to show the panel, type, and press ↩. Press the hotkey again, Esc, or click elsewhere to hide it.
 
 <picture>

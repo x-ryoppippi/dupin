@@ -15,7 +15,8 @@ const VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-
 const MAX_MESSAGE: usize = control::MAX_FRAME;
 const MAX_CONFIG: usize = 64 * 1024;
 const INSTRUCTIONS: &str = "Dupin is a macOS launcher. These tools read and validate its config.toml and show its panel; \
-     open_panel and pick need the launcher running. They never write configuration, run scripts or open files. \
+     open_panel and pick need the launcher running, as do the snapshot tools, which only read saved snapshots or show \
+     their window. They never write configuration, run scripts or open files. \
      Started with --workspace, ext_check, ext_run, ext_test and ext_snap check, run, replay the fixtures of and render \
      extension packages in that folder, offline and without writing to it.";
 
@@ -417,6 +418,36 @@ fn tools(workspace: bool) -> Vec<Value> {
             },
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
         }),
+        json!({
+            "name": "list_snapshots",
+            "title": "List snapshots",
+            "description": "The saved snapshots' metadata, newest first, as `dupin snapshots list --json` prints it: id, saved_at (seconds since the epoch), mode, title and query, with `truncated` and any storage `problem`. Needs the launcher running.",
+            "inputSchema": none,
+            "annotations": read_only,
+        }),
+        json!({
+            "name": "read_snapshot",
+            "title": "Read a snapshot",
+            "description": "The saved content of one snapshot, as the Snapshots window shows it: its metadata and `views`, each a `text` (title, subtitle), `detail` (title, body) or `pair` (source, result). Views that don't fit are left out, with `truncated` and `omitted_views` saying so. Never runs the snapshot's actions. Needs the launcher running.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"id": {"type": "string", "description": "A snapshot's id, from list_snapshots.", "minLength": 1, "maxLength": 128}},
+                "required": ["id"],
+                "additionalProperties": false,
+            },
+            "annotations": read_only,
+        }),
+        json!({
+            "name": "open_snapshot",
+            "title": "Open the Snapshots window",
+            "description": "Show the Snapshots window, with the snapshot `id` selected if given. Nothing is resumed or deleted; the user chooses what to do.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"id": {"type": "string", "description": "A snapshot's id, from list_snapshots.", "minLength": 1, "maxLength": 128}},
+                "additionalProperties": false,
+            },
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
+        }),
     ];
     if workspace {
         tools.extend(extension_tools(&read_only));
@@ -579,6 +610,7 @@ fn call_tool(
         "validate_config" => &["source"],
         "open_panel" => &["query"],
         "pick" => &["values"],
+        "read_snapshot" | "open_snapshot" => &["id"],
         "ext_check" | "ext_test" => &["package"],
         "ext_run" => &["package", "query"],
         "ext_snap" => &["package", "fixture", "step"],
@@ -629,9 +661,28 @@ fn call_tool(
             )?;
             Ok(json!({"value": value}))
         }
+        "list_snapshots" => host.control(Command::SnapshotsList {}, cancel),
+        "read_snapshot" => {
+            let id = snapshot_id(arguments.get("id"))?.ok_or("id must be a string")?;
+            host.control(Command::SnapshotsRead { id }, cancel)
+        }
+        "open_snapshot" => {
+            let id = snapshot_id(arguments.get("id"))?;
+            host.control(Command::SnapshotsOpen { id }, cancel)?;
+            Ok(json!({"shown": true}))
+        }
         _ => Err(format!("unknown tool: {name}")),
     };
     result.map(Output::Json)
+}
+
+fn snapshot_id(id: Option<&Value>) -> Result<Option<String>, String> {
+    match id {
+        None => Ok(None),
+        Some(Value::String(id)) if !id.is_empty() && id.len() <= 128 => Ok(Some(id.clone())),
+        Some(Value::String(_)) => Err("id must be 1 to 128 bytes".into()),
+        Some(_) => Err("id must be a string".into()),
+    }
 }
 
 fn tool_result(result: Result<Output, String>) -> Value {
@@ -807,7 +858,10 @@ mod tests {
                 "validate_config",
                 "get_active_config",
                 "open_panel",
-                "pick"
+                "pick",
+                "list_snapshots",
+                "read_snapshot",
+                "open_snapshot"
             ]
         );
         assert_eq!(replies[3]["result"]["protocolVersion"], VERSIONS[0]);
@@ -951,6 +1005,80 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_tools_send_read_only_control_commands() {
+        let host = Fake {
+            reply: Some(Ok(json!({"id": "a", "views": []}))),
+            ..Fake::default()
+        };
+        let mut replies = exchange(
+            &host,
+            &[
+                call(1, "list_snapshots", json!({})),
+                call(2, "read_snapshot", json!({"id": "a"})),
+                call(3, "open_snapshot", json!({"id": "a"})),
+                call(4, "open_snapshot", json!({})),
+                call(5, "read_snapshot", json!({})),
+                call(6, "read_snapshot", json!({"id": 1})),
+                call(7, "read_snapshot", json!({"id": ""})),
+                call(8, "open_snapshot", json!({"id": "x".repeat(129)})),
+                call(9, "list_snapshots", json!({"id": "a"})),
+            ]
+            .concat(),
+        );
+        replies.sort_by_key(|reply| reply["id"].as_u64());
+        let result = |n: usize| &replies[n]["result"];
+        assert_eq!(result(0)["structuredContent"], json!({"id": "a", "views": []}));
+        assert_eq!(result(1)["structuredContent"], json!({"id": "a", "views": []}));
+        assert_eq!(result(2)["structuredContent"], json!({"shown": true}));
+        assert_eq!(result(3)["structuredContent"], json!({"shown": true}));
+        for (n, reason) in [
+            (4, "id must be a string"),
+            (5, "id must be a string"),
+            (6, "id must be 1 to 128 bytes"),
+            (7, "id must be 1 to 128 bytes"),
+            (8, "unexpected argument: id"),
+        ] {
+            assert_eq!(result(n)["isError"], true, "{}", replies[n]);
+            assert_eq!(result(n)["content"][0]["text"], reason);
+        }
+        let mut commands = host.commands.lock().unwrap().clone();
+        commands.sort();
+        assert_eq!(
+            commands,
+            [
+                r#"{"kind":"snapshots_list"}"#,
+                r#"{"kind":"snapshots_open","id":"a"}"#,
+                r#"{"kind":"snapshots_open","id":null}"#,
+                r#"{"kind":"snapshots_read","id":"a"}"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn snapshot_tools_report_an_unknown_id_and_a_missing_launcher_as_tool_errors() {
+        for reason in ["NotFound: snapshot", "Dupin is not running"] {
+            let host = Fake {
+                reply: Some(Err(reason.into())),
+                ..Fake::default()
+            };
+            let replies = exchange(
+                &host,
+                &[
+                    call(1, "list_snapshots", json!({})),
+                    call(2, "read_snapshot", json!({"id": "missing"})),
+                    call(3, "open_snapshot", json!({"id": "missing"})),
+                ]
+                .concat(),
+            );
+            assert_eq!(replies.len(), 3);
+            for reply in &replies {
+                assert_eq!(reply["result"]["isError"], true);
+                assert_eq!(reply["result"]["content"][0]["text"], reason);
+            }
+        }
+    }
+
+    #[test]
     fn client_cancellation_goes_unanswered_and_closing_input_aborts_the_rest() {
         let (started_tx, started) = mpsc::channel();
         let (aborted_tx, aborted) = mpsc::channel();
@@ -1045,7 +1173,7 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        assert_eq!(&names[5..], ["ext_check", "ext_run", "ext_test", "ext_snap"]);
+        assert_eq!(&names[8..], ["ext_check", "ext_run", "ext_test", "ext_snap"]);
         let result = |n: usize| &replies[n]["result"];
         assert_eq!(result(1)["structuredContent"]["keyword"], "greeter");
         assert_eq!(

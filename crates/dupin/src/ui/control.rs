@@ -56,7 +56,7 @@ impl Ui {
             Command::SnapshotsOpen { .. } if self.picker.is_some() => {
                 call.finish(Err("Busy: picker active".into()));
             }
-            Command::SnapshotsList {} | Command::SnapshotsOpen { .. } => {
+            Command::SnapshotsList {} | Command::SnapshotsRead { .. } | Command::SnapshotsOpen { .. } => {
                 self.snapshots.update_if(move |s, _| {
                     s.control(call);
                     false

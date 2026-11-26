@@ -1,6 +1,7 @@
 <div align="center">
     <img src="./assets/logo/dupin.svg" alt="Dupin logo" width="112" height="112">
     <h1>Dupin</h1>
+    <p><a href="./docs/name.md">/dy.pɛ̃/</a></p>
     <p><strong>The doorway to your Mac: type a keyword, reach anything.</strong></p>
     <p>
         <a href="https://dupin.app">Website</a> ·
@@ -15,6 +16,8 @@
 </div>
 
 ## Why Dupin
+
+**A launcher should be the doorway to your desktop, not a replacement for it.** [Read the philosophy](./docs/philosophy.md).
 
 - **Fast.** The panel is already drawn when you press the hotkey, and app search shows its results under 3 ms after each keystroke (p95, measured in CI on every change to the app).
 - **Built for searching, and simple.** Type a keyword, reach anything; the launcher stays a launcher.
