@@ -27,7 +27,7 @@ Add `dupin mcp` to your agent's MCP servers (see [Configuration](#configuration)
 | `pick`                                           | Shows `values` in the panel and waits for you to choose one.           |
 | <kbd>↩</kbd> / <kbd>Esc</kbd> on a `pick`        | Hands the chosen value back, or dismisses it ("Cancelled").            |
 | `list_snapshots`, `read_snapshot`                | List the saved [snapshots](./snapshots.md), or read one's content.     |
-| `open_snapshot`                                  | Shows the Snapshots window, optionally with one snapshot selected.     |
+| `open_snapshot`                                  | Shows the Snapshots page in Settings, optionally with one selected.    |
 | `ext_check`, `ext_run`, `ext_test`, `ext_render` | Work on an extension package; see [Extension tools](#extension-tools). |
 
 Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
@@ -43,8 +43,8 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 | `open_panel`        | Shows the panel, optionally with a `query` typed in, as `dupin open --query` does.                                            |
 | `pick`              | Shows `values` (1 to 1000 JSON values) in the panel and waits up to five minutes for you to choose one, as `dupin pick` does. |
 | `list_snapshots`    | Returns the saved snapshots' metadata, newest first, as `dupin snapshots list --json` does.                                   |
-| `read_snapshot`     | Takes an `id` and returns that snapshot's saved content: what the Snapshots window shows of it.                               |
-| `open_snapshot`     | Shows the Snapshots window, with the snapshot `id` selected if given, as `dupin snapshots open [--id]` does.                  |
+| `read_snapshot`     | Takes an `id` and returns that snapshot's saved content: what the Snapshots page shows of it.                                 |
+| `open_snapshot`     | Shows the Snapshots page in Settings, with the snapshot `id` selected if given, as `dupin snapshots open [--id]` does.        |
 
 `read_config` reports the base's `path`, `exists`, `readOnly` and TOML `source` at the top level. The `overlay`, what Settings saved over a read-only base, has `exists`, its TOML `source`, read from encrypted storage or from the running launcher that holds it, and `active`, which is true when the base is read-only. `lockedKeys` is empty for a writable base and null if the read-only base has invalid TOML syntax.
 

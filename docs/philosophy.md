@@ -51,19 +51,19 @@ Hotkey, a few letters, ↩, gone.
 
 ## The panel is transient
 
-The panel starts the work and a window keeps it: a [snapshot](./features/snapshots.md) opens in its own window to read later, and a script's output in the [Script Output window](./features/scripts.md#output-and-cancellation).
+The panel starts the work and a window keeps it: a [snapshot](./features/snapshots.md) opens on its own page in Settings to read later, and a script's output in the [Script Output window](./features/scripts.md#output-and-cancellation).
 
 <div class="doc-pair">
 
 <PanelHandoff>
 
-The panel starts the work and a window keeps it: a result goes to the Snapshots window, a script's output to the Script Output window.
+The panel starts the work and a window keeps it: a result goes to the Snapshots page in Settings, a script's output to the Script Output window.
 
 </PanelHandoff>
 
 <picture>
-<source media="(prefers-color-scheme: dark)" srcset="images/philosophy/snapshots-window-dark.png" />
-<img alt="The Snapshots window, with saved snapshots listed on the left and the selected one's saved dictionary entry on the right." src="images/philosophy/snapshots-window-light.png" width="680" />
+<source media="(prefers-color-scheme: dark)" srcset="images/philosophy/snapshots-page-dark.png" />
+<img alt="Settings → Snapshots, with saved snapshots listed on the left and the selected one's saved dictionary entry on the right." src="images/philosophy/snapshots-page-light.png" width="680" />
 </picture>
 
 </div>

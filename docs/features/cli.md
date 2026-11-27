@@ -16,7 +16,7 @@ With a resident Dupin instance, `dupin open --query 'Safari'` shows the panel wi
 
 `printf 'red\nblue\n' | dupin pick` opens a transient picker; Enter prints the original value and Esc exits unsuccessfully. For structured values, use `dupin pick --input-json` with a JSON array. Values are displayed as data, including objects containing paths or action names. Picker sessions never add history entries.
 
-`dupin snapshots list --json` prints saved Snapshot metadata, `dupin snapshots open [--id ID]` shows the separate window, and `dupin snapshots close` hides it; see [Snapshots](./snapshots.md#snapshots).
+`dupin snapshots list --json` prints saved Snapshot metadata, `dupin snapshots open [--id ID]` shows Settings on the Snapshots page, and `dupin snapshots close` closes Settings if it shows that page; see [Snapshots](./snapshots.md#snapshots).
 
 ## Configuration
 

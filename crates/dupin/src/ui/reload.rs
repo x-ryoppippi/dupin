@@ -20,7 +20,8 @@ impl Ui {
         // The extensions' commands joined the registry just now.
         crate::hotkey::mark_shortcuts(config, &mut registration.registry);
         let sources = registration.registry.ids();
-        self.snapshots.update(move |s, _| s.set_sources(sources));
+        self.prefs
+            .update(move |prefs, _| prefs.snapshots.set_sources(sources));
         let effects = self
             .session
             .set_commands(registration.registry)

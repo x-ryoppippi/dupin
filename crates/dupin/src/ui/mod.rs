@@ -73,7 +73,6 @@ enum PendingPaste {
 pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
-    pub snapshots: AppHandle<crate::snapshots::Snapshots>,
     pub scripts: AppHandle<crate::scripts::output::Output>,
 }
 
@@ -193,7 +192,6 @@ pub struct Ui {
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
-    snapshots: AppHandle<crate::snapshots::Snapshots>,
     script_output: AppHandle<crate::scripts::output::Output>,
     script_output_after_close: Option<crate::scripts::runner::RunId>,
 }
@@ -211,7 +209,6 @@ impl Ui {
         let Windows {
             panel: me,
             prefs,
-            snapshots,
             scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
@@ -304,7 +301,7 @@ impl Ui {
             .map(|(id, provider)| (id.clone(), spawn_searcher(me.clone(), id, provider)))
             .collect();
         let sources = registration.session.command_ids();
-        snapshots.update(move |s, _| s.set_sources(sources));
+        prefs.update(move |prefs, _| prefs.snapshots.set_sources(sources));
         me.update(|s, tx| s.refresh_default(tx));
         let mut query = TextEdit::new("");
         query.focused = true;
@@ -402,7 +399,6 @@ impl Ui {
             quick_look,
             me,
             prefs,
-            snapshots,
         };
         ui.watch_extensions(config.extensions);
         ui

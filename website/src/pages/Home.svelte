@@ -172,7 +172,7 @@
 								<span class="box panel">The panel</span>
 								<span class="arrow"></span>
 								<span class="windows">
-									<span class="box">Snapshots window</span>
+									<span class="box">Snapshots in Settings</span>
 									<span class="box">Script Output window</span>
 								</span>
 							</div>
