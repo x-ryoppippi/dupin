@@ -124,6 +124,8 @@ pub struct Prefs {
     /// Each visible permission's status in row order, read while the page shows.
     permissions: Vec<PermissionStatus>,
     calendar_access: CalendarAccess,
+    /// Whether General shows its Advanced cards, kept while Dupin runs.
+    advanced: bool,
     /// The first-run welcome's step while it covers the pages.
     welcome: Option<welcome::Step>,
     pub(crate) hotkey_problem: Option<String>,
@@ -190,6 +192,7 @@ impl Prefs {
             login: LoginPreference::current(),
             permissions: Vec::new(),
             calendar_access,
+            advanced: false,
             welcome: welcome.then_some(welcome::Step::Hotkey),
         }
     }
@@ -514,13 +517,8 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         }
         pages = pages.child(item);
     }
-    let config = footer_link(k, "open-config", "Open config.toml").on_press(|_: &mut Prefs| {
-        if let Some(path) = crate::settings::path()
-            && path.exists()
-        {
-            std::thread::spawn(move || dupin_mac::workspace::open(&path));
-        }
-    });
+    let config =
+        footer_link(k, "open-config", "Open config.toml").on_press(|_: &mut Prefs| open_config_file());
     let folder = footer_link(k, "open-config-folder", "Open Config Folder")
         .on_press(|_: &mut Prefs| open_config_folder());
     col()
@@ -551,6 +549,15 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             })
         }))
         .children(s.updater.available().then(|| updates::footer(s, k)))
+}
+
+/// Open config.toml in its default editor, when there is one.
+fn open_config_file() {
+    if let Some(path) = crate::settings::path()
+        && path.exists()
+    {
+        std::thread::spawn(move || dupin_mac::workspace::open(&path));
+    }
 }
 
 /// Open the folder holding config.toml, `extensions/` and `shaders/` in Finder, making it
@@ -640,6 +647,28 @@ mod tests {
             ("display", "Display", Role::ComboBox),
             ("system_automation", "System Command Automation", Role::Switch),
         ];
+        let advanced = |runtime: &mut rune::Runtime<Prefs>| {
+            runtime.frame(0.0);
+            let tree = runtime.accessibility_tree();
+            let shown = tree
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("System Command Automation"));
+            let (_, disclosure) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == Role::Button && node.label() == Some("Advanced"))
+                .expect("the Advanced disclosure");
+            assert_eq!(disclosure.is_expanded(), Some(shown));
+            shown
+        };
+        assert!(!advanced(&mut runtime), "Advanced starts collapsed");
+        let (x, y) = runtime
+            .find("advanced")
+            .expect("the Advanced disclosure is drawn");
+        runtime.pointer_down(x, y);
+        runtime.pointer_up(x, y);
+        assert!(advanced(&mut runtime));
 
         for locked in [false, true] {
             runtime.update(|s, _| {

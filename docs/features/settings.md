@@ -10,11 +10,12 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 
 - A sidebar of pages: General, Search, Keywords, Snippets, Appearance, Permissions, Sync, Updates and more.
 - At the foot of the sidebar: **Open config.toml**, **Open Config Folder**, **Show Welcome** and **Acknowledgements**.
+- At the foot of General, **Advanced** shows the rows you rarely change: System Command Automation, the anonymous usage ping, Relaunch, and config.toml and its folder.
 - Rows a read-only `config.toml` sets are locked and marked **Managed by Nix** or **Set in config.toml**.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/settings/general-dark.png" />
-<img alt="Settings → General: hotkey, selection hotkey, display, position, input source, launch at login and more, with the pages in the sidebar." src="../images/settings/general-light.png" width="760" />
+<img alt="Settings → General: hotkey, selection hotkey, display, position, input source and launch at login, with Advanced collapsed below them and the pages in the sidebar." src="../images/settings/general-light.png" width="760" />
 </picture>
 
 <picture>
@@ -84,7 +85,7 @@ The welcome appears once. It is skipped for anyone who used Dupin before: when i
 
 In Settings → General, turn **Launch at login** on or off. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings; Dupin refreshes the status when you return.
 
-Choose **Relaunch** in Settings → General to restart Dupin. If an update is already staged, relaunch installs it first.
+Choose **Relaunch** in Settings → General → Advanced to restart Dupin. If an update is already staged, relaunch installs it first.
 
 > [!NOTE]
 > This setting is managed by macOS and is available in the signed app bundle outside the Nix store. With Nix, use `launchd.enable`; see [Configuration › Nix](../configuration.md#nix).
