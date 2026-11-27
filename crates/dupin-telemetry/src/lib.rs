@@ -143,3 +143,5 @@ mod tests {
         }
     }
 }
+
+// Probe for the CI path filter; not for merging.
