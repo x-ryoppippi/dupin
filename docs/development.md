@@ -45,6 +45,10 @@ The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
 silicon runner, then keeps it available for commands. It follows ccusage's
 Testbox setup and uses the same macOS runner and Nix setup as CI.
 
+CI jobs that do any real work (build, test, lint, format, record) run on the largest
+Blacksmith instance for their OS; jobs that only post comments may use `ubuntu-slim`. Check
+https://docs.blacksmith.sh when adding a job or when Blacksmith adds larger runners.
+
 After this workflow is available on the repository's default branch, start a box
 from the root of the worktree you want to test:
 
@@ -132,7 +136,7 @@ manifest changed, and 16–18 seconds when everything came from the cache. 17
 runs could not download a path that the Hestia manifest still listed, because
 its pack had been evicted from the cache; nine of them rebuilt the app for a
 change that touched no Rust. Each `Cargo.lock` change stores about 1 GB of
-compiled dependencies. On the Testbox, the same step after a UI edit takes 107
+compiled dependencies. On the 6-CPU Testbox, the same step after a UI edit takes 107
 seconds instead of 142 now that Hawk reuses its dependencies, and the three
 dependency outputs that step builds together hold 1.03 GB (debug 353 MB,
 release 343 MB, Hawk 338 MB), where the debug output alone held 662 MB with
@@ -142,7 +146,7 @@ sccache is not configured for local builds or CI. Cargo builds workspace
 crates incrementally in the dev profile, which sccache cannot cache, and those
 crates are all that an edit rebuilds. It can only replay third-party crates in
 a fresh target directory. In the
-[Cargo cache experiment](../experiments/cargo-cache/README.md) on the Testbox,
+[Cargo cache experiment](../experiments/cargo-cache/README.md) on the 6-CPU Testbox,
 a warm cache built a fresh target at a new path, as a new worktree has, in 46.5
 seconds against 48.8–49.5 without it, and a cold cache cost 1.2 seconds more.
 It only pays when a removed target is rebuilt at the same path: 18.1 seconds

@@ -79,7 +79,7 @@ jobs:
 
   # The collector Worker in telemetry/: its tests, type check and build, which need no Mac.
   telemetry:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -227,7 +227,7 @@ jobs:
   e2e:
     needs: [changes, build, extension-host, latency, search-quality]
     if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 20
     steps:
       - name: Require the build, the extension host tests, latency parity and search quality

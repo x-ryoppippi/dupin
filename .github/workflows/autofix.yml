@@ -21,7 +21,7 @@ jobs:
   autofix:
     # Neither fetching Rune nor the formatter depends on the flake's aarch64-darwin packages;
     # the flake exports its formatter for x86_64-linux too.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
