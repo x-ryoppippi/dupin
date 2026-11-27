@@ -226,6 +226,7 @@ pub(crate) fn run() {
         })
         .on_quit(ui::Ui::stop_child_processes)
         .on_close(ui::Ui::closed)
+        .on_reopen(ui::Ui::reopened)
         .on_focus(ui::Ui::focus_changed);
 
     rune::run_windows(move |_| {

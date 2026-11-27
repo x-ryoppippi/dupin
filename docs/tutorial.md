@@ -55,7 +55,7 @@ Type `?`, and choose one to enter it.
 
 ## Make it yours
 
-⌘, opens Settings. Everything there is also in `~/.config/dupin/config.toml` ([Configuration](./configuration.md)). Add your own shorthands with `[aliases]`:
+⌘, opens Settings, and so does opening Dupin again while it runs: its app row, Finder or Spotlight. Everything there is also in `~/.config/dupin/config.toml` ([Configuration](./configuration.md)). Add your own shorthands with `[aliases]`:
 
 ```toml
 [aliases]
