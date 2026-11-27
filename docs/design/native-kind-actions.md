@@ -78,7 +78,7 @@ Each gap is generic: it blocks more than one move, or makes stay-native actions 
 
 ### Native actions in `[advanced]`
 
-Native actions aren't addressable from `[advanced]`: a user can add actions to a kind but can't hide or reorder the kind's own. Give each native action its stable ID as its public name (`open`, `reveal`, `quick-look`, `copy-name`, `rename`, `move-to`, `copy-to`, `duplicate`, `compress`, `trash` and the Send to… IDs) and let `[advanced.kinds.<kind>]` take `hide = [...]` and `order = [...]` over native and composed actions alike, validated like the rest of `[advanced]`. Enter and ⌘Enter keep their routes; hiding their action only removes its row. This delivers the composability the owner wants for every stay-native action, with no port, consent or latency.
+**Done.** `[advanced.kinds.file]` and `[advanced.kinds.app]` take `hide` and `order`, lists of action IDs, validated like the rest of `[advanced]`; [Hide and order](../features/advanced.md#hide-and-order) lists every ID (`kind::FILE_ACTIONS` and `kind::APP_ACTIONS`, held to each kind's list by a test). The one rule for every action a kind lists: `order` puts the actions it names first, in its order, and the rest follow in their default place; `hide` takes the actions it names out of the action screen. A package's kind action is named `<package>/<action>`, whether `[[actions]]` composes it or #381's default composition does, so the same two keys place and hide it; a `script` or `url` action has no ID and keeps its place in `actions`. Hiding never disables: Enter, ⌘Enter and ⌘Y still run `open`, `reveal` and `quick-look`, because a route or shortcut is an explicit binding the user pressed, and refusing to hide the Enter route or moving Enter elsewhere would make a list setting change what a key does. `text` and `url` take neither key: their rows come from extensions and list the extension's actions. Send to… stays last, and its receivers are not covered: they belong to the payload, not the kind, and come with [Send to… contributions](#send-to-contributions).
 
 ### Row file handles
 
@@ -109,7 +109,7 @@ No native file action can be undone today; Move to Trash relies on the Trash. Un
 Smallest and safest first. Each PR keeps the action list, routes and ranking unchanged unless it says otherwise.
 
 1. **Copy name** to a bundled `file-actions` package, once #381's default composition and availability land, with the position anchor. It proves the path from a native kind action to a bundled one against the existing order tests, with only `clipboard:write` and `rows:file`.
-2. **Native actions in `[advanced]`**: `hide` and `order` over native IDs. No guest code; it makes every stay-native action composable, Quick Look included.
+2. **Native actions in `[advanced]`** (done): `hide` and `order` over native IDs. No guest code; it makes every stay-native action composable, Quick Look included.
 3. **Send to… contributions**, then **Copy path** into `file-actions`.
 4. **Row file handles and `fileActions` with `compress`**, then **Compress** into `file-actions`. Compress creates a new item and replaces nothing, so it is the safest write.
 5. **`duplicate`**, then **Duplicate**.
