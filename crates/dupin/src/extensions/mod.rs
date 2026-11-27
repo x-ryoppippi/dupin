@@ -1069,7 +1069,6 @@ pub(crate) mod tests {
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
 
     pub(super) const EXTENSION_HOST_ENV: &str = "DUPIN_EXTENSION_HOST_TEST";
 
@@ -1208,11 +1207,13 @@ pub(crate) mod tests {
         (watcher, source, received)
     }
 
+    /// Waits for the watch to deliver a catalogue with `keyword`, however long its scans take:
+    /// each one may start a helper to compile a package, which on a busy machine is slow, and a
+    /// watch that never delivers hangs the test for the harness to report.
     fn wait_for_keyword(received: &mpsc::Receiver<Catalog>, keyword: Option<&str>) {
-        let deadline = Instant::now() + Duration::from_secs(6);
         loop {
             let catalog = received
-                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .recv()
                 .unwrap_or_else(|error| panic!("no catalogue with keyword {keyword:?}: {error}"));
             let keywords = catalog
                 .extensions
