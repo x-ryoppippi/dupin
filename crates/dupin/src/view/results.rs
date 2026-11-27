@@ -144,16 +144,20 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .virtualize(s.theme.row_height as f32)
             .on_visible_rows(rows_in_view(s, rows.len()))
             .children(list_order(rows, s.grows_up()));
-        return col().key("results").w_full().py(LIST_PAD).child(
-            col()
-                .key("scroll")
-                .w_full()
-                .h(s.list_budget + CARDS_EXTRA_H)
-                .scroll(list_scroll(s))
-                .on_scroll_offset(report_offset(s))
-                .instant_changes()
-                .child(list),
-        );
+        return col()
+            .key(results_key(s.session.command_id()))
+            .w_full()
+            .py(LIST_PAD)
+            .child(
+                col()
+                    .key("scroll")
+                    .w_full()
+                    .h(s.list_budget + CARDS_EXTRA_H)
+                    .scroll(list_scroll(s))
+                    .on_scroll_offset(report_offset(s))
+                    .instant_changes()
+                    .child(list),
+            );
     }
     if layout == Layout::Cards {
         let rows = items
@@ -178,16 +182,20 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .key("content-rows")
             .w_full()
             .children(list_order(rows, s.grows_up()));
-        return col().key("results").w_full().py(LIST_PAD).child(
-            col()
-                .key("content-scroll")
-                .w_full()
-                .shrink()
-                .max_h(s.list_budget + CARDS_EXTRA_H)
-                .scroll(list_scroll(s))
-                .on_scroll_offset(report_offset(s))
-                .child(content),
-        );
+        return col()
+            .key(results_key(s.session.command_id()))
+            .w_full()
+            .py(LIST_PAD)
+            .child(
+                col()
+                    .key("content-scroll")
+                    .w_full()
+                    .shrink()
+                    .max_h(s.list_budget + CARDS_EXTRA_H)
+                    .scroll(list_scroll(s))
+                    .on_scroll_offset(report_offset(s))
+                    .child(content),
+            );
     }
     let row_height = s.theme.row_height as f32;
     let selected = s.session.selected();
@@ -223,16 +231,27 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             list,
         )
     };
-    col().key("results").w_full().py(LIST_PAD).child(
-        col()
-            .key("scroll")
-            .w_full()
-            .h(height)
-            .scroll(list_scroll(s))
-            .on_scroll_offset(report_offset(s))
-            .instant_changes()
-            .child(list.children(list_order(rows, s.grows_up()))),
-    )
+    col()
+        .key(results_key(s.session.command_id()))
+        .w_full()
+        .py(LIST_PAD)
+        .child(
+            col()
+                .key("scroll")
+                .w_full()
+                .h(height)
+                .scroll(list_scroll(s))
+                .on_scroll_offset(report_offset(s))
+                .instant_changes()
+                .child(list.children(list_order(rows, s.grows_up()))),
+        )
+}
+
+/// The list's rows change in place as a query is refined, and land at once there; entering or
+/// leaving a command swaps in another command's list, which enters and exits as a new element,
+/// whichever row was selected and whatever entered it.
+fn results_key(command: &dupin_core::CommandId) -> String {
+    format!("results-{command}")
 }
 
 /// The rows, first match first, in the order they stack from the list's top: a list that runs

@@ -145,6 +145,8 @@ pub struct Ui {
     rows: Rows,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
+    /// The command the panel last applied effects in, to tell entering or leaving one apart.
+    entered: dupin_core::CommandId,
     /// The clock when the panel last showed, and when the query last changed.
     pub shown_at: f64,
     pub typed_at: f64,
@@ -304,6 +306,7 @@ impl Ui {
             .map(|(id, provider)| (id.clone(), spawn_searcher(me.clone(), id, provider)))
             .collect();
         let sources = registration.session.command_ids();
+        let entered = registration.session.command_id().clone();
         prefs.update(move |prefs, _| prefs.snapshots.set_sources(sources));
         me.update(|s, tx| s.refresh_default(tx));
         let mut query = TextEdit::new("");
@@ -351,6 +354,7 @@ impl Ui {
             screen,
             rows: config.rows,
             shown: false,
+            entered,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
             typed_at: f64::NEG_INFINITY,
