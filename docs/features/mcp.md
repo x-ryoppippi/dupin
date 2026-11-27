@@ -52,7 +52,7 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 
 `pick` answers `{"value": ...}` with the chosen value unchanged.
 
-`list_snapshots` answers `entries` (each with `id`, `saved_at`, `mode`, `title` and `query`), `truncated` and any storage `problem`. `read_snapshot` answers the same metadata plus `views`: the result rows and text the window shows, each a `text` (`title`, `subtitle`), `detail` (`title`, `body`) or `pair` (`source`, `result`). A snapshot too large for one reply keeps its first views that fit; `truncated` is then true and `omitted_views` counts the rest. Its resume state is never returned. `open_snapshot` answers `{"shown": true}`; an unknown `id` is "NotFound: snapshot".
+`list_snapshots` answers `entries` (each with `id`, `saved_at`, `mode`, `title` and `query`), `truncated` and any storage `problem`. `read_snapshot` answers the same metadata plus `views`: the result rows and text the Snapshots page shows, each a `text` (`title`, `subtitle`), `detail` (`title`, `body`) or `pair` (`source`, `result`). A snapshot too large for one reply keeps its first views that fit; `truncated` is then true and `omitted_views` counts the rest. Its resume state is never returned. `open_snapshot` answers `{"shown": true}`; an unknown `id` is "NotFound: snapshot".
 
 Reading a snapshot returns what you saved, which can include what you typed and the results shown, to the agent you connected. The tools only read: they don't save, delete or resume a snapshot, and never run its saved actions.
 
