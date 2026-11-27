@@ -66,6 +66,8 @@ pub(crate) struct Asking<'a> {
 
 struct Shared {
     state: Mutex<State>,
+    /// The catalogues the budget weighs this one with: those of the launcher it was made in.
+    held: &'static Held,
     /// Kept outside the lock, so the budget can weigh a catalogue another thread is filling.
     bytes: AtomicUsize,
     used: AtomicU64,
@@ -110,7 +112,9 @@ impl Cached {
 
     /// One whose rows' times are measured against `clock`.
     pub fn with_clock(matching: Matching, clock: Clock) -> Self {
+        let held = held();
         let shared = Arc::new(Shared {
+            held,
             state: Mutex::new(State {
                 catalogue: Catalogue::new(matching),
                 cursor: None,
@@ -127,8 +131,7 @@ impl Cached {
             used: AtomicU64::new(0),
             forgotten: AtomicU64::new(0),
         });
-        held()
-            .lock()
+        held.lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(Arc::downgrade(&shared));
         Self { shared, clock }
@@ -338,7 +341,11 @@ impl Cached {
     /// Drops the least recently used other catalogues while all of them hold more than the
     /// budget. One being filled or searched right now is skipped.
     fn keep_within_budget(&self) {
-        let mut held = held().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut held = self
+            .shared
+            .held
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         held.retain(|shared| shared.strong_count() > 0);
         let mut others: Vec<Arc<Shared>> = held
             .iter()
@@ -497,10 +504,12 @@ fn rejected(problem: &ChangeError) -> Diagnostic {
     Diagnostic::new(code, problem.to_string()).hint(hint)
 }
 
-/// Every catalogue alive, for the budget across them.
-fn held() -> &'static Mutex<Vec<Weak<Shared>>> {
-    static HELD: OnceLock<Mutex<Vec<Weak<Shared>>>> = OnceLock::new();
-    HELD.get_or_init(Mutex::default)
+type Held = Mutex<Vec<Weak<Shared>>>;
+
+/// Every catalogue alive in the launcher, for the budget across them: under test, those of
+/// one test, so another test's catalogues neither fill its budget nor are dropped for it.
+fn held() -> &'static Held {
+    launcher_wide!(Held, Mutex::default())
 }
 
 fn now_ms() -> u64 {
