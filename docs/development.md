@@ -48,11 +48,14 @@ Testbox setup and uses the same macOS runner and Nix setup as CI.
 CI jobs that do any real work (build, test, lint, format, record) run on the largest
 Blacksmith instance for their OS; jobs that only post comments may use `ubuntu-slim`. Check
 https://docs.blacksmith.sh when adding a job or when Blacksmith adds larger runners.
-The exception is `latency`, which runs on macOS 26 because its bundled extensions' parity with
-native does not hold on macOS 27: on the same 6 vCPU runner, `calendar.rev`'s port took 46%
-longer at p95 on 27 than on 26 while the native control took 15% longer, so re-recording the
-baselines on 27 would not let the ports pass
-([Keypress latency](#keypress-latency)).
+On macOS that is `blacksmith-12vcpu-macos-26`, not the same-sized macOS 27 runner, because
+27 is slower per core. At one commit and one cache state, CI's `build` job took 9–14% longer on
+12 vCPU macOS 27 than on 26, the release build's fat LTO step 12–17% longer and the
+extension-host test build 18–19% longer. Bundled extensions' parity with native does not hold
+on 27 either: on the same 6 vCPU runner, `calendar.rev`'s port took 46% longer at p95 on 27
+than on 26 while the native control took 15% longer, so `latency`'s baselines could not be
+re-recorded there ([Keypress latency](#keypress-latency)). Measure again before moving to a
+newer macOS.
 
 After this workflow is available on the repository's default branch, start a box
 from the root of the worktree you want to test:
