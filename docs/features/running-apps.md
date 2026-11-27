@@ -56,11 +56,12 @@ version = 1
 enabled = true
 ```
 
-To leave an action off app rows, or put it among your own, name it in `[advanced.kinds.app]` ([Default kind actions](./advanced.md#default-kind-actions)):
+To leave an action off app rows, name it in `hide`; to move it, in `order`, as for any app action ([Hide and order](./advanced.md#hide-and-order)):
 
 ```toml
 [advanced.kinds.app]
-exclude = ["running-apps/quit_forcibly"]
+hide = ["running-apps/quit_forcibly"]
+order = ["open", "running-apps/quit"]
 ```
 
 | Action          | Name                         |
