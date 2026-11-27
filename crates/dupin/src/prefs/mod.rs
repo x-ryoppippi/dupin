@@ -1370,7 +1370,7 @@ mod tests {
                 .as_nanos(),
         ));
         let (sent, received) = mpsc::channel();
-        let settings = Arc::new(crate::settings::Service::new(
+        let settings = Arc::new(crate::settings::Service::told(
             crate::settings::Paths {
                 base: Some(path.clone()),
                 overlay: None,
@@ -1399,7 +1399,7 @@ mod tests {
             state.recorders[LauncherShortcut::Panel as usize].shortcut(),
             crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()
         );
-        let saved = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        let saved = received.recv().unwrap();
         assert_eq!(saved.result.as_ref().unwrap(), &expected);
         state.reflect_config(saved.revision, expected.clone(), Default::default(), None);
         assert_eq!(
