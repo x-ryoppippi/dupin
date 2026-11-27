@@ -131,7 +131,7 @@ impl Ui {
                 DisplaySelection::Mouse => DisplayTarget::UnderPointer,
                 DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
             };
-            self.list_budget = crate::view::DEFAULT_LIST_BUDGET;
+            self.list_budget = unplaced_list_budget(self.theme.panel_width, self.position);
             (display, Align::Center, 0.0, EDGE_MARGIN)
         };
         self.me.place(
@@ -426,6 +426,43 @@ impl Ui {
     }
 }
 
+/// The list's budget where the panel knows no display: a headless run's simulated one, whose
+/// usable area `DUPIN_HEADLESS_DISPLAY` gives as `<width>x<height>` points, or the default.
+pub(super) fn unplaced_list_budget(width: u16, position: Position) -> f32 {
+    let simulated = rune::tooling::is_headless()
+        .then(|| std::env::var("DUPIN_HEADLESS_DISPLAY").ok())
+        .flatten();
+    let Some(value) = simulated else {
+        return crate::view::DEFAULT_LIST_BUDGET;
+    };
+    match simulated_list_budget(&value, width, position) {
+        Some(budget) => budget,
+        None => {
+            crate::log::warn(&format!(
+                "DUPIN_HEADLESS_DISPLAY is {value:?}, not <width>x<height>; using the default list"
+            ));
+            crate::view::DEFAULT_LIST_BUDGET
+        }
+    }
+}
+
+/// The list's budget on a display whose whole frame is usable, `value` points as
+/// `<width>x<height>`, through the same placement a real display takes.
+fn simulated_list_budget(value: &str, width: u16, position: Position) -> Option<f32> {
+    let (w, h) = value.split_once('x')?;
+    let (w, h) = (w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?);
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let area = NSRect::new(
+        objc2_foundation::NSPoint::new(0.0, 0.0),
+        objc2_foundation::NSSize::new(w, h),
+    );
+    Some(crate::view::list_budget(
+        panel_offsets(area, area, width, position).list_room,
+    ))
+}
+
 /// Where the panel goes on a display, in points from the display's frame.
 #[derive(Debug, PartialEq)]
 struct PanelOffsets {
@@ -509,6 +546,24 @@ mod tests {
             panel_offsets(frame, visible, 680, Position::Top),
             offsets(60.0, 86.0, 0.0)
         );
+    }
+
+    #[test]
+    fn a_simulated_display_sizes_the_list_as_a_real_one_would() {
+        let real = rect(0.0, 0.0, 1728.0, 2560.0);
+        let budget = crate::view::list_budget(panel_offsets(real, real, 680, Position::Center).list_room);
+        assert_eq!(
+            simulated_list_budget("1728x2560", 680, Position::Center),
+            Some(budget)
+        );
+        assert_eq!(budget, 832.0, "a 2560-point display reaches the list's maximum");
+        assert_eq!(
+            simulated_list_budget("1440x900", 680, Position::Center),
+            Some(crate::view::DEFAULT_LIST_BUDGET)
+        );
+        for bad in ["", "1440", "1440x", "x900", "0x900", "1440x-1", "wide x tall"] {
+            assert_eq!(simulated_list_budget(bad, 680, Position::Center), None, "{bad:?}");
+        }
     }
 
     #[test]
