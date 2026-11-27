@@ -31,11 +31,12 @@ jobs:
 
       - uses: ./.github/actions/setup-nix-cache
 
-      # Every flake check except the Rust builds below, so a new quick check lands here.
+      # Every flake check except those that need the Rust builds, which build runs, so a new
+      # quick check lands here.
       - run: |
           read -ra checks <<<"$(nix eval --raw .#checks.aarch64-darwin --apply '
             checks: toString (map (name: ".#checks.aarch64-darwin." + name)
-              (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" ])))')"
+              (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" "bundled-extension-scopes" ])))')"
           nix build --no-link "${checks[@]}"
 
   # A pull request that only touches website/ or telemetry/ cannot change the app, so build and
@@ -103,8 +104,11 @@ jobs:
 
       - uses: ./.github/actions/setup-nix-cache
 
-      # Clippy, tests, Hawk's analysis toolchain and the release app bundle.
-      - run: nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.hawk .#checks.aarch64-darwin.dupin
+      # Clippy, tests, Hawk's analysis toolchain, the release app bundle and the scopes its
+      # bundled extensions declare.
+      - run: >-
+          nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.hawk
+          .#checks.aarch64-darwin.dupin .#checks.aarch64-darwin.bundled-extension-scopes
 
       # The bundle is already in the store. tar keeps its executable bits, which
       # upload-artifact drops.
