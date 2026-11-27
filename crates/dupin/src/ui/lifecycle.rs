@@ -39,6 +39,10 @@ impl Restart {
     }
 }
 
+fn toggle_should_dismiss(visible: bool, shown: bool) -> bool {
+    visible && shown
+}
+
 #[test]
 fn only_automatic_restart_waits_for_scripts() {
     let actions = AtomicUsize::new(0);
@@ -48,6 +52,14 @@ fn only_automatic_restart_waits_for_scripts() {
 
     actions.store(1, Ordering::Release);
     assert!(Restart::Requested.waiting_for_work(&actions, &scripts));
+}
+
+#[test]
+fn toggle_reopens_when_window_visibility_and_shown_state_disagree() {
+    assert!(toggle_should_dismiss(true, true));
+    assert!(!toggle_should_dismiss(true, false));
+    assert!(!toggle_should_dismiss(false, true));
+    assert!(!toggle_should_dismiss(false, false));
 }
 
 impl Ui {
@@ -64,7 +76,9 @@ impl Ui {
         }
         let visible = self.me.is_visible();
         crate::trace::panel("toggle", visible, self.shown);
-        if visible {
+        // Rune can still report the window visible after hide sets `shown` to false.
+        // In that transition, dismiss would return without doing anything.
+        if toggle_should_dismiss(visible, self.shown) {
             self.dismiss(tx);
         } else {
             self.show(tx);
