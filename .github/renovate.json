@@ -4,9 +4,7 @@
 	"automerge": true,
 	"platformAutomerge": true,
 	"branchConcurrentLimit": 0,
-	"dependencyDashboard": {
-		"enabled": false
-	},
+	"dependencyDashboard": true,
 	"gitIgnoredAuthors": ["114827586+autofix-ci[bot]@users.noreply.github.com"],
 	"labels": ["dependencies", "renovate"],
 	"lockFileMaintenance": {
