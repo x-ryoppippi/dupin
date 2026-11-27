@@ -7,7 +7,7 @@ on:
   # can write; that is how it can record signatures and comment on forks' pull requests. It
   # checks out no pull request code.
   pull_request_target: # zizmor: ignore[dangerous-triggers]
-    types: [opened, closed, synchronize]
+    types: [opened, reopened, closed, synchronize]
 
 permissions: {}
 
@@ -34,4 +34,4 @@ jobs:
           path-to-document: https://github.com/x-ryoppippi/dupin/blob/main/CLA.md
           # Signatures live on their own unprotected branch, away from main.
           branch: cla-signatures
-          allowlist: ryoppippi,dependabot[bot],renovate[bot],github-actions[bot],coderabbitai[bot]
+          allowlist: ryoppippi,autofix-ci[bot],dependabot[bot],renovate[bot],github-actions[bot],coderabbitai[bot]
