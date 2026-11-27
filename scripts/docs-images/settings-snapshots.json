@@ -1,7 +1,7 @@
 {
 	"events": [
 		{ "t": 0.3, "type": "tap", "key": "page-snapshots" },
-		{ "t": 0.6, "type": "tap", "key": "snapshot-serendipity" },
+		{ "t": 0.6, "type": "tap", "key": "snapshot-serendipity", "wait_s": 5 },
 		{ "t": 1.5, "type": "mark", "name": "end" }
 	]
 }
