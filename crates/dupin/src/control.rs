@@ -333,33 +333,105 @@ pub struct Server {
     thread: Option<std::thread::JoinHandle<()>>,
     path: PathBuf,
     inode: u64,
-    _directory_lock: std::fs::File,
+    _directory_lock: DirectoryLock,
+}
+
+/// The file in the control directory whose lock says a server owns the directory.
+const LOCK_FILE: &str = "control.lock";
+
+/// A server's hold on its control directory: a POSIX record lock on its lock file, which no
+/// other process can take while this one lives. An `flock` would do the same, but it belongs to
+/// the open file, and a child another thread is spawning starts with a copy of this process's
+/// descriptors, close-on-exec ones included, until its exec completes: closing ours then left
+/// the lock held by that copy, and a launcher started meanwhile found the directory owned. A
+/// record lock belongs to this process alone, so it ends when this process lets go of it.
+struct DirectoryLock {
+    file: Option<std::fs::File>,
+    directory: PathBuf,
+}
+
+/// The control directories this process's servers hold. Record locks never turn this process
+/// away from its own, and closing any descriptor for the lock file releases them, so a second
+/// server here is refused before it opens the file.
+fn held_here() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf>> {
+    static HELD: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    HELD.get_or_init(Default::default)
+}
+
+impl DirectoryLock {
+    fn take(directory: &std::path::Path) -> io::Result<Self> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
+        let owned_already = || {
+            io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "control server already owns the directory",
+            )
+        };
+        let mut held = held_here()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if held.contains(directory) {
+            return Err(owned_already());
+        }
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(directory.join(LOCK_FILE))?;
+        let meta = file.metadata()?;
+        // SAFETY: geteuid has no preconditions.
+        if !meta.is_file() || meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 {
+            return Err(io::Error::other("unsafe control path ownership or permissions"));
+        }
+        let whole = libc::flock {
+            l_start: 0,
+            l_len: 0,
+            l_pid: 0,
+            l_type: libc::F_WRLCK as libc::c_short,
+            l_whence: libc::SEEK_SET as libc::c_short,
+        };
+        // SAFETY: file owns a valid descriptor, and `whole` is the struct F_SETLK reads.
+        if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &raw const whole) } != 0 {
+            let error = io::Error::last_os_error();
+            return Err(match error.raw_os_error() {
+                Some(libc::EAGAIN | libc::EACCES) => owned_already(),
+                _ => error,
+            });
+        }
+        held.insert(directory.to_owned());
+        Ok(Self {
+            file: Some(file),
+            directory: directory.to_owned(),
+        })
+    }
+}
+
+impl Drop for DirectoryLock {
+    fn drop(&mut self) {
+        // Closed before another server here may open the file, whose close would end this lock.
+        drop(self.file.take());
+        held_here()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.directory);
+    }
 }
 impl Server {
     pub fn start(dispatch: impl Fn(Call) + Send + Sync + 'static) -> io::Result<Self> {
         Self::bind(socket_path(true)?, dispatch)
     }
     fn bind(path: PathBuf, dispatch: impl Fn(Call) + Send + Sync + 'static) -> io::Result<Self> {
-        use std::os::fd::AsRawFd;
         let parent = path
             .parent()
             .ok_or_else(|| io::Error::other("missing control directory"))?;
         owned(parent, true)?;
-        let directory = std::fs::File::open(parent)?;
         // A full accept queue can also return ECONNREFUSED. Hold the lock until
         // shutdown and unlink finish so another starter cannot mistake us for a stale socket.
-        // SAFETY: directory owns a valid descriptor for the duration of the lock.
-        if unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            let error = io::Error::last_os_error();
-            return Err(if error.kind() == io::ErrorKind::WouldBlock {
-                io::Error::new(
-                    io::ErrorKind::AddrInUse,
-                    "control server already owns the directory",
-                )
-            } else {
-                error
-            });
-        }
+        let directory = DirectoryLock::take(parent)?;
         let listener = match UnixListener::bind(&path) {
             Ok(listener) => listener,
             Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
@@ -592,6 +664,15 @@ mod tests {
             .is_err()
         );
     }
+    /// Removes a test's control directory, with the lock file a server there left.
+    fn remove_control_dir(dir: &std::path::Path) {
+        match std::fs::remove_file(dir.join(LOCK_FILE)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => panic!("{error}"),
+        }
+        std::fs::remove_dir(dir).unwrap();
+    }
     fn subprocess(mode: &str, dir: &std::path::Path, tmp: &str) {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "control::tests::disposable_process", "--nocapture"])
@@ -607,16 +688,6 @@ mod tests {
         assert!(status.success(), "child failed: {status}");
     }
 
-    /// Waits until nothing holds `dir`'s lock any more. Under load the lock outlives the server
-    /// this process dropped, for seconds at times, while other processes the test binary started
-    /// hold copies of its descriptor, and a server started then would find the directory owned.
-    /// Once the server is gone this process holds no descriptor for it, so no new copy appears.
-    fn released(dir: &std::path::Path) {
-        use std::os::fd::AsRawFd;
-        let directory = std::fs::File::open(dir).unwrap();
-        // SAFETY: directory owns a valid descriptor; closing it releases the lock again.
-        assert_eq!(unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX) }, 0);
-    }
     #[test]
     fn disposable_process() {
         let Ok(mode) = std::env::var("DUPIN_CONTROL_TEST") else {
@@ -636,6 +707,11 @@ mod tests {
                 drop(server);
                 assert!(!path.exists());
             }
+            "refused" => {
+                let refused = Server::bind(path, |_| panic!("refused dispatched work")).err();
+                assert_eq!(refused.map(|error| error.kind()), Some(io::ErrorKind::AddrInUse));
+            }
+            "bind" => drop(Server::bind(path, |_| panic!("bind dispatched work")).unwrap()),
             "path" => {
                 use std::os::unix::ffi::OsStrExt;
                 std::fs::write(
@@ -657,9 +733,61 @@ mod tests {
         let server = Server::bind(path.clone(), |_| {}).unwrap();
         assert!(Server::bind(path.clone(), |_| {}).is_err());
         drop(server);
-        released(&dir);
         subprocess("shutdown", &dir, "/unused-second");
-        std::fs::remove_dir(dir).unwrap();
+        remove_control_dir(&dir);
+    }
+    #[test]
+    fn another_launcher_can_bind_while_a_child_started_before_the_server_dropped_has_not_exec_ed() {
+        use std::os::unix::process::CommandExt;
+        let dir = std::env::temp_dir().join(format!("dupin-control-spawning-{}", std::process::id()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let path = dir.join("control.sock");
+        let server = Server::bind(path.clone(), |_| {}).unwrap();
+        let pipe = || {
+            let mut fds = [0; 2];
+            // SAFETY: fds is the two-descriptor array pipe fills.
+            assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+            (fds[0], fds[1])
+        };
+        let (forked_read, forked_write) = pipe();
+        let (go_read, go_write) = pipe();
+        // A child between fork and exec holds a copy of every descriptor this process has, as a
+        // child being spawned does until its exec completes; this one stays there until told.
+        let child = std::thread::spawn(move || {
+            let mut command = std::process::Command::new("/usr/bin/true");
+            // SAFETY: the closure makes only async-signal-safe calls on descriptors it was given.
+            unsafe {
+                command.pre_exec(move || {
+                    libc::write(forked_write, [1u8].as_ptr().cast(), 1);
+                    let mut byte = 0u8;
+                    libc::read(go_read, (&raw mut byte).cast(), 1);
+                    Ok(())
+                });
+            }
+            command.status().unwrap()
+        });
+        /// Lets the child go on to its exec, even when an assertion below fails: a child left
+        /// waiting would keep the test run's output open.
+        struct Release(i32);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                // SAFETY: self.0 is the test's end of the pipe the child waits on.
+                unsafe { libc::write(self.0, [1u8].as_ptr().cast(), 1) };
+            }
+        }
+        let release = Release(go_write);
+        let mut byte = 0u8;
+        // SAFETY: byte is the one byte read writes.
+        assert_eq!(unsafe { libc::read(forked_read, (&raw mut byte).cast(), 1) }, 1);
+        drop(server);
+        subprocess("bind", &dir, "/unused-spawning");
+        drop(release);
+        assert!(child.join().unwrap().success());
+        for fd in [forked_read, forked_write, go_read, go_write] {
+            // SAFETY: each is a pipe end this test opened and no longer uses.
+            unsafe { libc::close(fd) };
+        }
+        remove_control_dir(&dir);
     }
     #[cfg(target_os = "macos")]
     #[test]
@@ -672,7 +800,7 @@ mod tests {
         assert_eq!(first, std::fs::read(dir.join("resolved")).unwrap());
         assert!(first.starts_with(b"/"));
         std::fs::remove_file(dir.join("resolved")).unwrap();
-        std::fs::remove_dir(dir).unwrap();
+        remove_control_dir(&dir);
     }
     #[test]
     fn recovery_does_not_remove_regular_files_or_unsafe_sockets() {
@@ -689,7 +817,7 @@ mod tests {
         assert!(Server::bind(path.clone(), |_| {}).is_err());
         assert!(path.exists());
         std::fs::remove_file(path).unwrap();
-        std::fs::remove_dir(dir).unwrap();
+        remove_control_dir(&dir);
     }
     #[test]
     fn simultaneous_stale_restarts_leave_one_live_listener() {
@@ -717,12 +845,8 @@ mod tests {
             }
         }
         assert_eq!(servers.len(), 1);
-        let directory = std::fs::File::open(&dir).unwrap();
-        use std::os::fd::AsRawFd;
-        // SAFETY: directory owns a valid descriptor.
-        let lock = unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        assert_eq!(lock, -1, "the running server must keep the directory locked");
-        assert_eq!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock);
+        // A record lock never refuses the process holding it, so another process checks it.
+        subprocess("refused", &dir, "/unused-race");
 
         let mut client = UnixStream::connect(&path).unwrap();
         client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
@@ -739,7 +863,7 @@ mod tests {
         assert_eq!(reply.result.unwrap(), Value::Null);
         drop(client);
         drop(servers);
-        std::fs::remove_dir(dir).unwrap();
+        remove_control_dir(&dir);
     }
     #[test]
     fn frames_are_strict_and_bounded() {
@@ -765,7 +889,7 @@ mod tests {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(owned(&dir, true).is_err());
         std::fs::remove_file(link).unwrap();
-        std::fs::remove_dir(dir).unwrap();
+        remove_control_dir(&dir);
     }
     #[test]
     fn disconnect_cancels_pending_work() {
@@ -805,7 +929,7 @@ mod tests {
         assert_eq!(read_frame::<Reply>(&mut client).unwrap().id, 99);
         drop(server);
         assert!(!path.exists());
-        std::fs::remove_dir(dir).unwrap();
+        remove_control_dir(&dir);
     }
     #[test]
     fn concurrent_connections_are_bounded_and_busy_is_correlated() {
@@ -849,7 +973,7 @@ mod tests {
             assert_eq!(read_frame::<Reply>(client).unwrap().id, id as u64);
         }
         drop(server);
-        std::fs::remove_dir(dir).unwrap();
+        remove_control_dir(&dir);
     }
     #[test]
     fn fake_host_correlates() {

@@ -140,8 +140,10 @@ impl Dir {
 
     /// Every entry, without following links: a link is listed as [`Kind::Other`].
     pub fn entries(&self) -> io::Result<Vec<Entry>> {
-        // SAFETY: `dup` of a valid descriptor; `fdopendir` takes ownership of the duplicate.
-        let dup = check(unsafe { libc::dup(self.raw()) })?;
+        // A plain `dup` would clear close-on-exec, and a program another thread spawned while the
+        // listing ran would keep the folder open after Dupin let it go.
+        // SAFETY: duplicating a valid descriptor; `fdopendir` takes ownership of the duplicate.
+        let dup = check(unsafe { libc::fcntl(self.raw(), libc::F_DUPFD_CLOEXEC, 0) })?;
         // SAFETY: As above.
         let stream = unsafe { libc::fdopendir(dup) };
         if stream.is_null() {
