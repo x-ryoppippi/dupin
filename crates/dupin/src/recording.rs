@@ -1,7 +1,9 @@
 //! A real launch that is only being filmed, as `scripts/docs-glass.nu` does to show Liquid
 //! Glass, which a headless render can't draw. It draws on fixtures as a headless run does: only
 //! the folders `DUPIN_HEADLESS_APPS` names are scanned for apps, and the usage history and the
-//! other stores live in a scratch storage under a throwaway key, never the Keychain.
+//! other stores live in a scratch storage under a throwaway key, never the Keychain. The
+//! clipboard history is the `DUPIN_HEADLESS_CLIPBOARD` fixture seeded into that storage, and the
+//! real pasteboard is never watched or read.
 //!
 //! Both of these hide the user's own apps and history, so a launch is a recording only when it
 //! says so with `DUPIN_RECORDING` and its `HOME` is not the account's own: a Finder, login item

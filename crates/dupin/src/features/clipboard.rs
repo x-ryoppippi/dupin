@@ -62,7 +62,7 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
 
 fn start(providers: &mut Providers) {
     let port = providers.port(CLIPBOARD);
-    let access = if rune::tooling::is_headless() {
+    let access = if rune::tooling::is_headless() || crate::recording::active() {
         || dupin_mac::clipboard::Access::Allowed
     } else {
         dupin_mac::clipboard::access
