@@ -48,6 +48,16 @@ let
     [target."${pkgs.stdenv.hostPlatform.rust.rustcTarget}"]
     linker = "${pkgs.stdenv.cc}/bin/cc"
     rustflags = [ "-Cforce-frame-pointers=yes" ]
+
+    # Every dev build here is a check, and the checks never read debug info: a failing test
+    # still prints where it panicked. Without it, the debug dependency output each lockfile
+    # change adds to CI's cache is half the size. The dependencies need their own entry, as
+    # Cargo.toml's override for them outranks the profile's own setting.
+    [profile.dev]
+    debug = false
+
+    [profile.dev.package."*"]
+    debug = false
     EOF
   '';
   baseArgs = builtins.removeAttrs commonArgs [ "cargoDeps" ] // {
@@ -64,13 +74,7 @@ let
     cargoExtraArgs = "--offline --locked --package dupin";
     doCheck = false;
   };
-  # The checks never read debug info: a failing test still prints where it panicked. Without
-  # it, the debug dependency output each lockfile change adds to CI's cache is half the size.
-  checkEnv = baseArgs.env // {
-    CARGO_PROFILE_DEV_DEBUG = "false";
-  };
   debugArgs = baseArgs // {
-    env = checkEnv;
     CARGO_PROFILE = "dev";
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
@@ -106,7 +110,6 @@ let
   # Hawk compiles with its own toolchain, so it can't reuse the other dependency outputs.
   hawkArgs = baseArgs // {
     pname = "dupin-hawk";
-    env = checkEnv;
     nativeBuildInputs = [ cargo-hawk ];
     doCheck = false;
   };
