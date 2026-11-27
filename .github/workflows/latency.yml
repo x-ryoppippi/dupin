@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   latency:
-    runs-on: blacksmith-12vcpu-macos-27
+    runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 45
     steps:
       # actions/checkout takes only a full SHA, branch or tag, so a short SHA is resolved first.
