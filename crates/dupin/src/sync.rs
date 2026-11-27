@@ -156,12 +156,18 @@ enum Job {
     FolderChanged,
 }
 
-/// The running worker's queue, so an owner can say it wrote without holding the service.
-static JOBS: std::sync::Mutex<Option<mpsc::Sender<Job>>> = std::sync::Mutex::new(None);
+/// The running worker's queue, so an owner can say it wrote without holding the service: the
+/// launcher's, or under test the one the test started, like [`crate::synced::hub`].
+fn jobs() -> &'static std::sync::Mutex<Option<mpsc::Sender<Job>>> {
+    launcher_wide!(
+        std::sync::Mutex<Option<mpsc::Sender<Job>>>,
+        std::sync::Mutex::new(None)
+    )
+}
 
 /// An owner wrote to a namespace that syncs: export it shortly. Never blocks.
 pub fn wrote() {
-    if let Some(jobs) = &*JOBS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+    if let Some(jobs) = &*jobs().lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
         let _ = jobs.send(Job::Wrote);
     }
 }
@@ -183,12 +189,15 @@ impl SyncService {
         };
         let (jobs, receive) = mpsc::channel();
         let _ = jobs.send(Job::Config(config.clone()));
-        *JOBS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(jobs.clone());
+        *self::jobs()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(jobs.clone());
         let notify: Notify = Arc::new(notify);
         let own_jobs = jobs.clone();
+        let hub = crate::synced::hub();
         let spawned = std::thread::Builder::new()
             .name("dupin-sync".into())
-            .spawn(move || Worker::new(storage, notify, own_jobs).run(receive));
+            .spawn(move || Worker::new(storage, hub, notify, own_jobs).run(receive));
         match spawned {
             Ok(_) => Self { jobs: Some(jobs) },
             Err(error) => {
@@ -291,6 +300,8 @@ impl dupin_sync::Fold for UsageFold {
 
 struct Worker {
     storage: Arc<Storage>,
+    /// The sync state of the launcher that started the worker.
+    hub: &'static crate::synced::Hub,
     notify: Notify,
     home: Home,
     config: dupin_core::config::Sync,
@@ -310,8 +321,14 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(storage: Arc<Storage>, notify: Notify, jobs: mpsc::Sender<Job>) -> Self {
+    fn new(
+        storage: Arc<Storage>,
+        hub: &'static crate::synced::Hub,
+        notify: Notify,
+        jobs: mpsc::Sender<Job>,
+    ) -> Self {
         Self {
+            hub,
             jobs,
             watcher: None,
             due: None,
@@ -408,8 +425,8 @@ impl Worker {
         if let Some(vault) = &self.vault {
             self.storage.hold_vault_key(vault.clone());
         }
-        crate::synced::set_switches(self.config.clone());
-        crate::synced::set_vault(self.vault.clone());
+        self.hub.set_switches(self.config.clone());
+        self.hub.set_vault(self.vault.clone());
         self.open_usage(first);
         self.pass();
     }
@@ -643,7 +660,7 @@ impl Worker {
         let fold = UsageFold {
             notify: self.notify.clone(),
         };
-        let owned = crate::synced::open_stores();
+        let owned = self.hub.open_stores();
         let mut namespaces: Vec<dupin_sync::Namespace<'_>> = owned
             .iter()
             .filter(|(name, _, _)| self.config.includes(name) || name.starts_with("ext-s-"))
@@ -663,7 +680,7 @@ impl Worker {
             });
         }
         let all: Vec<&str> = crate::synced::SYNCED.iter().map(|(name, _)| *name).collect();
-        let revoked = crate::synced::leaving_extensions();
+        let revoked = self.hub.leaving_extensions();
         let mut switched_off: Vec<&str> = all
             .iter()
             .copied()
@@ -689,11 +706,11 @@ impl Worker {
                 self.problem = None;
                 for name in &report.changed {
                     if name != USAGE {
-                        crate::synced::changed(name);
+                        self.hub.changed(name);
                     }
                 }
                 for name in &report.left {
-                    crate::synced::left_extension(name);
+                    self.hub.left_extension(name);
                 }
                 let left = all.iter().all(|name| report.left.iter().any(|left| left == name));
                 let reminted = report.reminted;
@@ -823,7 +840,7 @@ impl Worker {
         self.state = Some(state);
         self.vault = Some(joined.key.clone());
         self.storage.hold_vault_key(joined.key.clone());
-        crate::synced::set_vault(Some(joined.key.clone()));
+        self.hub.set_vault(Some(joined.key.clone()));
         let engine = self.engine_for(folder, joined)?;
         self.watch(engine.folder_path());
         self.engine = Some(engine);
@@ -842,7 +859,7 @@ impl Worker {
         write_state(Some(&state))?;
         self.state = Some(state);
         self.vault = None;
-        crate::synced::set_vault(None);
+        self.hub.set_vault(None);
         self.open_usage(false);
         self.pass();
         if self.engine.is_none() {
