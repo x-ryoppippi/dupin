@@ -553,12 +553,26 @@ declare module 'dupin' {
 		filters?: Record<string, { stage: 'matcher' | 'sorter' }>;
 		/** Each one an export of `actions`, receiving the field it names, which `capabilities.rows` declares. */
 		kinds?: {
-			text?: Record<string, { field: 'text' }>;
-			url?: Record<string, { field: 'url' }>;
-			file?: Record<string, { field: 'name' | 'path' }>;
-			app?: Record<string, { field: 'name' | 'path' }>;
+			text?: Record<string, KindActionDeclaration<'text'>>;
+			url?: Record<string, KindActionDeclaration<'url'>>;
+			file?: Record<string, KindActionDeclaration<'name' | 'path'>>;
+			app?: Record<string, KindActionDeclaration<'name' | 'path'> & { when?: 'running' }>;
 		};
 	}
+
+	/**
+	 * One kind action. With `default`, Dupin composes it onto every row of its kind, after the
+	 * actions config.toml adds, in the order of their names, while the package runs; config.toml
+	 * hides or moves it with `hide` and `order`, naming it `<package>/<action>`. `confirm` asks before it
+	 * runs and `when: 'running'` offers an app action only while the app runs, wherever it is
+	 * composed; Dupin checks that as the action screen opens.
+	 */
+	export type KindActionDeclaration<Field extends string> = {
+		field: Field;
+		/** What the action screen calls it when Dupin composes it, up to 128 bytes. */
+		title?: string;
+		confirm?: boolean;
+	} & ({ default?: false } | { default: true; title: string });
 
 	export type PreferenceDeclaration = { title: string } & (
 		| { type: 'checkbox'; default: boolean }

@@ -28,7 +28,9 @@ const DUPIN_KEY_NAMES: [&str; 10] = [
     "capabilities",
     "provides",
 ];
-const PROVIDES_HINT: &str = "`provides` takes `filters`, as `{ \"<name>\": { \"stage\": \"matcher\" | \"sorter\" } }`, and `kinds`, as `{ \"<kind>\": { \"<action>\": { \"field\": \"<field>\" } } }`; see docs/features/advanced.md.";
+const PROVIDES_HINT: &str = "`provides` takes `filters`, as `{ \"<name>\": { \"stage\": \"matcher\" | \"sorter\" } }`, and `kinds`, as `{ \"<kind>\": { \"<action>\": { \"field\": \"<field>\", \"title\"?: \"<title>\", \"default\"?: true, \"confirm\"?: true, \"when\"?: \"running\" } } }`; see docs/features/advanced.md.";
+/// The longest title a kind action composed by default may have, as config.toml's titles.
+const MAX_KIND_TITLE_BYTES: usize = 128;
 /// Filters, and kind actions for each kind, one package may provide.
 const MAX_CONTRIBUTIONS: usize = 8;
 const DEFAULT_SEARCH_HINT: &str =
@@ -89,9 +91,23 @@ fn parse_icon(icon: &str) -> Result<PackageIcon, Diagnostic> {
 pub struct Provides {
     /// Its `filters` exports by name, with the stage each is.
     pub filters: std::collections::BTreeMap<String, dupin_js_runtime::FilterStage>,
-    /// Its `actions` exports that act on rows of a kind, by kind and name, with the one field
-    /// each receives.
-    pub kinds: std::collections::BTreeMap<(RowKind, String), RowField>,
+    /// Its `actions` exports that act on rows of a kind, by kind and name.
+    pub kinds: std::collections::BTreeMap<(RowKind, String), KindProvision>,
+}
+
+/// How a package declares one kind action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KindProvision {
+    /// The one field of the row it receives.
+    pub field: RowField,
+    /// What the action screen calls it when Dupin composes it by default.
+    pub title: Option<String>,
+    /// Composed onto every row of the kind while the package runs, unless config.toml excludes
+    /// or places it.
+    pub default: bool,
+    /// Ask before running it.
+    pub confirm: bool,
+    pub availability: Option<dupin_core::kind::Availability>,
 }
 
 /// The `provides` value of a manifest, checked against the scopes `capabilities` declares: a
@@ -203,7 +219,9 @@ fn parse_provides(value: &Value, capabilities: &dupin_broker::Capabilities) -> R
                         let field = format!("{field}.{name}");
                         named(&name, &field)?;
                         let action = object(&action, &field)?;
-                        if let Some(key) = action.keys().find(|key| *key != "field") {
+                        if let Some(key) = action.keys().find(|key| {
+                            !["field", "title", "default", "confirm", "when"].contains(&key.as_str())
+                        }) {
                             return Err(problem(
                                 &format!("{field}.{key}"),
                                 "is not a key Dupin reads".into(),
@@ -239,7 +257,61 @@ fn parse_provides(value: &Value, capabilities: &dupin_broker::Capabilities) -> R
                                 ),
                             ));
                         }
-                        provides.kinds.insert((kind, name), row_field);
+                        let flag = |key: &str| match action.get(key) {
+                            None => Ok(false),
+                            Some(Value::Bool(set)) => Ok(*set),
+                            Some(_) => {
+                                Err(problem(&format!("{field}.{key}"), "must be true or false".into()))
+                            }
+                        };
+                        let title = match action.get("title") {
+                            None => None,
+                            Some(Value::String(title))
+                                if !title.trim().is_empty()
+                                    && title.trim() == title
+                                    && title.len() <= MAX_KIND_TITLE_BYTES
+                                    && !title.chars().any(char::is_control) =>
+                            {
+                                Some(title.clone())
+                            }
+                            Some(_) => {
+                                return Err(problem(
+                                    &format!("{field}.title"),
+                                    format!(
+                                        "must be one line of 1 to {MAX_KIND_TITLE_BYTES} bytes without outer whitespace"
+                                    ),
+                                ));
+                            }
+                        };
+                        let default = flag("default")?;
+                        if default && title.is_none() {
+                            return Err(problem(
+                                &format!("{field}.title"),
+                                "is needed for an action Dupin composes by default".into(),
+                            ));
+                        }
+                        let availability = match action.get("when") {
+                            None => None,
+                            Some(Value::String(when)) if when == "running" && kind == RowKind::App => {
+                                Some(dupin_core::kind::Availability::Running)
+                            }
+                            Some(_) => {
+                                return Err(problem(
+                                    &format!("{field}.when"),
+                                    "must be \"running\", on an app action".into(),
+                                ));
+                            }
+                        };
+                        provides.kinds.insert(
+                            (kind, name),
+                            KindProvision {
+                                field: row_field,
+                                title,
+                                default,
+                                confirm: flag("confirm")?,
+                                availability,
+                            },
+                        );
                     }
                 }
             }
@@ -854,7 +926,16 @@ mod tests {
         );
         assert_eq!(
             provides.kinds.into_iter().collect::<Vec<_>>(),
-            [((RowKind::File, "upload".to_owned()), RowField::Path)]
+            [(
+                (RowKind::File, "upload".to_owned()),
+                KindProvision {
+                    field: RowField::Path,
+                    title: None,
+                    default: false,
+                    confirm: false,
+                    availability: None,
+                }
+            )]
         );
         let titles = serde_json::json!({ "rows": { "app": ["title"] } });
         for (capabilities, provides, field) in [
@@ -905,6 +986,49 @@ mod tests {
             ),
         ] {
             let problem = provided(capabilities, provides.clone()).unwrap_err();
+            assert_eq!(problem.field.as_deref(), Some(field), "{provides}: {problem:?}");
+        }
+        let paths = serde_json::json!({ "rows": { "app": ["path"], "file": ["path"] } });
+        let quit = provided(
+            paths.clone(),
+            serde_json::json!({ "kinds": { "app": { "quit": {
+                "field": "path", "title": "Quit", "default": true, "confirm": true, "when": "running"
+            } } } }),
+        )
+        .unwrap();
+        assert_eq!(
+            quit.kinds.get(&(RowKind::App, "quit".to_owned())),
+            Some(&KindProvision {
+                field: RowField::Path,
+                title: Some("Quit".into()),
+                default: true,
+                confirm: true,
+                availability: Some(dupin_core::kind::Availability::Running),
+            })
+        );
+        for (provides, field) in [
+            (
+                serde_json::json!({ "kinds": { "app": { "quit": { "field": "path", "default": true } } } }),
+                "dupin.provides.kinds.app.quit.title",
+            ),
+            (
+                serde_json::json!({ "kinds": { "app": { "quit": { "field": "path", "title": " Quit" } } } }),
+                "dupin.provides.kinds.app.quit.title",
+            ),
+            (
+                serde_json::json!({ "kinds": { "app": { "quit": { "field": "path", "default": "yes" } } } }),
+                "dupin.provides.kinds.app.quit.default",
+            ),
+            (
+                serde_json::json!({ "kinds": { "app": { "quit": { "field": "path", "when": "hidden" } } } }),
+                "dupin.provides.kinds.app.quit.when",
+            ),
+            (
+                serde_json::json!({ "kinds": { "file": { "quit": { "field": "path", "when": "running" } } } }),
+                "dupin.provides.kinds.file.quit.when",
+            ),
+        ] {
+            let problem = provided(paths.clone(), provides.clone()).unwrap_err();
             assert_eq!(problem.field.as_deref(), Some(field), "{provides}: {problem:?}");
         }
         let many: Map<String, Value> = (0..=MAX_CONTRIBUTIONS)

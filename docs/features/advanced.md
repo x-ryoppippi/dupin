@@ -11,7 +11,7 @@ Edit the `[advanced]` table in `config.toml`; Settings → Search shows what it 
 - In Settings → Search, the composition `[advanced]` sets, read-only.
 - Rows matched and ordered by the matcher and sorter you chose.
 - In the main search, results from the sources you appended, below the apps.
-- In the action screen, the actions you added to a kind, after the kind's own.
+- In the action screen, the actions you added to a kind, after the kind's own, then the ones a package that is on adds by default.
 - In the action screen, a kind's actions in the order you set, without the ones you hid.
 
 ## What you can do
@@ -210,7 +210,7 @@ A file row lists them in this order by default. `rename` to `compress` appear on
 
 Hiding an action never turns it off. <kbd>↩</kbd> and <kbd>⌘↩</kbd> still run `open` and `reveal`, and <kbd>⌘Y</kbd> still runs `quick-look`, so you can keep a key you use without its row. A hidden action that asks you to confirm first is shown for that prompt only.
 
-A [package's kind action](#extensions) is named `<package>/<action>`, as `extension` names it; one no package composes on the kind changes nothing. A `script` or `url` action has no ID: it keeps its place among the actions you added, after any you list in `order`. Remove it from `actions` to hide it.
+A [package's kind action](#extensions), whether you add it in `actions` or the package adds it [by default](#default-kind-actions), is named `<package>/<action>`, as `extension` names it; one no package composes on the kind changes nothing. A `script` or `url` action has no ID: it keeps its place among the actions you added, after any you list in `order`. Remove it from `actions` to hide it.
 
 `text` and `url` take neither key: an extension's row lists the extension's own actions, and Dupin's only `text` and `url` actions are the ones <kbd>↩</kbd> runs.
 
@@ -218,7 +218,7 @@ A [package's kind action](#extensions) is named `<package>/<action>`, as `extens
 
 ## Extensions
 
-An extension can provide filters and kind actions, declared in the `provides` object of its [manifest](./extension-manifest.md). Nothing is composed until `config.toml` names one as `<package>/<name>`:
+An extension can provide filters and kind actions, declared in the `provides` object of its [manifest](./extension-manifest.md). Nothing is composed until `config.toml` names one as `<package>/<name>`, except a kind action the package declares `default`, which joins every row of its kind while the package is on ([Default kind actions](#default-kind-actions)):
 
 ```toml
 [advanced.sources.apps]
@@ -264,6 +264,15 @@ export const filters = {
 | `provides.filters.<name>`      | `stage`: `matcher` or `sorter`           | `matcher` or `sorter` of `apps` or `folder`       | `rows:app` or `rows:file` with `title`; `query` for a matcher |
 | `provides.kinds.<kind>.<name>` | `field`: `text`, `url`, `name` or `path` | `extension = "<package>/<name>"` on a kind action | `rows:<kind>` with that field                                 |
 
+A kind action may also declare `title`, `default`, `confirm` and, on an app action, `when`:
+
+| Key       | Means                                                                                                                             |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `title`   | What the action screen calls it when Dupin composes it by default: one line of up to 128 bytes. `default` needs one.              |
+| `default` | `true` composes it onto every row of its kind while the package is on.                                                            |
+| `confirm` | `true` asks before it runs, as Move to Trash does, wherever it is composed: “Force Quit “Safari”?”, with the title as the button. |
+| `when`    | `"running"` offers an app action only while the app runs, wherever it is composed.                                                |
+
 A matcher returns `{ index, score?, positions? }` for each candidate it finds, and a sorter every index once, in its order. `dupin.d.ts` declares `Provides`, `Filters`, `FilterInput`, `FilterMatch` and `KindActionData`.
 
 </details>
@@ -283,6 +292,25 @@ If the package isn't running, doesn't provide that filter as that stage, isn't a
 <summary>How kind actions run</summary>
 
 A kind action is an `actions` export. It appears only on rows Dupin's own sources found: an extension's rows never reach another package's kind action. When you choose it, Dupin asks the broker for `rows:<kind>` with that field, as an action you chose, and runs `actions[name]({ <field>: value })` as any action of the package runs, with its effects. A field it isn't allowed shows why instead.
+
+</details>
+
+### Default kind actions
+
+A package's `default` kind actions follow the ones `[[advanced.kinds.<kind>.actions]]` adds, each package's in the order of their names. They are named `<package>/<action>`, so [`hide` and `order`](#hide-and-order) hide and move them as they do the kind's own actions:
+
+```toml
+[advanced.kinds.app]
+hide = ["running-apps/quit_forcibly"]
+order = ["open", "running-apps/quit"]
+```
+
+Naming one in `[[advanced.kinds.<kind>.actions]]` adds it under your own title instead, in that place, and Dupin doesn't add it again.
+
+<details>
+<summary>When they show</summary>
+
+Default actions show only on rows Dupin's own sources found, as every package's kind action does, and only while the package is on: turning it off takes them away. An action declared `when = "running"` is checked as the action screen opens, against the apps running then, so typing never waits for it: the action screen of an app that isn't running doesn't list it.
 
 </details>
 

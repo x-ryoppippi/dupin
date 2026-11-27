@@ -13,7 +13,7 @@ use std::time::Duration;
 use dupin_broker::{RowField, RowKind};
 use dupin_core::config::{Advanced, contribution};
 use dupin_core::filter::{BatchStage, Filters, Hit, Sorter, SourceFilters, Stages};
-use dupin_core::kind::{Kinds, Subject};
+use dupin_core::kind::{KindName, Kinds, Provided, Subject};
 use dupin_extension_bridge::{Bridge, Request, Trigger};
 use dupin_js_runtime::{FilterInput, FilterStage};
 use dupin_mac::kinds::Rows;
@@ -55,6 +55,15 @@ impl Composition {
     /// Where the packages a composed filter runs in are handed over.
     pub fn guests(&self) -> &Arc<Guests> {
         &self.guests
+    }
+
+    /// The packages that run now, whose filters composed onto a source run in them and whose
+    /// kind actions the kinds compose. Whether the kinds' actions changed, which rows already
+    /// built lack.
+    pub fn set_extensions(&self, extensions: Vec<Arc<Extension>>) -> bool {
+        let provided = provided(&extensions);
+        self.guests.set_extensions(extensions);
+        self.kinds.provide(provided)
     }
 
     /// What the source `name`, which matches its own candidates, builds its rows with.
@@ -342,6 +351,37 @@ impl BatchStage for GuestFilter {
                 })
                 .collect(),
         )
+    }
+}
+
+/// The kind actions `extensions` provide, each package's in the order of their names.
+fn provided(extensions: &[Arc<Extension>]) -> Vec<Provided> {
+    extensions
+        .iter()
+        .flat_map(|extension| {
+            extension
+                .provides
+                .kinds
+                .iter()
+                .map(|((kind, name), provision)| Provided {
+                    kind: kind_name(*kind),
+                    package: extension.id.clone(),
+                    name: name.clone(),
+                    title: provision.title.clone(),
+                    confirm: provision.confirm,
+                    availability: provision.availability,
+                    default: provision.default,
+                })
+        })
+        .collect()
+}
+
+fn kind_name(kind: RowKind) -> KindName {
+    match kind {
+        RowKind::Text => KindName::Text,
+        RowKind::Url => KindName::Url,
+        RowKind::File => KindName::File,
+        RowKind::App => KindName::App,
     }
 }
 
@@ -703,7 +743,7 @@ export const filters = {
             path: "/Users/test/a.txt".into(),
             folder: false,
         };
-        let native = composition.kinds().configured(&file, Producer::Dupin);
+        let native = composition.kinds().configured(&file, "a.txt", Producer::Dupin);
         assert_eq!(
             native,
             [dupin_core::ItemAction::new(
@@ -723,11 +763,17 @@ export const filters = {
         assert!(
             composition
                 .kinds()
-                .configured(&text, Producer::Extension)
+                .configured(&text, "Text", Producer::Extension)
                 .is_empty(),
             "another extension's rows never reach a package's kind action"
         );
-        assert_eq!(composition.kinds().configured(&text, Producer::Dupin).len(), 1);
+        assert_eq!(
+            composition
+                .kinds()
+                .configured(&text, "Text", Producer::Dupin)
+                .len(),
+            1
+        );
         assert_eq!(row_kind(&file), RowKind::File);
         assert_eq!(row_field(&file, RowField::Name).as_deref(), Some("a.txt"));
         assert_eq!(
