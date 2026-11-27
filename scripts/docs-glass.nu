@@ -358,7 +358,7 @@ def draw-landscape [
     )
     (
         ^magick $scene $reflection -append
-        -attenuate 0.12 +noise Gaussian
+        -attenuate 0.06 +noise Gaussian -depth 8
         $out
     )
 }
@@ -405,7 +405,7 @@ def record-clip [
             (
                 ^ffmpeg -nostdin -hide_banner -loglevel error -y -f avfoundation -framerate 30
                 -capture_cursor 0 -i "Capture screen 0:none" -t ($seconds | into string) -an
-                -c:v libx264 -preset veryfast -crf 12 -pix_fmt yuv420p -stats_period 0.1
+                -c:v libx264 -preset veryfast -crf 8 -pix_fmt yuv444p -stats_period 0.1
                 -progress $progress $movie
             )
             true | job send 0 --tag 1

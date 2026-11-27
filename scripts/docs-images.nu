@@ -436,18 +436,20 @@ def finish-clip [
 # Encodes `pngs` over `video.background` as an H.264 MP4 at `out`, which every browser plays and
 # which takes a fraction of an animated WebP's bytes when a backdrop shader changes every pixel of
 # every frame, and saves the last frame as `video.poster`.
+# `-tune grain` keeps the dither a smooth gradient is drawn with, which `animation` smooths away
+# and leaves as bands.
 export def encode-video [pngs: list<string>, out: path, video: record]: nothing -> nothing {
     ^magick mogrify -background $video.background -flatten ...$pngs
     let frames = $pngs | first | path dirname | path join "frame_*.png"
     let result = (
         ^ffmpeg -loglevel error -y -framerate ($CLIP_FPS | into string) -pattern_type glob -i $frames
-        -c:v libx264 -crf 26 -preset veryslow -tune animation -pix_fmt yuv420p -movflags +faststart -an $out
+        -c:v libx264 -crf 22 -preset veryslow -tune grain -pix_fmt yuv420p -movflags +faststart -an $out
         | complete
     )
     if $result.exit_code != 0 {
         error make {msg: $"ffmpeg failed for ($out):\n($result.stderr)"}
     }
-    ^magick ($pngs | last) -quality 85 $video.poster
+    ^magick ($pngs | last) -quality 90 $video.poster
 }
 
 # An extension's fixture played through `dupin ext render --record`, up to `step` or its last
