@@ -28,6 +28,7 @@ row_height = 52
 corner_radius = 14
 font_size = 15
 font_family = "system"
+search_icon = "⌕"
 
 [theme.light]
 

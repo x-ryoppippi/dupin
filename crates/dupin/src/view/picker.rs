@@ -3,7 +3,7 @@ use rune::{Color, El, TextStyle, col, row, text, text_input};
 use crate::ui::Ui;
 
 use super::header::HEADER_H;
-use super::results::visible_rows;
+use super::results::{list_order, visible_rows};
 
 pub(super) fn view(s: &Ui, values: &[serde_json::Value], selected: usize) -> El {
     let field = text_input(&s.query, TextStyle::new(22.0, 400.0))
@@ -13,19 +13,35 @@ pub(super) fn view(s: &Ui, values: &[serde_json::Value], selected: usize) -> El 
         .on_edit(|s: &mut Ui| &mut s.query)
         .on_input_key(Ui::key)
         .on_input_change(Ui::edited);
-    picker_view(field, values, &s.query.text, selected, s.theme.row_height as f32).on_key(Ui::key)
+    picker_view(
+        field,
+        values,
+        &s.query.text,
+        selected,
+        visible_rows(s.list_budget, s.theme.row_height as f32),
+        s.theme.row_height as f32,
+        s.grows_up(),
+    )
+    .on_key(Ui::key)
 }
 
-fn picker_view(field: El, values: &[serde_json::Value], query: &str, selected: usize, row_height: f32) -> El {
-    let shown = visible_rows(row_height);
-    let mut list = col().key("picker").w_full().fill(Color::BLACK).child(
+fn picker_view(
+    field: El,
+    values: &[serde_json::Value],
+    query: &str,
+    selected: usize,
+    shown: usize,
+    row_height: f32,
+    grows_up: bool,
+) -> El {
+    let mut parts = vec![
         row()
             .w_full()
             .h(HEADER_H)
             .px(16.0)
             .center_y()
             .child(field.grow(1.0)),
-    );
+    ];
     for (index, original) in crate::ui::pick_indices(values, query)
         .into_iter()
         .enumerate()
@@ -37,7 +53,7 @@ fn picker_view(field: El, values: &[serde_json::Value], query: &str, selected: u
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| value.to_string());
-        list = list.child(
+        parts.push(
             row()
                 .key(format!("pick-item-{original}"))
                 .w_full()
@@ -57,7 +73,11 @@ fn picker_view(field: El, values: &[serde_json::Value], query: &str, selected: u
                 .child(text(label).color(Color::WHITE)),
         );
     }
-    list
+    col()
+        .key("picker")
+        .w_full()
+        .fill(Color::BLACK)
+        .children(list_order(parts, grows_up))
 }
 
 #[cfg(test)]
@@ -84,7 +104,9 @@ mod picker_tests {
                     &s.values,
                     "",
                     0,
+                    8,
                     52.0,
+                    false,
                 )
             },
         ));

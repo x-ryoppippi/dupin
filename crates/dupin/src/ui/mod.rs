@@ -80,6 +80,8 @@ type BoundAgainst = (
     std::collections::BTreeMap<String, dupin_core::config::HotkeyTarget>,
     Vec<String>,
     bool,
+    bool,
+    Vec<String>,
 );
 
 pub struct Configuration {
@@ -122,9 +124,12 @@ pub struct Ui {
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
     bindings_applied: bool,
-    /// The bindings, commands and whether the extensions had loaded when the shortcuts were
-    /// last applied, since a `target = "dupin"` binding registers once its command is there.
+    /// The bindings, commands, whether the extensions had loaded, System Command Automation
+    /// and the web searches bindings name that answer, when the shortcuts were last applied,
+    /// since a `target = "dupin"` binding registers once what it addresses is there.
     bound_against: Option<BoundAgainst>,
+    /// The row a shortcut chose that waits for its package's consent, to run once granted.
+    bound_waiting: Option<hotkeys::Waiting>,
     pub icons: HashMap<dupin_core::Icon, Image>,
     /// The images extension rows name, made off the panel's thread.
     pub(crate) thumbnails: thumbnails::Thumbnails,
@@ -132,6 +137,9 @@ pub struct Ui {
     visible_rows: std::ops::Range<usize>,
     /// How far down the result list is scrolled, as it last drew.
     pub(crate) list_offset: Rc<Cell<f32>>,
+    /// The height the result list takes before it scrolls, from the display the panel last
+    /// opened on.
+    pub list_budget: f32,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -317,6 +325,7 @@ impl Ui {
             acknowledged_config: config.clone(),
             bindings_applied: false,
             bound_against: None,
+            bound_waiting: None,
             session: registration.session,
             query,
             config_problem: None,
@@ -328,6 +337,7 @@ impl Ui {
             thumbnails: thumbnails::Thumbnails::new(),
             visible_rows: 0..0,
             list_offset: Rc::default(),
+            list_budget: crate::view::DEFAULT_LIST_BUDGET,
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
@@ -384,6 +394,11 @@ impl Ui {
         };
         ui.watch_extensions(config.extensions);
         ui
+    }
+
+    /// Whether the panel's lists run upwards from the field, the best match next to it.
+    pub(crate) fn grows_up(&self) -> bool {
+        self.position.grows_up()
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {

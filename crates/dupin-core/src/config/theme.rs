@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::item::{SYMBOL_PREFIX, is_symbol_name};
+
 /// What animates behind the query field. In config.toml: `"flow"`, `"off"`, or the path to a
 /// WGSL file (`~/` is the home directory; a relative path is relative to config.toml).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -42,6 +44,7 @@ pub struct Theme {
     pub corner_radius: u16,
     pub font_size: u16,
     pub font_family: FontFamily,
+    pub search_icon: SearchIcon,
     pub light: Colors,
     pub dark: Colors,
 }
@@ -81,6 +84,47 @@ impl From<FontFamily> for String {
     }
 }
 
+/// What stands before the query field. In config.toml: `"sf:"` and an SF Symbol's name
+/// (`"sf:sparkle"`), or a few characters of text (`"⌕"`, the default).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+pub enum SearchIcon {
+    /// An SF Symbol, drawn in the secondary text colour.
+    Symbol(String),
+    /// Text in the theme's font, such as a glyph or an emoji.
+    Text(String),
+}
+
+/// The search icon a theme without one shows, and one whose symbol the system lacks.
+pub const DEFAULT_SEARCH_ICON: &str = "⌕";
+
+/// The most characters a text search icon holds: room for a joined emoji, not for a word.
+const MAX_SEARCH_ICON_TEXT: usize = 8;
+
+impl Default for SearchIcon {
+    fn default() -> Self {
+        SearchIcon::Text(DEFAULT_SEARCH_ICON.into())
+    }
+}
+
+impl From<String> for SearchIcon {
+    fn from(value: String) -> Self {
+        match value.strip_prefix(SYMBOL_PREFIX) {
+            Some(name) => SearchIcon::Symbol(name.into()),
+            None => SearchIcon::Text(value),
+        }
+    }
+}
+
+impl From<SearchIcon> for String {
+    fn from(value: SearchIcon) -> Self {
+        match value {
+            SearchIcon::Symbol(name) => format!("{SYMBOL_PREFIX}{name}"),
+            SearchIcon::Text(text) => text,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Colors {
@@ -101,6 +145,7 @@ struct ThemeValues {
     corner_radius: u16,
     font_size: u16,
     font_family: FontFamily,
+    search_icon: SearchIcon,
     light: Colors,
     dark: Colors,
 }
@@ -112,6 +157,7 @@ impl Default for Theme {
             corner_radius: 14,
             font_size: 15,
             font_family: FontFamily::System,
+            search_icon: SearchIcon::default(),
             light: Colors::default(),
             dark: Colors::default(),
         }
@@ -126,6 +172,7 @@ impl Default for ThemeValues {
             corner_radius: t.corner_radius,
             font_size: t.font_size,
             font_family: t.font_family,
+            search_icon: t.search_icon,
             light: t.light,
             dark: t.dark,
         }
@@ -146,6 +193,19 @@ impl TryFrom<ThemeValues> for Theme {
             && name.trim().is_empty()
         {
             return Err("theme font_family must not be empty".into());
+        }
+        let search_icon_fits = match &v.search_icon {
+            SearchIcon::Symbol(name) => is_symbol_name(name),
+            SearchIcon::Text(text) => {
+                !text.trim().is_empty()
+                    && text.chars().count() <= MAX_SEARCH_ICON_TEXT
+                    && !text.chars().any(char::is_control)
+            }
+        };
+        if !search_icon_fits {
+            return Err(format!(
+                "theme search_icon must be \"{SYMBOL_PREFIX}\" and an SF Symbol's name, or 1..{MAX_SEARCH_ICON_TEXT} characters of text"
+            ));
         }
         for c in [&v.light, &v.dark] {
             for value in [
@@ -174,6 +234,7 @@ impl TryFrom<ThemeValues> for Theme {
             corner_radius: v.corner_radius,
             font_size: v.font_size,
             font_family: v.font_family,
+            search_icon: v.search_icon,
             light: v.light,
             dark: v.dark,
         })
@@ -221,6 +282,27 @@ mod tests {
             assert!(Config::parse(&format!("[theme]\n{field}")).is_err(), "{field}");
         }
         assert_eq!(Config::parse("").unwrap().theme, Theme::default());
+    }
+
+    #[test]
+    fn search_icon_is_a_symbol_or_short_text() {
+        use super::SearchIcon;
+        let read = |v: &str| Config::parse(&format!("[theme]\nsearch_icon = \"{v}\""));
+        assert_eq!(Theme::default().search_icon, SearchIcon::Text("⌕".into()));
+        assert_eq!(
+            read("sf:sparkle").unwrap().theme.search_icon,
+            SearchIcon::Symbol("sparkle".into())
+        );
+        assert_eq!(read("λ").unwrap().theme.search_icon, SearchIcon::Text("λ".into()));
+        assert_eq!(
+            read("🔎").unwrap().theme.search_icon,
+            SearchIcon::Text("🔎".into())
+        );
+        for value in ["", "   ", "sf:", "sf:moon fill", "sf:../moon", "far too long"] {
+            assert!(read(value).is_err(), "{value}");
+        }
+        let config = read("sf:moon.fill").unwrap();
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
     }
 
     #[test]

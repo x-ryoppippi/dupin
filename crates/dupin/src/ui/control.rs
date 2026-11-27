@@ -162,7 +162,7 @@ impl Ui {
                     call.finish(Err(error));
                     return;
                 }
-                let commands = self.bound_commands();
+                let commands = self.bound_commands(desired);
                 let previous = self.configuration.values.borrow();
                 {
                     let scripts = self.scripts.read().unwrap();

@@ -36,7 +36,8 @@ impl From<InputSource> for String {
     }
 }
 
-/// Where the panel opens. Results always grow downwards from the field.
+/// Where the panel opens. Results grow away from the field: downwards from it, or upwards at
+/// the bottom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Position {
@@ -45,6 +46,16 @@ pub enum Position {
     Center,
     /// The field near the top, about where Spotlight puts it.
     Top,
+    /// The field near the bottom, as far from it as `Top` is from the top, with the results
+    /// above it and the best match next to it, as fzf and Telescope lay out.
+    Bottom,
+}
+
+impl Position {
+    /// Whether the panel's lists run upwards from the field.
+    pub fn grows_up(self) -> bool {
+        self == Position::Bottom
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -83,6 +94,12 @@ mod tests {
             Config::parse("position = \"top\"").unwrap().position,
             Position::Top
         );
+        assert_eq!(
+            Config::parse("position = \"bottom\"").unwrap().position,
+            Position::Bottom
+        );
+        assert!(Position::Bottom.grows_up());
+        assert!(!Position::Top.grows_up() && !Position::Center.grows_up());
         assert!(Config::parse("position = \"middle\"").is_err());
     }
 

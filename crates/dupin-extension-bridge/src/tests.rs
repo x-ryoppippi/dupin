@@ -636,7 +636,8 @@ fn revoking_while_a_request_runs_drops_its_result_and_the_call_is_stale() {
     );
     world.enable();
     world.grant("http:https://api.example.com");
-    *world.http.delay.lock().unwrap() = Duration::from_millis(300);
+    let (release, hold) = std::sync::mpsc::channel();
+    *world.http.hold.lock().unwrap() = Some(hold);
     let world = Arc::new(world);
     let call = world.bridge.call(&world.id, Trigger::Query);
     let searching = {
@@ -653,11 +654,12 @@ fn revoking_while_a_request_runs_drops_its_result_and_the_call_is_stale() {
             )
         })
     };
-    std::thread::sleep(Duration::from_millis(100));
+    wait_for(|| !world.http.requests.lock().unwrap().is_empty());
     world
         .bridge
         .revoke(&world.id, &"http:https://api.example.com".parse().unwrap())
         .unwrap();
+    release.send(()).unwrap();
     let rows = searching.join().unwrap().unwrap();
     assert_eq!(rows[0].title, "revoked");
     assert_eq!(
@@ -920,7 +922,8 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
              export const events = { async clipboard(change) { await storage.put(change.text); } };",
         ),
     ));
-    let delivered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // Noted once the handler has returned, so a delivery still under way is never counted.
+    let delivered = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let (world_for_watch, delivered) = (Arc::downgrade(&world), delivered.clone());
         world.bridge.watch_clipboard(&world.id, move |event| {
@@ -937,7 +940,7 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
                 &|| false,
                 &call.services,
             );
-            delivered.fetch_add(1, Ordering::Relaxed);
+            delivered.lock().unwrap().push(event["text"].clone());
         });
     }
     assert_eq!(world.clipboard.watchers(), 0, "not on, not granted");
@@ -951,11 +954,12 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
     assert_eq!(world.clipboard.watchers(), 1);
 
     world.clipboard.copy("first");
-    wait_for(|| delivered.load(Ordering::Relaxed) == 1);
+    wait_for(|| delivered.lock().unwrap().len() == 1);
     for index in 0..20 {
         world.clipboard.copy(&format!("burst {index}"));
     }
-    wait_for(|| world.stored().first() == Some(&serde_json::json!("burst 19")));
+    wait_for(|| delivered.lock().unwrap().last() == Some(&serde_json::json!("burst 19")));
+    assert_eq!(world.stored().first(), Some(&serde_json::json!("burst 19")));
     let mut seen = world.stored();
     seen.reverse();
     assert_eq!(seen[0], "first");
@@ -966,10 +970,10 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
         .revoke(&world.id, &"clipboard:watch".parse().unwrap())
         .unwrap();
     assert_eq!(world.clipboard.watchers(), 0);
-    let before = delivered.load(Ordering::Relaxed);
+    let before = delivered.lock().unwrap().len();
     world.clipboard.copy("after revoking");
     std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(delivered.load(Ordering::Relaxed), before);
+    assert_eq!(delivered.lock().unwrap().len(), before);
 }
 
 #[test]

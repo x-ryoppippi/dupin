@@ -8,7 +8,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use dupin_core::{Config, config::HotkeyTarget};
+use dupin_core::Config;
+use dupin_core::config::{Address, HotkeyTarget};
 use dupin_mac::system_hotkey;
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
@@ -461,6 +462,9 @@ pub fn mark_shortcuts(config: &Config, registry: &mut dupin_core::CommandRegistr
         let HotkeyTarget::Dupin { command, query: None } = target else {
             continue;
         };
+        let Some(command) = command.command() else {
+            continue;
+        };
         let (Ok(shortcut), Ok(command)) = (
             accelerator.parse::<Shortcut>(),
             crate::features::aliases::command(command, &registered),
@@ -521,6 +525,10 @@ fn configured_targets(config: &Config) -> Result<HashMap<Shortcut, Target>, Stri
                 Some("an app bundle identifier")
             }
             HotkeyTarget::Command { command } if command.trim().is_empty() => Some("a shell command"),
+            HotkeyTarget::Dupin {
+                command,
+                query: Some(_),
+            } if !command.takes_query() => Some("a command or a web search to type its query into"),
             HotkeyTarget::App { .. }
             | HotkeyTarget::Command { .. }
             | HotkeyTarget::Script { .. }
@@ -551,9 +559,9 @@ fn insert_target(
     }
 }
 
-/// Whether the command a `target = "dupin"` binding names opens now; `Err(None)` while the
+/// Whether what a `target = "dupin"` binding addresses is there now; `Err(None)` while the
 /// extensions that may answer it are still loading.
-pub type Commands<'a> = &'a dyn Fn(&str) -> Result<(), Option<String>>;
+pub type Commands<'a> = &'a dyn Fn(&Address) -> Result<(), Option<String>>;
 
 /// What the bindings whose script or command is missing need, which leaves them out until it
 /// appears. Without a catalogue, or while a command may still load, they are left out quietly.
@@ -725,6 +733,72 @@ mod tests {
         }
     }
 
+    fn dupin(address: &str, query: Option<&str>) -> HotkeyTarget {
+        HotkeyTarget::Dupin {
+            command: Address::parse(address).unwrap(),
+            query: query.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_query_goes_only_with_a_command_or_a_web_search() {
+        for (address, takes) in [
+            ("clipboard", true),
+            ("web:g", true),
+            ("system/sleep", false),
+            ("window-management/left-half", false),
+            ("app:com.apple.calculator", false),
+            ("file:~/Downloads", false),
+        ] {
+            let mut config = Config::default();
+            config
+                .bindings
+                .insert("alt+cmd+q".into(), dupin(address, Some("x")));
+            match configured_targets(&config) {
+                Ok(_) => assert!(takes, "{address}"),
+                Err(problem) => {
+                    assert!(!takes, "{address}");
+                    assert_eq!(
+                        problem,
+                        "⌥⌘Q needs a command or a web search to type its query into."
+                    );
+                }
+            }
+            config.bindings.insert("alt+cmd+q".into(), dupin(address, None));
+            assert!(configured_targets(&config).is_ok(), "{address}");
+        }
+    }
+
+    #[test]
+    fn a_binding_to_a_row_is_skipped_with_the_reason_it_cant_run() {
+        let mut config = Config::default();
+        config
+            .bindings
+            .insert("alt+cmd+s".into(), dupin("system/shut-down", None));
+        config
+            .bindings
+            .insert("alt+cmd+l".into(), dupin("system/sleep", None));
+        let mut targets = configured_targets(&config).unwrap();
+        let automation_off = |address: &Address| match address {
+            Address::Row { command, row } if command == "system" => {
+                crate::features::system::unavailable(row, false, true)
+                    .map_or(Ok(()), |problem| Err(Some(problem)))
+            }
+            _ => Ok(()),
+        };
+        assert_eq!(
+            filter_unavailable(&mut targets, None, &automation_off),
+            [
+                "Couldn't register the ⌥⌘S binding: it names `system/shut-down`, which runs only with System Command Automation on."
+            ]
+        );
+        assert!(targets.contains_key(&"alt+cmd+l".parse().unwrap()));
+        assert_eq!(
+            holder(&config, &"alt+cmd+l".parse().unwrap(), None).as_deref(),
+            Some("the binding for system/sleep")
+        );
+    }
+
     #[test]
     fn rejects_aliases_of_the_panel_or_another_binding() {
         let mut config = Config::default();
@@ -803,25 +877,25 @@ mod tests {
         let mut config = Config::default();
         config.bindings.insert("ctrl+alt+c".into(), app());
         for (chord, command) in [("cmd+shift+v", "clipboard"), ("alt+cmd+w", "word-count")] {
-            config.bindings.insert(
-                chord.into(),
-                HotkeyTarget::Dupin {
-                    command: command.into(),
-                    query: None,
-                },
-            );
+            config.bindings.insert(chord.into(), dupin(command, None));
         }
         let configured = configured_targets(&config).unwrap();
         let clipboard: Shortcut = "cmd+shift+v".parse().unwrap();
         let words: Shortcut = "alt+cmd+w".parse().unwrap();
 
         let mut targets = configured.clone();
-        let loading = |name: &str| if name == "clipboard" { Ok(()) } else { Err(None) };
+        let loading = |address: &Address| {
+            if address.command() == Some("clipboard") {
+                Ok(())
+            } else {
+                Err(None)
+            }
+        };
         assert!(filter_unavailable(&mut targets, None, &loading).is_empty());
         assert!(targets.contains_key(&clipboard) && !targets.contains_key(&words));
 
         let mut targets = configured;
-        let off = |name: &str| Err(Some(format!("names `{name}`, which is off")));
+        let off = |address: &Address| Err(Some(format!("names `{address}`, which is off")));
         let problems = filter_unavailable(&mut targets, None, &off);
         assert_eq!(problems.len(), 2, "{problems:?}");
         assert!(
@@ -837,13 +911,9 @@ mod tests {
     #[test]
     fn a_dupin_binding_clashes_like_any_other() {
         let mut config = Config::default();
-        config.bindings.insert(
-            "Command+Space".into(),
-            HotkeyTarget::Dupin {
-                command: "clipboard".into(),
-                query: None,
-            },
-        );
+        config
+            .bindings
+            .insert("Command+Space".into(), dupin("clipboard", None));
         assert_eq!(
             configured_targets(&config).err().unwrap(),
             "⌘Space is assigned more than once."

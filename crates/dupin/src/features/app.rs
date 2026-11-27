@@ -43,7 +43,7 @@ impl AppProvider {
     }
 }
 
-fn labels(command: AppCommand) -> (&'static str, &'static str, &'static str) {
+pub(crate) fn labels(command: AppCommand) -> (&'static str, &'static str, &'static str) {
     match command {
         AppCommand::Relaunch => ("Restart Dupin", "Relaunch Dupin", "arrow.clockwise.circle"),
         AppCommand::Update => (

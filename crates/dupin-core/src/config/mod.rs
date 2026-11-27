@@ -26,11 +26,11 @@ use aliases::check_command_name;
 pub use aliases::{AliasTarget, Aliases, MAX_ALIASES, check_alias};
 pub use calendar::Calendar;
 pub use clipboard::{Clipboard, Retention};
-pub use hotkeys::HotkeyTarget;
+pub use hotkeys::{Address, HotkeyTarget};
 pub use panel::{DisplaySelection, InputSource, Position};
 pub use snippets::Snippet;
 pub use sync::Sync;
-pub use theme::{Backdrop, Colors, FontFamily, Theme};
+pub use theme::{Backdrop, Colors, DEFAULT_SEARCH_ICON, FontFamily, SearchIcon, Theme};
 pub use web::WebSearch;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

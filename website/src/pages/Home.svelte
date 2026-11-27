@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CopyButton from '../components/CopyButton.svelte';
 	import Demo from '../components/Demo.svelte';
+	import DownloadButton from '../components/DownloadButton.svelte';
 	import { choices } from '../components/docs/DesignChoices.svelte';
 	import { steps } from '../components/docs/LauncherLoop.svelte';
 	import Footer from '../components/Footer.svelte';
@@ -92,10 +93,7 @@
 			</p>
 			<div class="cta rise" style="--d: 200ms">
 				<div class="cta-buttons">
-					<a class="btn-primary" href={channels[downloadChannel].dmg}>
-						<span class="btn-icon icon-[simple-icons--apple]" aria-hidden="true"></span>
-						Download for macOS
-					</a>
+					<DownloadButton href={channels[downloadChannel].dmg} />
 					<CopyButton
 						class="btn-secondary"
 						text={setupPrompt}
@@ -308,34 +306,6 @@
 
 	.cta-buttons > :global(*) {
 		justify-content: center;
-	}
-
-	.btn-primary {
-		display: inline-flex;
-		align-items: center;
-		gap: 10px;
-		padding: 14px 22px;
-		border: 0;
-		border-radius: 10px;
-		background: var(--accent-btn);
-		color: #fff;
-		font: inherit;
-		font-size: 15px;
-		font-weight: 600;
-		cursor: pointer;
-		transition:
-			background 0.18s ease,
-			transform 0.18s ease;
-	}
-
-	.btn-primary:hover {
-		background: var(--accent-btn-hover);
-		transform: translateY(-1px);
-	}
-
-	.btn-primary .btn-icon {
-		width: 16px;
-		height: 16px;
 	}
 
 	.link-arrow {

@@ -41,6 +41,14 @@ impl Ui {
         if !self.session.command().private_results {
             crate::trace::key(ev);
         }
+        let flipped;
+        let ev = match list_key(&ev.key, self.grows_up()) {
+            Some(key) => {
+                flipped = KeyEvent { key, ..ev.clone() };
+                &flipped
+            }
+            None => ev,
+        };
         if self.picker.is_some() {
             return self.picker_key(ev, tx);
         }
@@ -180,8 +188,28 @@ impl Ui {
     }
 }
 
+/// ↑ and ↓ as the lists see them: a list that runs upwards from the field shows its next row
+/// above, so ↑ moves to it. `None` leaves the key as it is.
+fn list_key(key: &Key, grows_up: bool) -> Option<Key> {
+    match key {
+        Key::Up if grows_up => Some(Key::Down),
+        Key::Down if grows_up => Some(Key::Up),
+        _ => None,
+    }
+}
+
 fn is_quick_look_shortcut(key: &Key) -> bool {
     matches!(key, Key::Command('y'))
+}
+
+#[cfg(test)]
+#[test]
+fn arrows_follow_a_list_that_runs_upwards() {
+    assert_eq!(list_key(&Key::Up, true), Some(Key::Down));
+    assert_eq!(list_key(&Key::Down, true), Some(Key::Up));
+    assert_eq!(list_key(&Key::Up, false), None);
+    assert_eq!(list_key(&Key::Down, false), None);
+    assert_eq!(list_key(&Key::Enter, true), None);
 }
 
 #[cfg(test)]

@@ -113,7 +113,14 @@ fn a_catalogue_reaches_host_services_as_a_search_does() {
 #[test]
 fn a_finished_request_reaches_the_guest_at_once() {
     skip_inside_a_sandbox!();
-    let host = host();
+    // Checks that come after the deadline, so a reply that waited for one never reaches the
+    // guest in time, however busy the machine is.
+    let within = Duration::from_secs(5);
+    let host = Host::ticking(
+        Box::new(|| helper_command("tests::helper_entry")),
+        None,
+        2 * within,
+    );
     let package = package(
         r#"import { storage } from 'dupin';
            export async function search(query) {
@@ -122,26 +129,18 @@ fn a_finished_request_reaches_the_guest_at_once() {
            }"#,
     );
     let fixture = Arc::new(Fixture::default());
-    let run = || {
-        host.search(
+    let rows = host
+        .search(
             &package,
             "count",
             10,
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + within,
             &|| false,
             &services(&fixture),
         )
-        .unwrap()
-    };
-    run();
-    let started = Instant::now();
-    assert_eq!(titles(&run()), ["done"]);
-    // Waiting out the host's 5 ms check for each reply would take a quarter of a second.
-    assert!(
-        started.elapsed() < Duration::from_millis(150),
-        "{:?}",
-        started.elapsed()
-    );
+        .unwrap();
+    assert_eq!(titles(&rows), ["done"]);
+    assert_eq!(fixture.seen.lock().unwrap().len(), 100);
 }
 
 #[test]

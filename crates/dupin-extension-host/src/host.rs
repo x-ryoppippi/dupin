@@ -174,6 +174,8 @@ pub struct Host {
 struct Shared {
     launch: Launcher,
     environment: Option<Environment>,
+    /// [`TICK`], unless a test checks that nothing waits for it.
+    tick: Duration,
     workers: Arc<Workers>,
     state: Mutex<State>,
     released: Condvar,
@@ -247,10 +249,15 @@ impl Host {
     /// A host whose guests see the clock and `Math.random` `environment` fixes, as a fixture
     /// replays them; with none, the real ones.
     pub fn fixed(launch: Launcher, environment: Option<Environment>) -> Self {
+        Self::ticking(launch, environment, TICK)
+    }
+
+    pub(crate) fn ticking(launch: Launcher, environment: Option<Environment>, tick: Duration) -> Self {
         Self {
             shared: Arc::new(Shared {
                 launch,
                 environment,
+                tick,
                 workers: Arc::default(),
                 state: Mutex::default(),
                 released: Condvar::new(),
@@ -603,7 +610,7 @@ impl Host {
             Some(helper) => helper,
             None => lease.helper.insert(Helper::start(&self.shared.launch)?),
         };
-        match helper.greet(&request, deadline, is_cancelled) {
+        match helper.greet(&request, deadline, self.shared.tick, is_cancelled) {
             Greeting::Ready => {}
             // A helper still starting is kept, so the next call doesn't pay for another start.
             Greeting::Waiting(error) => return Err(error),
@@ -631,7 +638,7 @@ impl Host {
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
         let mut helper = Helper::start(&self.shared.launch)?;
-        match helper.greet(&request, greet_by(&helper), is_cancelled) {
+        match helper.greet(&request, greet_by(&helper), self.shared.tick, is_cancelled) {
             Greeting::Ready => {}
             Greeting::Waiting(error) | Greeting::Failed(error) => return Err(error),
         }
@@ -680,7 +687,7 @@ impl Host {
             state = self
                 .shared
                 .released
-                .wait_timeout(state, TICK)
+                .wait_timeout(state, self.shared.tick)
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .0;
         }
@@ -855,6 +862,7 @@ impl Helper {
         &mut self,
         request: &Request<'_>,
         deadline: Instant,
+        tick: Duration,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Greeting {
         let refused = |reason: String| {
@@ -869,7 +877,7 @@ impl Helper {
         let didnt_start =
             || Greeting::Failed(RunError::Failed(host_error("the extension host didn't start")));
         while !self.greeted {
-            match self.replies.recv_timeout(TICK) {
+            match self.replies.recv_timeout(tick) {
                 Ok((FromHelper::Hello { version, engine }, _))
                     if version == wire::VERSION && engine == dupin_js_runtime::engine_version() =>
                 {
@@ -1009,7 +1017,7 @@ impl Helper {
             shared.workers.clone(),
         );
         loop {
-            match self.replies.recv_timeout(TICK) {
+            match self.replies.recv_timeout(shared.tick) {
                 Ok((
                     FromHelper::Done {
                         id: done,

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use dupin_core::config::{AliasTarget, HotkeyTarget, check_alias};
+use dupin_core::config::{Address, AliasTarget, HotkeyTarget, check_alias};
 use dupin_core::{Config, KeywordEntry, KeywordTarget};
 use rune::{El, Shortcut, ShortcutError, TextEdit, col, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, Kit, ShortcutRecorder, ShortcutRecorderState, shortcut_error_message};
@@ -24,7 +24,7 @@ pub(super) struct Keywords {
     snippets: TextEdit,
     /// Why the last edit on the page wasn't saved.
     pub(super) problem: Option<String>,
-    /// Each command's shortcut recorder, by the name a binding gives the command.
+    /// Each row's shortcut recorder, by the address a binding gives the row.
     shortcuts: BTreeMap<String, ShortcutRecorderState>,
     /// Why the chord last recorded for a command was refused, by command.
     pub(super) shortcut_problems: BTreeMap<String, String>,
@@ -75,27 +75,27 @@ impl Keywords {
     }
 }
 
-/// The shortcut of each command a `target = "dupin"` binding without a query opens, by the
-/// command's name.
+/// The shortcut of each row a `target = "dupin"` binding without a query reaches, by the
+/// row's address.
 fn command_shortcuts(config: &Config) -> BTreeMap<String, Shortcut> {
     config
         .bindings
         .iter()
         .filter_map(|(accelerator, target)| match target {
             HotkeyTarget::Dupin { command, query: None } => {
-                Some((command.clone(), accelerator.parse().ok()?))
+                Some((command.to_string(), accelerator.parse().ok()?))
             }
             _ => None,
         })
         .collect()
 }
 
-/// The key in `[bindings]` of the shortcut that opens the command `name`.
-fn command_binding(config: &Config, name: &str) -> Option<String> {
+/// The key in `[bindings]` of the shortcut that reaches `address`.
+fn command_binding(config: &Config, address: &Address) -> Option<String> {
     config
         .bindings
         .iter()
-        .find(|(_, target)| matches!(target, HotkeyTarget::Dupin { command, query: None } if command == name))
+        .find(|(_, target)| matches!(target, HotkeyTarget::Dupin { command, query: None } if command == address))
         .map(|(accelerator, _)| accelerator.clone())
 }
 
@@ -169,15 +169,16 @@ impl Prefs {
         }
     }
 
-    /// Binds `next` to the command `name` in config.toml, in place of the shortcut it had,
-    /// unless something else already has `next`.
+    /// Binds `next` to the row `name` addresses in config.toml, in place of the shortcut it
+    /// had, unless something else already has `next`.
     pub(super) fn change_command_shortcut(
         &mut self,
         name: &str,
         next: Option<&Shortcut>,
     ) -> Result<(), ShortcutError> {
+        let address = Address::parse(name).expect("the page names each row by its address");
         let base = self.current.borrow().clone();
-        let existing = command_binding(&base, name);
+        let existing = command_binding(&base, &address);
         self.keywords.shortcut_problems.remove(name);
         if let Some(next) = next {
             let keys = next.keycaps().join("");
@@ -190,7 +191,7 @@ impl Prefs {
             }
         }
         let target = HotkeyTarget::Dupin {
-            command: name.to_owned(),
+            command: address,
             query: None,
         };
         self.set(|config| {
@@ -236,7 +237,12 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     body.push(card(k, hair, command_rows(s, k)));
     body.push(note(
         k,
-        "Type a keyword, then Space, in the launcher to enter its command; type ? to list them all. Record a shortcut to open a command from any app; pressing it again hides the panel.",
+        "Type a keyword, then Space, in the launcher to enter its command; type ? to list them all. Record a shortcut to reach a row from any app: a command or web search shows the panel in it, and pressing it again hides the panel; an app or file opens.",
+    ));
+    body.push(card(k, hair, system_rows(s, k)));
+    body.push(note(
+        k,
+        "A system command's shortcut runs it without showing the panel. Restart, Shut Down, Log Out and Empty Trash show their row instead, for ↩ to ask first.",
     ));
     body.push(card(k, hair, alias_rows(s, k)));
     body.push(note(
@@ -261,10 +267,24 @@ fn command_rows(s: &Prefs, k: &Kit) -> Vec<El> {
                 .map(|keyword| (keyword.as_str(), aliases.contains(&keyword.as_str())));
             let space = matches!(entry.target, KeywordTarget::Command(_)) && entry.keywords.is_empty();
             let name = match &entry.target {
-                KeywordTarget::Command(id) => crate::features::aliases::binding_name(id.as_str()),
-                _ => None,
+                KeywordTarget::Command(id) => {
+                    crate::features::aliases::binding_name(id.as_str()).map(str::to_owned)
+                }
+                KeywordTarget::Web(search) => Some(AliasTarget::Web(search.clone()).to_string()),
+                // An app or file is addressed as the alias that reaches it names it.
+                KeywordTarget::Path(_) => entry
+                    .keywords
+                    .iter()
+                    .find_map(|keyword| s.config.aliases.0.get(keyword).map(ToString::to_string)),
             };
-            command_row(s, k, (&entry.title, &entry.subtitle), tags, space, name)
+            command_row(
+                s,
+                k,
+                (&entry.title, &entry.subtitle),
+                tags,
+                space,
+                name.as_deref(),
+            )
         })
         .collect();
     for listed in s.extensions.0.iter().filter(|listed| !listed.built_in) {
@@ -298,7 +318,33 @@ fn command_rows(s: &Prefs, k: &Kit) -> Vec<El> {
     rows
 }
 
-/// A command's row: its keywords, and the shortcut that opens it when a binding can name it.
+/// Each system command, and the shortcut that runs it.
+fn system_rows(s: &Prefs, k: &Kit) -> Vec<El> {
+    let automation = s.config.system_automation;
+    crate::features::system::ROWS
+        .iter()
+        .filter(|(name, _)| *name != "update-dupin" || crate::update::offered())
+        .filter_map(|(name, _)| {
+            let row = crate::features::system::row(name)?;
+            let detail = if crate::features::system::unavailable(name, automation, true).is_some() {
+                format!("{} · Needs System Command Automation", row.subtitle)
+            } else {
+                row.subtitle.to_owned()
+            };
+            let address = format!("{}/{name}", crate::features::system::BINDING_NAME);
+            Some(command_row(
+                s,
+                k,
+                (row.title, &detail),
+                std::iter::empty(),
+                false,
+                Some(&address),
+            ))
+        })
+        .collect()
+}
+
+/// A row: its keywords, and the shortcut that reaches it when a binding can name it.
 fn command_row<'a>(
     s: &Prefs,
     k: &Kit,
@@ -333,8 +379,13 @@ fn command_row<'a>(
     )
 }
 
-/// The recorder for the shortcut that opens the command `name`, and a button to clear it.
+/// The recorder for the shortcut that reaches the row `name` addresses, and a button to clear
+/// it.
 fn shortcut_recorder(s: &Prefs, k: &Kit, name: &str, title: &str, locked: bool) -> El {
+    let verb = match Address::parse(name) {
+        Ok(Address::Row { .. }) => "Run",
+        _ => "Open",
+    };
     let state = s.keywords.shortcuts.get(name).cloned().unwrap_or_default();
     let problem = s.keywords.shortcut_problems.get(name).cloned();
     let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
@@ -349,7 +400,7 @@ fn shortcut_recorder(s: &Prefs, k: &Kit, name: &str, title: &str, locked: bool) 
     let recorder = ShortcutRecorder::new(format!("shortcut-{name}"), &state, move |s: &mut Prefs| {
         s.keywords.shortcuts.entry(owned.clone()).or_default()
     })
-    .label(format!("Open {title}"))
+    .label(format!("{verb} {title}"))
     .width(140.0)
     .on_change(move |s: &mut Prefs, next, _| s.change_command_shortcut(&changed, next))
     .error_message(refusal)

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import LabelSwap from './LabelSwap.svelte';
 
 	let {
 		text,
@@ -32,14 +33,22 @@
 	}
 </script>
 
+{#snippet copyIcon()}
+	<span class="copy-icon icon-[ph--copy]" aria-hidden="true"></span>
+{/snippet}
+
+{#snippet checkIcon()}
+	<span class="copy-icon icon-[ph--check]" aria-hidden="true"></span>
+{/snippet}
+
 <button class={className} class:is-copied={state === 'copied'} type="button" aria-label={label} onclick={copy}>
-	{#if state === 'copied' && copiedChildren}
-		{@render copiedChildren()}
-	{:else if children}
-		{@render children()}
-	{:else}
-		<span class={['copy-icon', state === 'copied' ? 'icon-[ph--check]' : 'icon-[ph--copy]']} aria-hidden="true"></span>
-	{/if}
+	<LabelSwap
+		labels={[
+			{ id: 'idle', content: children ?? copyIcon },
+			{ id: 'copied', content: copiedChildren ?? checkIcon },
+		]}
+		current={state === 'copied' ? 'copied' : 'idle'}
+	/>
 </button>
 <span class="visually-hidden" role="status">
 	{#if state === 'copied'}{copiedMessage}{:else if state === 'failed'}Could not copy. Select the text to copy it instead.{/if}

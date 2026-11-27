@@ -30,6 +30,8 @@ impl Ui {
             config.bindings.clone(),
             self.session.command_ids(),
             self.extensions.settled(),
+            config.system_automation,
+            self.bound_web_searches(config),
         );
         if self.bound_against.as_ref() != Some(&bound) {
             self.bound_against = Some(bound);
