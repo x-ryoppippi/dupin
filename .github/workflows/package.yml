@@ -50,6 +50,7 @@ jobs:
       - uses: ./.github/actions/setup-nix-cache
         with:
           save: 'false'
+      - run: nix profile install --inputs-from . nixpkgs#just nixpkgs#nushell
 
       - name: Import the Developer ID certificate
         env:
@@ -75,7 +76,7 @@ jobs:
         run: |
           export NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8"
           printf '%s' "$NOTARY_KEY" > "$NOTARY_KEY_PATH"
-          nix shell --inputs-from . nixpkgs#nushell --command nu scripts/package-app.nu --channel "$CHANNEL" --notarize
+          just package-release "$CHANNEL"
           rm "$NOTARY_KEY_PATH"
 
       - name: Publish the stable release
