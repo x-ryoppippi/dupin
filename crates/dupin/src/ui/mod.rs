@@ -164,6 +164,8 @@ pub struct Ui {
     paste_after_close: Option<PendingPaste>,
     /// Why something wasn't pasted, to show once the panel has closed.
     notice_after_close: Option<String>,
+    /// Shown while a close was still to come: show again once it's done.
+    show_after_close: bool,
     sharing: dupin_mac::sharing::Picker,
     /// What gives each row its actions and Send to… its choices.
     kinds: dupin_core::kind::Kinds,
@@ -372,6 +374,7 @@ impl Ui {
             web: registration.web,
             paste_after_close: None,
             notice_after_close: None,
+            show_after_close: false,
             sharing: dupin_mac::sharing::Picker::default(),
             kinds,
             composition,
