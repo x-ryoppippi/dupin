@@ -10,6 +10,7 @@ mod general;
 mod keywords;
 mod permissions;
 mod search;
+mod shortcut;
 mod snippets;
 mod sync;
 mod updates;
@@ -23,10 +24,11 @@ use std::sync::Arc;
 use dupin_core::Config;
 use dupin_mac::privacy::{CalendarAccess, PermissionStatus};
 use rune::{AppHandle, Cx, El, Icon, ScrollSpec, Shortcut, ShortcutError, Tx, col, el, icon, row, text};
-use rune_kit::{Kit, ShortcutRecorderState};
+use rune_kit::Kit;
 
 use self::controls::{DESCRIPTION, ROW_PX};
 use self::general::LoginPreference;
+use self::shortcut::ShortcutState;
 use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
 use crate::ui::Ui;
@@ -109,7 +111,7 @@ pub struct Prefs {
     config: Config,
     current: Rc<RefCell<Config>>,
     page: Page,
-    recorders: [ShortcutRecorderState; 2],
+    recorders: [ShortcutState; 2],
     shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
@@ -154,7 +156,7 @@ impl Prefs {
         let config = current.borrow().clone();
         let recorders = LauncherShortcut::ALL.map(|kind| {
             let mut recorder =
-                ShortcutRecorderState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
+                ShortcutState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
             if binding.launch_problem(kind, recorder.shortcut()).is_some() {
                 recorder.mark_unregistered();
             }
@@ -247,7 +249,7 @@ impl Prefs {
             let i = kind as usize;
             let shortcut = crate::hotkey::parse(kind.accelerator(&config)).ok().flatten();
             if self.recorders[i].shortcut() != shortcut.as_ref() {
-                self.recorders[i] = ShortcutRecorderState::new(shortcut);
+                self.recorders[i] = ShortcutState::new(shortcut);
                 self.shortcut_problems[i] = None;
             }
         }
@@ -796,6 +798,34 @@ mod tests {
             assert!(dictionary(s).is_empty());
             assert_eq!(s.config.bindings.len(), 1, "the app binding stays");
         });
+
+        let press = |runtime: &mut rune::Runtime<Prefs>, key: &str| {
+            runtime.frame(0.0);
+            let (x, y) = runtime.find(key).unwrap_or_else(|| panic!("{key} is drawn"));
+            runtime.pointer_down(x, y);
+            runtime.pointer_up(x, y);
+            runtime.frame(0.0);
+        };
+        press(&mut runtime, "shortcut-dictionary");
+        assert!(runtime.state.keywords.shortcuts["dictionary"].is_recording());
+        runtime.physical_input(rune::PhysicalInput::Key {
+            key: rune::PhysicalKeyCode::KeyD,
+            mods: rune::Mods {
+                ctrl: true,
+                alt: true,
+                ..rune::Mods::default()
+            },
+            pressed: true,
+            repeat: false,
+            text: None,
+            consumed_mods: Default::default(),
+        });
+        runtime.frame(0.0);
+        assert!(!runtime.state.keywords.shortcuts["dictionary"].is_recording());
+        assert_eq!(dictionary(&runtime.state)[0].0, "ctrl+alt+d");
+        press(&mut runtime, "shortcut-dictionary-clear");
+        assert!(dictionary(&runtime.state).is_empty());
+        assert_eq!(runtime.state.keywords.shortcuts["dictionary"].shortcut(), None);
     }
 
     #[test]

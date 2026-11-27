@@ -1,11 +1,12 @@
 use dupin_core::config::HotkeyTarget;
 use dupin_core::{DisplaySelection, InputSource, Position};
 use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
-use rune::{El, Shortcut, ShortcutError, Tx, col, row, text};
-use rune_kit::{Button, ButtonVariant, Kit, ShortcutRecorder, Switch, shortcut_error_message};
+use rune::{El, Shortcut, Tx, col, row, text};
+use rune_kit::{Button, ButtonVariant, Kit, Switch};
 
 use super::Prefs;
 use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button};
+use super::shortcut::ShortcutKeycap;
 use crate::hotkey::LauncherShortcut;
 use crate::icons;
 
@@ -34,27 +35,14 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
 
 fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, label: &str, locked: bool) -> El {
     let i = kind as usize;
-    let shortcut_problem = s.shortcut_problems[i].clone();
-    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
-        shortcut_problem
-            .as_ref()
-            .filter(|_| *error == ShortcutError::Conflict)
-            .cloned()
-            .unwrap_or_else(|| shortcut_error_message(error, chord))
-    };
-    let recorder = ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
-        .label(label)
-        .width(180.0)
-        .on_change(move |s: &mut Prefs, next, _| s.change_hotkey(kind, next))
-        .error_message(refusal)
-        .disabled(locked)
-        .build(k);
-    if locked {
-        // Rune disables recorder input without applying the kit's usual disabled dimming.
-        recorder.layer_opacity(0.5)
-    } else {
-        recorder
-    }
+    ShortcutKeycap::new(key, label, &s.recorders[i])
+        .locked(locked)
+        .conflict(s.shortcut_problems[i].clone())
+        .build(
+            k,
+            move |s: &mut Prefs| &mut s.recorders[i],
+            move |s: &mut Prefs, next| s.change_hotkey(kind, next),
+        )
 }
 
 /// The panel hotkey's row, on General and in the welcome.
