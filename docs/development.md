@@ -339,6 +339,8 @@ package = "bundled:emoji"
 budget_ms = 5.0
 ```
 
+A headless run has no display, so the panel lays out its default 416-point list (eight rows). An implementation's `display` simulates one: `run` sets `DUPIN_HEADLESS_DISPLAY` to it, `<width>x<height>` points of usable area, and the panel sizes its list from that area as it would from a real display's, through the same placement. `search-tall` measures the main search on a 1728×2560 display, whose list reaches the 832-point maximum (16 rows), so drawing more rows can't slow every keypress unnoticed. `display` is set outside `scripts/latency/measure.nu`, so it doesn't change any scenario's `benchmark` fingerprint.
+
 The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity, and both are held to a 5 ms budget.
 
 ### Native baselines

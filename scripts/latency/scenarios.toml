@@ -147,6 +147,14 @@ package = "repo"
 extensions = "scripts/latency/repo.extensions"
 budget_ms = 5.0
 
+# The main search on a display tall enough for the list's maximum, 832 points (16 rows at the
+# default height), so a regression from drawing more rows shows. `display` is the simulated
+# display's usable area in points; without it the panel lays out its default 416-point list.
+[features.search-tall.native]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "apps.search"
+display = "1728x2560"
+
 [[scenarios]]
 id = "search.saf"
 feature = "search"
@@ -255,3 +263,9 @@ id = "repo.ccu"
 feature = "repo"
 prefix = "repo "
 typed = "ccu"
+
+[[scenarios]]
+id = "search-tall.s"
+feature = "search-tall"
+prefix = ""
+typed = "s"

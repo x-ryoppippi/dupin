@@ -337,7 +337,7 @@ impl Ui {
             thumbnails: thumbnails::Thumbnails::new(),
             visible_rows: 0..0,
             list_offset: Rc::default(),
-            list_budget: crate::view::DEFAULT_LIST_BUDGET,
+            list_budget: lifecycle::unplaced_list_budget(config.theme.panel_width, config.position),
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
