@@ -224,6 +224,20 @@ scenario = "scripts/docs-images/settings-permissions.json"
 window = "prefs"
 width = 760
 
+[[images]]
+page = "philosophy"
+name = "snapshots-window"
+scenario = "scripts/docs-images/snapshots-window.json"
+window = "snapshots"
+width = 760
+
+[[images]]
+page = "philosophy"
+name = "agents"
+extension = "extensions/agent"
+fixture = "list.json"
+step = 1
+
 # A clip is a short recording of `steps` played into the panel, rendered to
 # docs/images/<page>/<name>-<theme>.webp with a caption below the panel naming each key it
 # presses and the text it types. A step types text one character at a time (`type`, or all at
@@ -429,6 +443,50 @@ name = "notes"
 extension = "examples/extensions/notes-js"
 fixture = "notes.json"
 step = 5
+
+[[clips]]
+page = "philosophy"
+name = "basics"
+fixtures = "scripts/headless/calendar.json"
+steps = [
+	{ type = "cal" },
+	{ key = "space" },
+	{ key = "down" },
+	{ wait = 0.6 },
+	{ key = "backspace" },
+	{ type = "?" },
+	{ key = "down" },
+]
+
+[[clips]]
+page = "philosophy"
+name = "doorway"
+steps = [{ type = "ma" }, { wait = 0.8 }]
+
+[[clips]]
+page = "philosophy"
+name = "same-keys"
+steps = [
+	{ type = "maps" },
+	{ key = "k", cmd = true },
+	{ wait = 0.6 },
+	{ key = "escape" },
+	{ key = "a", cmd = true },
+	{ type = "12*3" },
+	{ wait = 0.6 },
+	{ key = "k", cmd = true },
+]
+
+[[clips]]
+page = "philosophy"
+name = "keystrokes"
+steps = [
+	{ type = "ca", burst = true },
+	{ wait = 0.5 },
+	{ type = "l" },
+	{ wait = 0.5 },
+	{ type = "e" },
+]
 
 # The home page's tabs, each one use of Dupin over Liquid Glass, as it opens by default.
 
