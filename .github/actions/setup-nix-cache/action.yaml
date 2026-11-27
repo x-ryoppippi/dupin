@@ -10,15 +10,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: x-ryoppippi/setup-nix@23ff4e6022b629334d3d16aa3b33b52fb6a3f37b # v0.0.5
+    - uses: x-ryoppippi/setup-nix@7e74b323c73835866702959671962c581f289cc0 # v0.0.6
       with:
         cache: auto
         cache-scope: ${{ inputs.cache-scope }}
-        # Only the default branch writes. Hestia treats a pack key that already exists as uploaded
-        # even when this run cannot download it, and Blacksmith scopes entries to the branch that
-        # wrote them, so a path a pull request pushed first could stay in main's manifest without
-        # being servable from main, and Hestia never re-pushes a path its manifest lists.
-        save: ${{ inputs.save == 'true' && github.event_name != 'pull_request' }}
+        save: ${{ inputs.save }}
         extra-conf: |
           keep-derivations = true
           keep-outputs = true
