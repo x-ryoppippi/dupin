@@ -189,11 +189,6 @@ title = "Calendar"
 keywords = ["cal"]
 
 [[commands]]
-id = "calculator.evaluate"
-title = "Calculator"
-keywords = ["calc"]
-
-[[commands]]
 id = "dictionary.lookup"
 title = "Dictionary"
 keywords = ["define", "d"]

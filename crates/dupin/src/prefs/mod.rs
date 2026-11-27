@@ -1191,7 +1191,7 @@ mod tests {
         let listed = |package: &PackageId, title: &str, kind| Listed {
             package: package.clone(),
             title: title.into(),
-            keyword: title.to_lowercase(),
+            keyword: Some(title.to_lowercase()),
             icon: None,
             kind,
             registered: true,
@@ -1278,7 +1278,7 @@ mod tests {
             vec![crate::extensions::packages::Listed {
                 package: id.clone(),
                 title: "Weather".into(),
-                keyword: "wx".into(),
+                keyword: Some("wx".into()),
                 icon: None,
                 kind: crate::extensions::packages::Kind::User,
                 registered: true,

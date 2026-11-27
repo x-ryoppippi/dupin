@@ -559,7 +559,7 @@ mod tests {
         dupin_extension_host::skip_inside_a_sandbox!();
         let extension = bundled();
         assert!(extension.default_search);
-        assert_eq!(extension.keyword, "web");
+        assert_eq!(extension.keyword.as_deref(), Some("web"));
         set(&extension, &Config::default());
         let web = provider(vec![extension.clone()], &["define"], false);
 

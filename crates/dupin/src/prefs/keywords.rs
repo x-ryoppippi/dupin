@@ -289,11 +289,14 @@ fn command_rows(s: &Prefs, k: &Kit) -> Vec<El> {
         })
         .collect();
     for listed in s.extensions.0.iter().filter(|listed| !listed.built_in) {
+        let Some(keyword) = &listed.keyword else {
+            continue;
+        };
         let package = listed
             .package
             .as_str()
             .trim_start_matches(crate::extensions::BUNDLED_PREFIX);
-        let mut tags = vec![(listed.keyword.as_str(), false)];
+        let mut tags = vec![(keyword.as_str(), false)];
         tags.extend(
             s.config
                 .aliases
@@ -305,7 +308,7 @@ fn command_rows(s: &Prefs, k: &Kit) -> Vec<El> {
         let detail = if listed.registered {
             "Extension".to_owned()
         } else {
-            format!("Extension · `{}` reaches another command", listed.keyword)
+            format!("Extension · `{keyword}` reaches another command")
         };
         rows.push(command_row(
             s,

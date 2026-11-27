@@ -1347,12 +1347,6 @@ query = "cal"
 tags = ["keyword"]
 
 [[cases]]
-id = "keyword.calc"
-intent = "command:calculator.evaluate"
-query = "calc"
-tags = ["keyword"]
-
-[[cases]]
 id = "keyword.d"
 intent = "command:dictionary.lookup"
 query = "d"
@@ -1430,12 +1424,6 @@ id = "keyword.calendar-app-over-cal"
 intent = "app:Calendar"
 query = "cale"
 tags = ["keyword", "prefix", "history"]
-
-[[cases]]
-id = "keyword.calculator-app-over-calc"
-intent = "app:Calculator"
-query = "calcu"
-tags = ["keyword", "prefix"]
 
 [[cases]]
 id = "alias.vs"
