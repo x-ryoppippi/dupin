@@ -467,7 +467,8 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
         Action::ExtCheck(folder) => {
             let extension = crate::extensions::check_folder(std::path::Path::new(&folder))?;
             // Kept from the check above, so this asks the package nothing.
-            let exports = extension.check(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE)?;
+            let exports =
+                extension.check(crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE))?;
             let mut exported: Vec<&str> = Vec::new();
             if exports.search {
                 exported.push("search");
@@ -524,7 +525,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 &query,
                 None,
                 dupin_js_runtime::MAX_ROWS,
-                std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE),
                 || false,
                 &dupin_extension_bridge::Call::none(),
             )?;

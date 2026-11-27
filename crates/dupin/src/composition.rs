@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dupin_broker::{RowField, RowKind};
 use dupin_core::config::{Advanced, contribution};
@@ -312,7 +312,11 @@ impl BatchStage for GuestFilter {
             Some(query.to_owned()),
             titles.iter().map(|title| (*title).to_owned()),
         );
-        let hits = match extension.filter(&self.filter, &input, Instant::now() + FILTER_DEADLINE) {
+        let hits = match extension.filter(
+            &self.filter,
+            &input,
+            crate::extensions::deadline_in(FILTER_DEADLINE),
+        ) {
             Ok(hits) => hits,
             Err(dupin_js_runtime::RunError::Failed(diagnostic)) => {
                 self.guests
@@ -640,7 +644,7 @@ export const filters = {
         assert_eq!(scores, [Some(6), None, Some(25)]);
 
         composition.apply(&advanced("[advanced.sources.apps]\nsorter = \"kana/spin\""));
-        let started = Instant::now();
+        let started = std::time::Instant::now();
         assert_eq!(stages().batch_order(&titles), None, "an overrun falls back");
         assert!(
             started.elapsed() < Duration::from_secs(2),

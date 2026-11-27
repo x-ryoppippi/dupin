@@ -167,6 +167,9 @@ pub struct Ui {
     pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
     pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
+    /// Extension actions a headless run's frames wait for, which haven't handed over their
+    /// results yet.
+    headless_acting: usize,
     extensions: Extensions,
     calendar_access: dupin_mac::privacy::CalendarAccess,
     _apps_watcher: Option<AppsWatcher>,
@@ -366,6 +369,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
+            headless_acting: 0,
             extensions: Extensions::new(bridge, registration.ports),
             calendar_access,
             _apps_watcher: apps_watcher,
@@ -410,6 +414,7 @@ impl Ui {
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        crate::extensions::play_headless_copies(clock);
         self.poll_picker(clock, tx);
         let notice_expired = self.notices.expire(clock);
         self.poll_searches(clock, tx) || notice_expired

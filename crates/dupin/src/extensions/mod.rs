@@ -312,7 +312,7 @@ impl Extension {
             .name(format!("catalogue-{}", self.id))
             .spawn(move || {
                 let never = || false;
-                let deadline = Instant::now() + QUERY_DEADLINE;
+                let deadline = crate::extensions::deadline_in(QUERY_DEADLINE);
                 let refreshed = extension.catalogue.refresh_stale(
                     &settings,
                     generation,
@@ -462,22 +462,32 @@ impl Extension {
     }
 }
 
-/// Starts the copies of the fixture `dupin ext render` renders, once the headless launcher's
-/// first frame starts its script.
-pub(crate) fn headless_ready() {
+/// Hands over the copies of the fixture `dupin ext render` renders that the headless
+/// launcher's script `clock` has reached.
+pub(crate) fn play_headless_copies(clock: f64) {
     if let Some(fixture) = fixtures::headless() {
-        fixture.play_events();
+        fixture.play_events(clock);
     }
 }
 
 /// The one extension host every JavaScript extension shares, which starts a trust domain's
 /// helper on that domain's first query. Every bundled package's calls queue for one helper, and
-/// the wait counts against each call's deadline.
+/// the wait counts against each call's deadline. A headless run renders as a fixture replays, so
+/// its host replays too, holding guests to the processor time they spend.
 fn host() -> &'static Host {
     launcher_wide!(
         Host,
-        Host::fixed(Box::new(helper_command), headless_environment())
+        match headless_environment() {
+            Some(environment) => Host::replaying(Box::new(helper_command), environment),
+            None => Host::new(Box::new(helper_command)),
+        }
     )
+}
+
+/// The moment `within` from now on the extension host's clock, which every deadline of a call
+/// to an extension is measured against.
+pub fn deadline_in(within: std::time::Duration) -> Instant {
+    host().now() + within
 }
 
 /// The process ID and processor time of the helper that runs `extension`'s searches.
@@ -510,6 +520,11 @@ impl Clock {
             fixed: Some(now),
             ..Self::launcher()
         }
+    }
+
+    /// Whether it stands at one moment, as the guests' clock does in a fixture.
+    pub(crate) fn is_fixed(self) -> bool {
+        self.fixed.is_some()
     }
 
     /// Unix milliseconds.
@@ -778,7 +793,7 @@ pub(crate) fn load_bundled(folder: &Path) -> Result<Arc<Extension>, Diagnostic> 
 pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     let extension = load_folder(folder)?;
     extension
-        .check(Instant::now() + QUERY_DEADLINE)
+        .check(crate::extensions::deadline_in(QUERY_DEADLINE))
         .map_err(|error| match error {
             RunError::Failed(diagnostic) => diagnostic,
             RunError::Cancelled => Diagnostic::new("cancelled", "the check was cancelled"),
@@ -1704,7 +1719,7 @@ pub(crate) mod tests {
             .query(
                 "",
                 10,
-                Instant::now() + QUERY_DEADLINE,
+                crate::extensions::deadline_in(QUERY_DEADLINE),
                 || false,
                 &(Arc::new(dupin_extension_host::NoServices) as _),
             )

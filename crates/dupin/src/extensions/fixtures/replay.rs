@@ -5,7 +5,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use dupin_core::form::{self, FieldKind, Form};
 use dupin_ext_sdk::fixture::{self, Action, Fixture};
@@ -295,7 +294,7 @@ impl Replayer<'_> {
                     event,
                     data,
                     &self.extension.preferences_with(&self.preferences),
-                    Instant::now() + ACTION_DEADLINE,
+                    self.host.now() + ACTION_DEADLINE,
                     self.cancelled,
                     &self.call(Trigger::Background).services,
                 );
@@ -409,7 +408,7 @@ impl Replayer<'_> {
             &page.view,
             &page.context(),
             &self.extension.preferences_with(&self.preferences),
-            Instant::now() + QUERY_DEADLINE,
+            self.host.now() + QUERY_DEADLINE,
             self.cancelled,
             &self.call(Trigger::Query).services,
         )?;
@@ -569,7 +568,7 @@ impl Replayer<'_> {
             data,
             &page,
             &self.extension.preferences_with(&self.preferences),
-            Instant::now() + ACTION_DEADLINE,
+            self.host.now() + ACTION_DEADLINE,
             self.cancelled,
             &self.call(Trigger::Activation).services,
         );

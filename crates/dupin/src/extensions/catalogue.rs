@@ -78,6 +78,9 @@ struct State {
     catalogue: Catalogue,
     cursor: Option<String>,
     expires: Option<Instant>,
+    /// Whether rows outlive their `ttl`: not by a fixed clock, which the guests' time never
+    /// leaves, so a fixture's rows hold however long a busy machine takes to replay it.
+    ages: bool,
     /// Why the package must be asked before the catalogue is used again, if it must.
     due: Option<Reason>,
     /// The preferences the catalogue was asked for with.
@@ -112,6 +115,7 @@ impl Cached {
                 catalogue: Catalogue::new(matching),
                 cursor: None,
                 expires: None,
+                ages: !clock.is_fixed(),
                 due: Some(Reason::Load),
                 preferences: None,
                 generation: None,
@@ -452,7 +456,10 @@ impl State {
             return Err(RunError::Failed(rejected(&problem)));
         }
         self.cursor = page.cursor;
-        self.expires = page.ttl.map(|seconds| now + Duration::from_secs(seconds.into()));
+        self.expires = page
+            .ttl
+            .filter(|_| self.ages)
+            .map(|seconds| now + Duration::from_secs(seconds.into()));
         if page.more {
             return Ok(false);
         }

@@ -11,8 +11,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use dupin_js_runtime::{
-    Acted, Bridge, CataloguePage, Control, Diagnostic, Engine, Exports, FilterHit, Handled, Package, Reply,
-    Row, RunError, Sources, ViewAnswer,
+    Acted, Bridge, CataloguePage, Control, Deadline, Diagnostic, Engine, Exports, FilterHit, Handled,
+    Package, Reply, Row, RunError, Sources, ViewAnswer,
 };
 
 use crate::sandbox;
@@ -77,6 +77,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
         let ToHelper::Run {
             id,
             deadline_ms,
+            processor_time,
             entry,
             package,
             modules,
@@ -88,8 +89,17 @@ fn run(socket: UnixStream) -> io::Result<()> {
         };
         let modules = modules.map(|modules| wire::split(modules, &tail)).transpose()?;
         let cancelled = cancelled.clone();
+        let limit = Duration::from_millis(deadline_ms);
+        let deadline = if processor_time {
+            Deadline::Spent {
+                limit: used().saturating_add(limit),
+                used,
+            }
+        } else {
+            Deadline::At(Instant::now() + limit)
+        };
         let control = Control {
-            deadline: Instant::now() + Duration::from_millis(deadline_ms),
+            deadline,
             is_cancelled: Box::new(move || cancelled.load(Ordering::Relaxed) == id),
         };
         let mut taken = Vec::new();
@@ -162,6 +172,19 @@ fn run(socket: UnixStream) -> io::Result<()> {
         // Freed once the answer is on its way, which is as much of a call's cost as making it.
         drop(spent);
     }
+}
+
+/// The processor time this process has used, across all its threads.
+fn used() -> Duration {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `time` is the struct the call fills.
+    if unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut time) } != 0 {
+        return Duration::MAX;
+    }
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
 }
 
 /// The bytecode of packages Dupin ran here, by the name Dupin gives each compile, so that a later

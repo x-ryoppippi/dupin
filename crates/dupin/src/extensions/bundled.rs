@@ -223,7 +223,7 @@ mod tests {
             .query(
                 "report",
                 10,
-                std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE),
                 || false,
                 &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )

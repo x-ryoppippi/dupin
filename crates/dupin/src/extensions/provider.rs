@@ -705,7 +705,7 @@ impl Provider for ExtensionProvider {
         } else {
             self.role
         };
-        let deadline = Instant::now() + QUERY_DEADLINE;
+        let deadline = crate::extensions::deadline_in(QUERY_DEADLINE);
         let id = &self.extension.package;
         // A main search the package may not see runs nothing, and asks nothing while typing.
         let seen = if role == Role::MainSearch {

@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use std::time::{Duration, Instant};
 
 use dupin_ext_sdk::fixture::{self, Consent, FilesReply, Replies};
 use dupin_extension_bridge::services::{self, Services, Subscription};
@@ -405,9 +404,10 @@ pub(in crate::extensions) struct Headless {
     /// value until they change again.
     preferences: Mutex<Arc<dupin_js_runtime::Preferences>>,
     /// The copies the clipboard `event` steps make, and the seconds into the script each
-    /// comes at.
+    /// comes at, in order.
     events: Vec<(f64, Value)>,
-    played: AtomicBool,
+    /// How many of them were handed over.
+    played: Mutex<usize>,
 }
 
 /// The fixture `dupin ext render` handed this headless launcher, if it handed one. A launcher
@@ -451,7 +451,7 @@ impl Headless {
                     _ => None,
                 })
                 .collect(),
-            played: AtomicBool::new(false),
+            played: Mutex::default(),
         })
     }
 
@@ -499,26 +499,24 @@ impl Headless {
         Some(held.clone())
     }
 
-    /// Hands what watches the clipboard each copy the fixture's clipboard `event` steps make,
-    /// at its time in the script, counted from now: the first frame, where the script starts.
-    pub fn play_events(&'static self) {
-        if self.events.is_empty() || self.played.swap(true, Ordering::Relaxed) {
-            return;
-        }
-        let start = Instant::now();
-        std::thread::spawn(move || {
-            for (at, copy) in &self.events {
-                let due = start + Duration::from_secs_f64(*at);
-                std::thread::sleep(due.saturating_duration_since(Instant::now()));
-                let watchers: Vec<Watcher> = lock(&self.replier.state.watchers)
-                    .iter()
-                    .map(|(_, watcher)| watcher.clone())
-                    .collect();
-                for watcher in watchers {
-                    watcher(copy.clone());
-                }
+    /// Hands what watches the clipboard each copy the fixture's clipboard `event` steps make
+    /// that the script's `clock` has reached, once, before the frame at that time takes its keys:
+    /// on the script's own clock, a copy lands between the keys around it however late a busy
+    /// machine draws the frames.
+    pub fn play_events(&self, clock: f64) {
+        let mut played = lock(&self.played);
+        while let Some((at, copy)) = self.events.get(*played)
+            && *at <= clock
+        {
+            *played += 1;
+            let watchers: Vec<Watcher> = lock(&self.replier.state.watchers)
+                .iter()
+                .map(|(_, watcher)| watcher.clone())
+                .collect();
+            for watcher in watchers {
+                watcher(copy.clone());
             }
-        });
+        }
     }
 }
 
