@@ -22,7 +22,7 @@ jobs:
   # The flake only targets aarch64-darwin, so even these evaluate on macOS.
   check:
     # Apple silicon (M4); Dupin targets nothing else. Labels: docs.blacksmith.sh, "Instance Types".
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,7 +79,7 @@ jobs:
 
   # The collector Worker in telemetry/: its tests, type check and build, which need no Mac.
   telemetry:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +94,7 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -149,7 +149,7 @@ jobs:
   extension-host:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -184,7 +184,7 @@ jobs:
   search-quality:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -220,28 +220,14 @@ jobs:
           nu --no-config-file scripts/search-quality.nu report "$RUNNER_TEMP/search-quality/results.json"
           --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
 
-  # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
-  # a required check, so e2e runs whenever the app could have changed and fails itself when the
-  # build, the extension host tests, the latency parity check or the search-quality benchmark
-  # did.
-  e2e:
-    needs: [changes, build, extension-host, latency, search-quality]
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
-    runs-on: blacksmith-6vcpu-macos-latest
+  # Drives the built app. It needs only build's Dupin.app, so it runs beside latency, the longest
+  # job, instead of after it.
+  e2e-tests:
+    needs: [changes, build]
+    if: needs.changes.outputs.app == 'true'
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 20
     steps:
-      - name: Require the build, the extension host tests, latency parity and search quality
-        if: >-
-          needs.build.result != 'success' || needs.extension-host.result != 'success' ||
-          needs.latency.result != 'success' || needs.search-quality.result != 'success'
-        env:
-          BUILD: ${{ needs.build.result }}
-          EXTENSION_HOST: ${{ needs.extension-host.result }}
-          LATENCY: ${{ needs.latency.result }}
-          SEARCH_QUALITY: ${{ needs.search-quality.result }}
-        run: |
-          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY, search-quality: $SEARCH_QUALITY"
-          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -249,3 +235,28 @@ jobs:
       - uses: ./.github/actions/e2e
         with:
           artifact: Dupin.app
+
+  # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
+  # a required check, so e2e runs whenever the app could have changed and fails itself unless the
+  # build, the extension host tests, the latency parity check, the search-quality benchmark and
+  # the E2E tests all passed.
+  e2e:
+    needs: [changes, build, extension-host, latency, search-quality, e2e-tests]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Require the build, the extension host tests, latency parity, search quality and E2E
+        if: >-
+          needs.build.result != 'success' || needs.extension-host.result != 'success' ||
+          needs.latency.result != 'success' || needs.search-quality.result != 'success' ||
+          needs.e2e-tests.result != 'success'
+        env:
+          BUILD: ${{ needs.build.result }}
+          EXTENSION_HOST: ${{ needs.extension-host.result }}
+          LATENCY: ${{ needs.latency.result }}
+          SEARCH_QUALITY: ${{ needs.search-quality.result }}
+          E2E_TESTS: ${{ needs.e2e-tests.result }}
+        run: |
+          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY, search-quality: $SEARCH_QUALITY, e2e-tests: $E2E_TESTS"
+          exit 1

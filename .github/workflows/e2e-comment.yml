@@ -90,7 +90,7 @@ jobs:
           fi
 
           conclusion=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
-            --jq '.jobs[] | select(.name == "e2e") | .conclusion')
+            --jq '.jobs[] | select(.name == "e2e-tests") | .conclusion')
           case $conclusion in
             success) heading='E2E passed' ;;
             *) heading="E2E ${conclusion:-did not finish}" ;;
