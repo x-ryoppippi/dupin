@@ -137,6 +137,9 @@ pub struct Ui {
     visible_rows: std::ops::Range<usize>,
     /// How far down the result list is scrolled, as it last drew.
     pub(crate) list_offset: Rc<Cell<f32>>,
+    /// The height the result list takes before it scrolls, from the display the panel last
+    /// opened on.
+    pub list_budget: f32,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -334,6 +337,7 @@ impl Ui {
             thumbnails: thumbnails::Thumbnails::new(),
             visible_rows: 0..0,
             list_offset: Rc::default(),
+            list_budget: crate::view::DEFAULT_LIST_BUDGET,
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
@@ -390,6 +394,11 @@ impl Ui {
         };
         ui.watch_extensions(config.extensions);
         ui
+    }
+
+    /// Whether the panel's lists run upwards from the field, the best match next to it.
+    pub(crate) fn grows_up(&self) -> bool {
+        self.position.grows_up()
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
