@@ -59,16 +59,16 @@ background = "#142734"
 accent = "#176EA6"
 ```
 
-| Key                                                                                                                 | Range or values                                                                      |
-| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `backdrop`                                                                                                          | `"off"` (default), `"flow"`, or the path to a WGSL file; see [Shaders](./shaders.md) |
-| `panel_width`                                                                                                       | 400–1200 points                                                                      |
-| `row_height`                                                                                                        | 52–100 points, and at least `3 * font_size + 7`                                      |
-| `corner_radius`                                                                                                     | 0–32 points; applies after a relaunch                                                |
-| `font_family`                                                                                                       | `"system"` (San Francisco), `"monospace"` (SF Mono), or an installed family          |
-| `font_size`                                                                                                         | 12–20 points                                                                         |
-| `search_icon`                                                                                                       | `"⌕"` (default), up to 8 characters of text, or `"sf:"` and an SF Symbol's name      |
-| `[theme.light]`, `[theme.dark]`: `background`, `text`, `secondary`, `accent`, `selected_text`, `hover`, `separator` | `#RRGGBB`; an omitted colour uses the system palette                                 |
+| Key                                                                                                                 | Range or values                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `backdrop`                                                                                                          | `"off"` (default), `"flow"`, or the path to a WGSL file; see [Shaders](./shaders.md)                  |
+| `panel_width`                                                                                                       | 400–1200 points                                                                                       |
+| `row_height`                                                                                                        | 52–100 points, and at least `3 * font_size + 7`                                                       |
+| `corner_radius`                                                                                                     | 0–32 points; applies after a relaunch                                                                 |
+| `font_family`                                                                                                       | `"system"` (San Francisco), `"monospace"` (SF Mono), or an installed family                           |
+| `font_size`                                                                                                         | 12–20 points                                                                                          |
+| `search_icon`                                                                                                       | `"sf:magnifyingglass"` (default), `"sf:"` and another SF Symbol's name, or up to 8 characters of text |
+| `[theme.light]`, `[theme.dark]`: `background`, `text`, `secondary`, `accent`, `selected_text`, `hover`, `separator` | `#RRGGBB`; an omitted colour uses the system palette                                                  |
 
 ## Backdrop
 
@@ -95,7 +95,7 @@ Themes are built in: share the `[theme]` section without installing an extension
 
 `font_family` takes any font installed on the Mac by the name Font Book shows — `"Menlo"`, `"JetBrains Mono"`, `"Hiragino Sans"`. A comma-separated list tries each in order, CSS-style: `"Iosevka, JetBrains Mono"`. A name nothing provides falls back to the system font. Settings → Appearance lists the installed families in the Font menu; a name only TOML can express stays there, checked.
 
-`search_icon` is what stands before the query field until a command's chip takes its place. Text draws in the theme's font, so a glyph or an emoji works; `"sf:sparkle"` draws that SF Symbol in the secondary text colour, and a name the system has no symbol for shows the default `"⌕"`.
+`search_icon` is what stands before the query field until a command's chip takes its place. `"sf:sparkle"` draws that SF Symbol in the secondary text colour, centred in the field's height at every `font_size`, and a name the system has no symbol for shows the default `"sf:magnifyingglass"`. Text draws in the theme's font, so a glyph or an emoji such as `"⌕"` works. It is centred by its line rather than its ink, so a glyph drawn low in its line, as `⌕` is, sits low beside the query.
 
 The background remains a tint over Liquid Glass; headless rendering uses its opaque fallback.
 
