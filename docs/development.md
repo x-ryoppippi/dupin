@@ -48,8 +48,11 @@ Testbox setup and uses the same macOS runner and Nix setup as CI.
 CI jobs that do any real work (build, test, lint, format, record) run on the largest
 Blacksmith instance for their OS; jobs that only post comments may use `ubuntu-slim`. Check
 https://docs.blacksmith.sh when adding a job or when Blacksmith adds larger runners.
-The exception is `latency`, which stays on the runner its native baselines were recorded
-on until they are re-recorded on a new one ([Keypress latency](#keypress-latency)).
+The exception is `latency`, which runs on macOS 26 because its bundled extensions' parity with
+native does not hold on macOS 27: on the same 6 vCPU runner, `calendar.rev`'s port took 46%
+longer at p95 on 27 than on 26 while the native control took 15% longer, so re-recording the
+baselines on 27 would not let the ports pass
+([Keypress latency](#keypress-latency)).
 
 After this workflow is available on the repository's default branch, start a box
 from the root of the worktree you want to test:
