@@ -1,6 +1,6 @@
 # Configuration
 
-Dupin reads `~/.config/dupin/config.toml` (`$XDG_CONFIG_HOME/dupin/config.toml` when `XDG_CONFIG_HOME` is set). Every key is optional. Settings (⌘, in the panel) and `dupin config set` write changes back to it, and Dupin reloads the file while it runs.
+Dupin reads `~/.config/dupin/config.toml` (`$XDG_CONFIG_HOME/dupin/config.toml` when `XDG_CONFIG_HOME` is set). Every key is optional. Settings (⌘, in the panel) and `dupin config set` write changes back to it, and Dupin reloads the file while it runs. Settings → General → Advanced → Configuration opens the file or its folder.
 
 ```toml
 display = "mouse" # "mouse", "main", or "active"

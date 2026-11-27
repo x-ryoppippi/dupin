@@ -1,11 +1,13 @@
 use dupin_core::config::HotkeyTarget;
 use dupin_core::{DisplaySelection, InputSource, Position};
 use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
-use rune::{El, Shortcut, ShortcutError, Tx, col, row, text};
-use rune_kit::{Button, ButtonVariant, Kit, ShortcutRecorder, Switch, shortcut_error_message};
+use rune::{El, Shortcut, Tx, col, icon, row, text};
+use rune_kit::{Button, ButtonVariant, Kit, Switch};
+use rune_theme_opencode::icons::{CHEVRON_DOWN, CHEVRON_RIGHT};
 
 use super::Prefs;
-use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button};
+use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button};
+use super::shortcut::ShortcutKeycap;
 use crate::hotkey::LauncherShortcut;
 use crate::icons;
 
@@ -13,7 +15,7 @@ const DISPLAY: &str = "display";
 const POSITION: &str = "position";
 const INPUT_SOURCE: &str = "input-source";
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let rows = vec![
         hotkey_setting(s, k),
         selection_hotkey_setting(s, k),
@@ -21,40 +23,84 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         position_setting(s, k),
         input_source_setting(s, k),
         login_setting(s, k),
-        automation_setting(s, k),
-        telemetry_setting(s, k),
-        relaunch_setting(k),
     ];
-    let mut body = vec![card(k, hair, rows)];
+    let mut body = vec![card(k, rows)];
     if !s.config.bindings.is_empty() {
-        body.push(configured_hotkeys(s, k, hair));
+        body.push(configured_hotkeys(s, k));
+    }
+    body.push(advanced_disclosure(s, k));
+    if s.advanced {
+        body.push(card(
+            k,
+            vec![
+                automation_setting(s, k),
+                telemetry_setting(s, k),
+                relaunch_setting(k),
+            ],
+        ));
+        body.push(card(k, vec![configuration_setting(k)]));
     }
     body
 }
 
+/// The label that shows or hides the rows people rarely change.
+fn advanced_disclosure(s: &Prefs, k: &Kit) -> El {
+    let c = &k.c;
+    let glyph = if s.advanced { &CHEVRON_DOWN } else { &CHEVRON_RIGHT };
+    row()
+        .key("advanced")
+        .role("button")
+        .label("Advanced")
+        .expanded(s.advanced)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .self_start()
+        .h(24.0)
+        .ml(ROW_PX - 6.0)
+        .pl(6.0)
+        .pr(4.0)
+        .gap(2.0)
+        .center_y()
+        .radius(k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .on_press(|s: &mut Prefs| s.advanced = !s.advanced)
+        .child(text("Advanced").font(k.ty.body_medium).color(c.text_base))
+        .child(icon(glyph, 16.0).color(c.icon_muted))
+}
+
+/// config.toml's path, and buttons that open it and the folder holding it.
+fn configuration_setting(k: &Kit) -> El {
+    let path = crate::settings::path().map(|path| tilde(&path.display().to_string()));
+    let open = Button::new("Open file")
+        .variant(ButtonVariant::Ghost)
+        .on_press(|_: &mut Prefs| super::open_config_file())
+        .build(k)
+        .key("open-config");
+    let folder = Button::new("Open folder")
+        .variant(ButtonVariant::Ghost)
+        .on_press(|_: &mut Prefs| super::open_config_folder())
+        .build(k)
+        .key("open-config-folder");
+    setting(
+        k,
+        &icons::FILES,
+        "Configuration",
+        path.as_deref(),
+        row().gap(4.0).center_y().child(open).child(folder),
+    )
+}
+
 fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, label: &str, locked: bool) -> El {
     let i = kind as usize;
-    let shortcut_problem = s.shortcut_problems[i].clone();
-    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
-        shortcut_problem
-            .as_ref()
-            .filter(|_| *error == ShortcutError::Conflict)
-            .cloned()
-            .unwrap_or_else(|| shortcut_error_message(error, chord))
-    };
-    let recorder = ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
-        .label(label)
-        .width(180.0)
-        .on_change(move |s: &mut Prefs, next, _| s.change_hotkey(kind, next))
-        .error_message(refusal)
-        .disabled(locked)
-        .build(k);
-    if locked {
-        // Rune disables recorder input without applying the kit's usual disabled dimming.
-        recorder.layer_opacity(0.5)
-    } else {
-        recorder
-    }
+    ShortcutKeycap::new(key, label, &s.recorders[i])
+        .locked(locked)
+        .conflict(s.shortcut_problems[i].clone())
+        .build(
+            k,
+            move |s: &mut Prefs| &mut s.recorders[i],
+            move |s: &mut Prefs, next| s.change_hotkey(kind, next),
+        )
 }
 
 /// The panel hotkey's row, on General and in the welcome.
@@ -425,7 +471,7 @@ fn relaunch_setting(k: &Kit) -> El {
     )
 }
 
-fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
+fn configured_hotkeys(s: &Prefs, k: &Kit) -> El {
     let rows = s
         .config
         .bindings
@@ -467,5 +513,5 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                 .font(k.ty.body_medium)
                 .color(k.c.text_base),
         )
-        .child(card(k, hair, rows))
+        .child(card(k, rows))
 }

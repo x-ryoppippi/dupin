@@ -8,7 +8,7 @@ use crate::update::Status;
 
 /// Whether to install updates by themselves, and where the updater is: the version, what it
 /// is doing, and the one thing to do next.
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let locked = s.locked("auto_update");
     let next_auto_update = !s.config.auto_update;
     let auto = Switch::new(s.config.auto_update)
@@ -51,7 +51,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             action,
         ),
     ];
-    vec![card(k, hair, rows)]
+    vec![card(k, rows)]
 }
 
 pub(super) fn footer(s: &Prefs, k: &Kit) -> El {

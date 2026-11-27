@@ -66,7 +66,7 @@ The launch that told you sends nothing, so you can turn it off before the first 
 
 Any of these turns it off, and each takes effect at once, in the running launcher:
 
-- **Settings → General → Anonymous usage ping**: switch it off.
+- **Settings → General → Advanced → Anonymous usage ping**: switch it off.
 - In `config.toml`:
 
   ```toml

@@ -6,10 +6,11 @@ use std::collections::BTreeMap;
 use dupin_core::config::{Address, AliasTarget, HotkeyTarget, check_alias};
 use dupin_core::{Config, KeywordEntry, KeywordTarget};
 use rune::{El, Shortcut, ShortcutError, TextEdit, col, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, Kit, ShortcutRecorder, ShortcutRecorderState, shortcut_error_message};
+use rune_kit::{Button, Kit};
 
 use super::Prefs;
 use super::controls::{DESCRIPTION, ROW_PX, card, note, setting_with_lock};
+use super::shortcut::{ShortcutKeycap, ShortcutState};
 use crate::icons;
 
 /// What the page shows and what is being typed on it.
@@ -25,7 +26,7 @@ pub(super) struct Keywords {
     /// Why the last edit on the page wasn't saved.
     pub(super) problem: Option<String>,
     /// Each row's shortcut recorder, by the address a binding gives the row.
-    shortcuts: BTreeMap<String, ShortcutRecorderState>,
+    pub(super) shortcuts: BTreeMap<String, ShortcutState>,
     /// Why the chord last recorded for a command was refused, by command.
     pub(super) shortcut_problems: BTreeMap<String, String>,
 }
@@ -57,13 +58,13 @@ impl Keywords {
         let bound = command_shortcuts(config);
         for (name, recorder) in &mut self.shortcuts {
             if !bound.contains_key(name) && recorder.shortcut().is_some() {
-                *recorder = ShortcutRecorderState::new(None);
+                *recorder = ShortcutState::new(None);
             }
         }
         for (name, shortcut) in bound {
             let recorder = self.shortcuts.entry(name).or_default();
             if recorder.shortcut() != Some(&shortcut) {
-                *recorder = ShortcutRecorderState::new(Some(shortcut));
+                *recorder = ShortcutState::new(Some(shortcut));
             }
         }
         if previous.is_none_or(|previous| previous.dictionary_keywords != config.dictionary_keywords) {
@@ -221,7 +222,7 @@ impl Prefs {
     }
 }
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let mut body = Vec::new();
     if let Some(problem) = &s.keywords.problem {
         body.push(
@@ -234,22 +235,22 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
                 .wrap(),
         );
     }
-    body.push(card(k, hair, command_rows(s, k)));
+    body.push(card(k, command_rows(s, k)));
     body.push(note(
         k,
         "Type a keyword, then Space, in the launcher to enter its command; type ? to list them all. Record a shortcut to reach a row from any app: a command or web search shows the panel in it, and pressing it again hides the panel; an app or file opens.",
     ));
-    body.push(card(k, hair, system_rows(s, k)));
+    body.push(card(k, system_rows(s, k)));
     body.push(note(
         k,
         "A system command's shortcut runs it without showing the panel. Restart, Shut Down, Log Out and Empty Trash show their row instead, for ↩ to ask first.",
     ));
-    body.push(card(k, hair, alias_rows(s, k)));
+    body.push(card(k, alias_rows(s, k)));
     body.push(note(
         k,
         "An alias reaches a command (calendar, dictionary, files, contents, clipboard, snippets, snapshots or an extension's package name), app:<bundle id>, web:<keyword> or file:<path>. Built-in keywords, Dictionary and snippet keywords and web searches keep theirs; an alias goes before extensions' keywords.",
     ));
-    body.push(card(k, hair, keyword_list_rows(s, k)));
+    body.push(card(k, keyword_list_rows(s, k)));
     body
 }
 
@@ -379,57 +380,22 @@ fn command_row<'a>(
     )
 }
 
-/// The recorder for the shortcut that reaches the row `name` addresses, and a button to clear
-/// it.
+/// The keycap for the shortcut that reaches the row `name` addresses.
 fn shortcut_recorder(s: &Prefs, k: &Kit, name: &str, title: &str, locked: bool) -> El {
     let verb = match Address::parse(name) {
         Ok(Address::Row { .. }) => "Run",
         _ => "Open",
     };
     let state = s.keywords.shortcuts.get(name).cloned().unwrap_or_default();
-    let problem = s.keywords.shortcut_problems.get(name).cloned();
-    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
-        problem
-            .as_ref()
-            .filter(|_| *error == ShortcutError::Conflict)
-            .cloned()
-            .unwrap_or_else(|| shortcut_error_message(error, chord))
-    };
-    let owned = name.to_owned();
-    let changed = name.to_owned();
-    let recorder = ShortcutRecorder::new(format!("shortcut-{name}"), &state, move |s: &mut Prefs| {
-        s.keywords.shortcuts.entry(owned.clone()).or_default()
-    })
-    .label(format!("{verb} {title}"))
-    .width(140.0)
-    .on_change(move |s: &mut Prefs, next, _| s.change_command_shortcut(&changed, next))
-    .error_message(refusal)
-    .disabled(locked)
-    .build(k);
-    // Rune disables recorder input without applying the kit's usual disabled dimming.
-    let recorder = if locked {
-        recorder.layer_opacity(0.5)
-    } else {
-        recorder
-    };
-    let mut controls = row().gap(4.0).child(recorder);
-    if state.shortcut().is_some() && !locked {
-        let cleared = name.to_owned();
-        controls = controls.child(
-            Button::new("Clear")
-                .variant(ButtonVariant::Ghost)
-                .on_press(move |s: &mut Prefs| {
-                    if s.change_command_shortcut(&cleared, None).is_ok() {
-                        s.keywords
-                            .shortcuts
-                            .insert(cleared.clone(), ShortcutRecorderState::new(None));
-                    }
-                })
-                .build(k)
-                .key(format!("clear-shortcut-{name}")),
-        );
-    }
-    controls
+    let (owned, changed) = (name.to_owned(), name.to_owned());
+    ShortcutKeycap::new(format!("shortcut-{name}"), format!("{verb} {title}"), &state)
+        .locked(locked)
+        .conflict(s.keywords.shortcut_problems.get(name).cloned())
+        .build(
+            k,
+            move |s: &mut Prefs| s.keywords.shortcuts.entry(owned.clone()).or_default(),
+            move |s: &mut Prefs, next| s.change_command_shortcut(&changed, next),
+        )
 }
 
 /// A keyword as a label; an alias is drawn quieter, as the user's own.

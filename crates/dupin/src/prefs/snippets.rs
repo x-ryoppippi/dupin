@@ -170,7 +170,7 @@ fn preview(text: &str) -> String {
     }
 }
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let mut body = Vec::new();
     for (index, line) in s.snippets.outcome.iter().chain(&s.snippets.notices).enumerate() {
         body.push(
@@ -184,7 +184,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         );
     }
     match &s.snippets.editor {
-        Some(editor) => body.push(card(k, hair, editor_rows(s, k, editor))),
+        Some(editor) => body.push(card(k, editor_rows(s, k, editor))),
         None => body.push(
             row().w_full().px(ROW_PX).child(
                 Button::new("Add Snippet")
@@ -201,7 +201,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             "No snippets yet. Add one here, or type snip, then Space, in the launcher.",
         ));
     } else {
-        body.push(card(k, hair, snippet_rows(s, k)));
+        body.push(card(k, snippet_rows(s, k)));
     }
     body.push(note(
         k,

@@ -144,14 +144,14 @@ Settings → Keywords lists every command, web search, app and file a keyword re
 <img alt="Settings → Keywords, listing each command and web search with its keywords and each command's shortcut recorder, Clipboard's set to ⇧⌘V, the aliases section and the Dictionary and snippet keyword fields." src="../images/settings/keywords-light.png" width="760" />
 </picture>
 
-| Key / action                                   | What it does                                                           |
-| ---------------------------------------------- | ---------------------------------------------------------------------- |
-| Click a row's shortcut recorder, press a chord | Save it to `[bindings]`                                                |
-| <kbd>⌫</kbd> while recording, or **Clear**     | Remove the shortcut                                                    |
-| <kbd>Esc</kbd> while recording                 | Cancel                                                                 |
-| **Remove** beside an alias                     | Delete the alias                                                       |
-| The fields below the aliases                   | Add an alias                                                           |
-| The last card                                  | Edit `dictionary_keywords` and `snippet_keywords`, separated by spaces |
+| Key / action                                         | What it does                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| Click a row's shortcut, or **Record**, press a chord | Save it to `[bindings]`                                                |
+| <kbd>⌫</kbd> while recording, or **×** beside it     | Remove the shortcut                                                    |
+| <kbd>Esc</kbd> while recording                       | Cancel                                                                 |
+| **Remove** beside an alias                           | Delete the alias                                                       |
+| The fields below the aliases                         | Add an alias                                                           |
+| The last card                                        | Edit `dictionary_keywords` and `snippet_keywords`, separated by spaces |
 
 <details>
 <summary>Locked and refused shortcuts</summary>

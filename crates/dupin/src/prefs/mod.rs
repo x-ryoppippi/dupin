@@ -10,6 +10,7 @@ mod general;
 mod keywords;
 mod permissions;
 mod search;
+mod shortcut;
 mod snippets;
 mod sync;
 mod updates;
@@ -23,10 +24,11 @@ use std::sync::Arc;
 use dupin_core::Config;
 use dupin_mac::privacy::{CalendarAccess, PermissionStatus};
 use rune::{AppHandle, Cx, El, Icon, ScrollSpec, Shortcut, ShortcutError, Tx, col, el, icon, row, text};
-use rune_kit::{Kit, ShortcutRecorderState};
+use rune_kit::Kit;
 
 use self::controls::{DESCRIPTION, ROW_PX};
 use self::general::LoginPreference;
+use self::shortcut::ShortcutState;
 use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
 use crate::ui::Ui;
@@ -109,7 +111,7 @@ pub struct Prefs {
     config: Config,
     current: Rc<RefCell<Config>>,
     page: Page,
-    recorders: [ShortcutRecorderState; 2],
+    recorders: [ShortcutState; 2],
     shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
@@ -122,6 +124,8 @@ pub struct Prefs {
     /// Each visible permission's status in row order, read while the page shows.
     permissions: Vec<PermissionStatus>,
     calendar_access: CalendarAccess,
+    /// Whether General shows its Advanced cards, kept while Dupin runs.
+    advanced: bool,
     /// The first-run welcome's step while it covers the pages.
     welcome: Option<welcome::Step>,
     pub(crate) hotkey_problem: Option<String>,
@@ -154,7 +158,7 @@ impl Prefs {
         let config = current.borrow().clone();
         let recorders = LauncherShortcut::ALL.map(|kind| {
             let mut recorder =
-                ShortcutRecorderState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
+                ShortcutState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
             if binding.launch_problem(kind, recorder.shortcut()).is_some() {
                 recorder.mark_unregistered();
             }
@@ -188,6 +192,7 @@ impl Prefs {
             login: LoginPreference::current(),
             permissions: Vec::new(),
             calendar_access,
+            advanced: false,
             welcome: welcome.then_some(welcome::Step::Hotkey),
         }
     }
@@ -247,7 +252,7 @@ impl Prefs {
             let i = kind as usize;
             let shortcut = crate::hotkey::parse(kind.accelerator(&config)).ok().flatten();
             if self.recorders[i].shortcut() != shortcut.as_ref() {
-                self.recorders[i] = ShortcutRecorderState::new(shortcut);
+                self.recorders[i] = ShortcutState::new(shortcut);
                 self.shortcut_problems[i] = None;
             }
         }
@@ -371,19 +376,19 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let k = rune_theme_opencode::kit(cx.system_dark());
     let hair = 1.0 / cx.env().scale;
     let rows = match (s.welcome, s.page) {
-        (Some(step), _) => welcome::page(s, k, hair, step),
-        (None, Page::General) => general::page(s, k, hair),
-        (None, Page::Search) => search::page(s, k, hair),
-        (None, Page::Keywords) => keywords::page(s, k, hair),
-        (None, Page::Snippets) => snippets::page(s, k, hair),
+        (Some(step), _) => welcome::page(s, k, step),
+        (None, Page::General) => general::page(s, k),
+        (None, Page::Search) => search::page(s, k),
+        (None, Page::Keywords) => keywords::page(s, k),
+        (None, Page::Snippets) => snippets::page(s, k),
         (None, Page::Appearance) => appearance::page(s, k, cx.system_dark()),
         (None, Page::Extensions) => extensions::problem(s, k)
             .into_iter()
-            .chain(extensions::page(s, k, hair))
+            .chain(extensions::page(s, k))
             .collect(),
-        (None, Page::Permissions) => permissions::page(s, k, hair),
-        (None, Page::Sync) => sync::page(s, k, hair),
-        (None, Page::Updates) => updates::page(s, k, hair),
+        (None, Page::Permissions) => permissions::page(s, k),
+        (None, Page::Sync) => sync::page(s, k),
+        (None, Page::Updates) => updates::page(s, k),
     };
     let title = s.welcome.map_or(s.page.title(), welcome::Step::title);
     let panel = col()
@@ -512,15 +517,6 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         }
         pages = pages.child(item);
     }
-    let config = footer_link(k, "open-config", "Open config.toml").on_press(|_: &mut Prefs| {
-        if let Some(path) = crate::settings::path()
-            && path.exists()
-        {
-            std::thread::spawn(move || dupin_mac::workspace::open(&path));
-        }
-    });
-    let folder = footer_link(k, "open-config-folder", "Open Config Folder")
-        .on_press(|_: &mut Prefs| open_config_folder());
     col()
         .key("sidebar")
         .role("navigation")
@@ -541,14 +537,21 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             footer_link(k, "open-snapshots", "Open Snapshots")
                 .on_press(|s: &mut Prefs| s.panel.update(crate::ui::Ui::show_snapshots)),
         )
-        .child(config)
-        .child(folder)
         .children(crate::notices::path().map(|path| {
             footer_link(k, "open-acknowledgements", "Acknowledgements").on_press(move |_: &mut Prefs| {
                 std::thread::spawn(move || dupin_mac::workspace::open(path));
             })
         }))
         .children(s.updater.available().then(|| updates::footer(s, k)))
+}
+
+/// Open config.toml in its default editor, when there is one.
+fn open_config_file() {
+    if let Some(path) = crate::settings::path()
+        && path.exists()
+    {
+        std::thread::spawn(move || dupin_mac::workspace::open(&path));
+    }
 }
 
 /// Open the folder holding config.toml, `extensions/` and `shaders/` in Finder, making it
@@ -638,6 +641,28 @@ mod tests {
             ("display", "Display", Role::ComboBox),
             ("system_automation", "System Command Automation", Role::Switch),
         ];
+        let advanced = |runtime: &mut rune::Runtime<Prefs>| {
+            runtime.frame(0.0);
+            let tree = runtime.accessibility_tree();
+            let shown = tree
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("System Command Automation"));
+            let (_, disclosure) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == Role::Button && node.label() == Some("Advanced"))
+                .expect("the Advanced disclosure");
+            assert_eq!(disclosure.is_expanded(), Some(shown));
+            shown
+        };
+        assert!(!advanced(&mut runtime), "Advanced starts collapsed");
+        let (x, y) = runtime
+            .find("advanced")
+            .expect("the Advanced disclosure is drawn");
+        runtime.pointer_down(x, y);
+        runtime.pointer_up(x, y);
+        assert!(advanced(&mut runtime));
 
         for locked in [false, true] {
             runtime.update(|s, _| {
@@ -796,6 +821,34 @@ mod tests {
             assert!(dictionary(s).is_empty());
             assert_eq!(s.config.bindings.len(), 1, "the app binding stays");
         });
+
+        let press = |runtime: &mut rune::Runtime<Prefs>, key: &str| {
+            runtime.frame(0.0);
+            let (x, y) = runtime.find(key).unwrap_or_else(|| panic!("{key} is drawn"));
+            runtime.pointer_down(x, y);
+            runtime.pointer_up(x, y);
+            runtime.frame(0.0);
+        };
+        press(&mut runtime, "shortcut-dictionary");
+        assert!(runtime.state.keywords.shortcuts["dictionary"].is_recording());
+        runtime.physical_input(rune::PhysicalInput::Key {
+            key: rune::PhysicalKeyCode::KeyD,
+            mods: rune::Mods {
+                ctrl: true,
+                alt: true,
+                ..rune::Mods::default()
+            },
+            pressed: true,
+            repeat: false,
+            text: None,
+            consumed_mods: Default::default(),
+        });
+        runtime.frame(0.0);
+        assert!(!runtime.state.keywords.shortcuts["dictionary"].is_recording());
+        assert_eq!(dictionary(&runtime.state)[0].0, "ctrl+alt+d");
+        press(&mut runtime, "shortcut-dictionary-clear");
+        assert!(dictionary(&runtime.state).is_empty());
+        assert_eq!(runtime.state.keywords.shortcuts["dictionary"].shortcut(), None);
     }
 
     #[test]
