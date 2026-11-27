@@ -150,7 +150,7 @@ fn unavailable() -> Item {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use dupin_core::config::Snippet;
     use dupin_core::{Action, Delivery, Effect, History, Session};
@@ -391,7 +391,7 @@ mod tests {
                 .catalogue(
                     &last,
                     10,
-                    Instant::now() + ACTION_DEADLINE,
+                    crate::extensions::deadline_in(ACTION_DEADLINE),
                     &dupin_extension_bridge::Call::none(),
                     Role::Keyword,
                     None,

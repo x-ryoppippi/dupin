@@ -2,6 +2,14 @@
 
 An extension is a JavaScript or TypeScript package that answers one keyword: type the keyword and Space, then a query, and Dupin shows the rows the extension returns. It runs inside Dupin, sandboxed; to drive Dupin from a terminal, a script or an AI agent, use the [command line](./cli.md) or the [MCP server](./mcp.md).
 
+Every search in Dupin is a pipeline, a model Dupin owes to Shougo Matsushita's [unite.vim](https://github.com/Shougo/unite.vim), [denite.nvim](https://github.com/Shougo/denite.nvim) and [ddu.vim](https://github.com/Shougo/ddu.vim): sources produce rows, filters match and order them, and each row's kind gives it actions. The core stays small, and an extension can plug into each stage.
+
+<Pipeline>
+
+Sources produce rows for the query, filters (matchers and sorters) match and order them, and kinds (text, URL, file and app) give each row its actions. An extension can be a source with its own keyword, provide a matcher or sorter (with the `rows:<kind>` and `query` scopes), or add an action to a kind's rows (with `rows:<kind>`); [`[advanced]`](./advanced.md) recomposes the stages.
+
+</Pipeline>
+
 ## Open it
 
 Type an extension's keyword and Space in the panel; `?` lists every keyword. Manage extensions in Settings → Extensions, and install or write them with `dupin ext`.
@@ -272,18 +280,19 @@ Dupin grants what a bundled package declares in advance, except its files and pr
 
 Some extensions ship inside Dupin and run whether or not the extensions folder is on, each with a switch in Settings → Extensions.
 
-| Extension                                   | Keyword  | What it does                                                |
-| ------------------------------------------- | -------- | ----------------------------------------------------------- |
-| **Dupin**                                   | `help`   | Searches Dupin's documentation, issues, source and website. |
-| [Emoji & Symbols](./emoji.md)               | `emoji`  | Picks an emoji or symbol by its English or Japanese name.   |
-| [Window Management](./window-management.md) | `window` | Moves and resizes the focused window. Off until turned on.  |
+| Extension                                   | Keyword  | What it does                                                                                        |
+| ------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| **Dupin**                                   | `help`   | Searches Dupin's documentation, issues, source and website.                                         |
+| [Emoji & Symbols](./emoji.md)               | `emoji`  | Picks an emoji or symbol by its English or Japanese name.                                           |
+| [Window Management](./window-management.md) | `window` | Moves and resizes the focused window. Off until turned on.                                          |
+| [Running Apps](./running-apps.md)           | `quit`   | Hides, quits and force quits running apps, and adds those actions to app rows. Off until turned on. |
 
 <details>
 <summary>Built-in features as packages</summary>
 
-[Calculator](./calculator.md), [Calendar search](./calendar.md), [Clipboard history](./clipboard.md), [Dictionary](./dictionary.md) and [Snippets](./snippets.md) are bundled extensions too. Each keeps its own settings and keywords, and Settings → Extensions lists it as a built-in command. **Dupin** (`help`) takes a word typed after its keyword. Web Search lists the web searches that the main search reaches by their alias. To change any bundled extension, [copy it](#overriding-a-built-in) into the extensions folder.
+[Calculator](./calculator.md), [Calendar search](./calendar.md), [Clipboard history](./clipboard.md), [Dictionary](./dictionary.md) and [Snippets](./snippets.md) are bundled extensions too. Each keeps its own settings and keywords, and Settings → Extensions lists it as a built-in command. Its package's `keyword` is the one its built-in answers by default, and a copy's own `keyword` is ignored. **Dupin** (`help`) takes a word typed after its keyword. Web Search lists the web searches that the main search reaches by their alias. To change any bundled extension, [copy it](#overriding-a-built-in) into the extensions folder.
 
-Calculator answers the main search rather than a keyword: Dupin hands its package only what you type there that has a digit in it, and only while the package holds `query`. A feature's Settings rows reach its package as the package's [preferences](./extension-manifest.md#preferences), and a package that watches on a feature's behalf watches only while the feature is on. One that reads config.toml, as Snippets does, gets those settings in its preferences too, and only the copy that shipped gets them: once an ejected copy is changed, it is third-party and gets none.
+Calculator answers the main search rather than a keyword, so its package declares none: Dupin hands its package only what you type there that has a digit in it, and only while the package holds `query`. A feature's Settings rows reach its package as the package's [preferences](./extension-manifest.md#preferences), and a package that watches on a feature's behalf watches only while the feature is on. One that reads config.toml, as Snippets does, gets those settings in its preferences too, and only the copy that shipped gets them: once an ejected copy is changed, it is third-party and gets none.
 
 </details>
 

@@ -283,6 +283,21 @@ export const windows = Object.freeze({
 	},
 });
 
+export const apps = Object.freeze({
+	async running() {
+		return (await call('apps.running', {})).apps;
+	},
+	async hide(app) {
+		return (await call('apps.hide', app)).outcome;
+	},
+	async quit(app) {
+		return (await call('apps.quit', app)).outcome;
+	},
+	async forceQuit(app) {
+		return (await call('apps.forceQuit', app)).outcome;
+	},
+});
+
 export const context = Object.freeze({
 	async frontmost() {
 		return (await call('context.frontmost', {})).app;

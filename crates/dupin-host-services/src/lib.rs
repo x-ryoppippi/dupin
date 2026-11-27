@@ -1,11 +1,12 @@
 //! Host services that the extension broker exposes to guests: reads and listings inside
 //! user-picked file scopes, user-approved executable profiles, and the OS-backed dictionary,
-//! calendar, clipboard, windows and context. Each acts with the user's native authority, so the broker checks
+//! calendar, clipboard, windows, context and running apps. Each acts with the user's native authority, so the broker checks
 //! grants before calling it. Nothing here prompts, stores grants or talks to a guest.
 //!
 //! Each OS-backed service defines a narrow backend trait that `dupin-mac` implements and a
 //! `Fixture` for tests, and returns serialisable results or a [`ServiceError`].
 
+pub mod apps;
 pub mod calendar;
 pub mod clipboard;
 pub mod context;

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use dupin_core::{Anchor, CommandId, ExtensionRequest, Navigated, Page, Provider};
 use dupin_extension_bridge::{Bridge, Notice, PackageId, ScopeKey, Trigger};
@@ -279,9 +278,10 @@ impl Ui {
     ) -> bool {
         let current = self.session.command_id().clone();
         let installed = self.extensions.install(registration, &current);
-        self.composition
-            .guests()
-            .set_extensions(self.extensions.active.clone());
+        let kinds_changed = self.composition.set_extensions(self.extensions.active.clone());
+        if kinds_changed {
+            self.extensions.forget_catalogues();
+        }
         for id in &installed.dropped {
             self.searchers.remove(id);
             self.deadlines.remove(id);
@@ -296,7 +296,7 @@ impl Ui {
             prefs.reflect_extensions(listing, problems);
             prefs.reflect_extension_access(bridge);
         });
-        installed.current_changed
+        installed.current_changed || kinds_changed
     }
 
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
@@ -332,7 +332,7 @@ impl Ui {
                     return;
                 };
                 let call = bridge_for_watch.call(&id_for_watch, Trigger::Background);
-                let deadline = Instant::now() + crate::extensions::QUERY_DEADLINE;
+                let deadline = crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE);
                 match extension.event("clipboard", &event, deadline, &call.services) {
                     // Only a search that lists this catalogue runs again: any other would run
                     // its package's `search` on this package's events.
@@ -504,7 +504,12 @@ impl Ui {
             );
         };
         let kind = crate::composition::row_kind(subject);
-        let Some(&field) = extension.provides.kinds.get(&(kind, action.clone())) else {
+        let Some(field) = extension
+            .provides
+            .kinds
+            .get(&(kind, action.clone()))
+            .map(|provision| provision.field)
+        else {
             return self.show_notice(
                 format!(
                     "{} provides no {} action called {action}.",
@@ -594,7 +599,7 @@ impl Ui {
         let anchor = self.session.anchor();
         let page = self.page_context(&extension);
         let bridge = self.extensions.bridge.clone();
-        let me = self.me.clone();
+        let acting = self.on_acted();
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
             let call = bridge.call(&extension.package, Trigger::Activation);
@@ -602,11 +607,11 @@ impl Ui {
                 &action,
                 &data,
                 &page,
-                Instant::now() + ACTION_DEADLINE,
+                crate::extensions::deadline_in(ACTION_DEADLINE),
                 &call.services,
             );
             let stale = !bridge.is_current(&extension.package, call.generation);
-            me.update(move |ui, tx| {
+            acting.acted(move |ui, tx| {
                 ui.form_answered(&anchor);
                 if stale {
                     ui.show_notice(

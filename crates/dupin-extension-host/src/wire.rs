@@ -19,7 +19,7 @@ use serde_json::value::RawValue;
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -38,6 +38,8 @@ pub enum ToHelper {
         id: u64,
         /// Milliseconds the run may take from when the helper reads it.
         deadline_ms: u64,
+        /// Whether `deadline_ms` counts the helper's processor time rather than the wall clock.
+        processor_time: bool,
         entry: String,
         /// The compiled package Dupin runs, which it names the same in every run. None for a
         /// compile.
@@ -347,6 +349,7 @@ mod tests {
         let message = ToHelper::Run {
             id: 7,
             deadline_ms: 100,
+            processor_time: false,
             entry: "main.js".into(),
             package: None,
             modules: Some(modules),
@@ -553,6 +556,7 @@ mod tests {
             .map(|call| ToHelper::Run {
                 id: 1,
                 deadline_ms: 2,
+                processor_time: true,
                 entry: "main.js".into(),
                 package: Some(5),
                 modules: Some(vec![span()]),
@@ -563,6 +567,7 @@ mod tests {
                 ToHelper::Run {
                     id: 1,
                     deadline_ms: 2,
+                    processor_time: false,
                     entry: "main.js".into(),
                     package: Some(5),
                     modules: None,
@@ -698,21 +703,21 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (12, SHAPES.map(str::to_owned).to_vec()),
+            (13, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
 
     const SHAPES: [&str; 27] = [
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"a":true}},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"view","name":"note","page":{"query":"q","state":{"id":7}},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null,"page":{"query":"","state":null},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"filter","name":"romaji","input":{"stage":"matcher","query":"q","titles":["A"]},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":null,"call":{"kind":"check"},"environment":null}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"a":true}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"view","name":"note","page":{"query":"q","state":{"id":7}},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null,"page":{"query":"","state":null},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":true,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"filter","name":"romaji","input":{"stage":"matcher","query":"q","titles":["A"]},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"processor_time":false,"entry":"main.js","package":5,"modules":null,"call":{"kind":"check"},"environment":null}"#,
         r#"{"kind":"cancel","id":1}"#,
         r#"{"kind":"reply","id":1,"call":2}"#,
         r#"{"kind":"hello","version":0,"engine":"e"}"#,

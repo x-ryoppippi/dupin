@@ -110,6 +110,10 @@ def measure [
     if $job.setup.extensions? != null {
         cp --recursive $job.setup.extensions ($config | path join dupin extensions)
     }
+    let enables = $job.setup.enables? | default []
+    if ($enables | is-not-empty) {
+        enabled-grants $enables | save ($config | path join dupin extension-grants.toml)
+    }
     let log = $dir | path join samples.jsonl
     let env_vars = {
         HOME: $dir
@@ -153,6 +157,12 @@ def measure [
             msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider) as answered by ($answerer), or ended a pass without its rows; the scenario does not reach its feature"
         }
     }
+    let off = unenabled $matched $enables $per_pass
+    if $off > 0 {
+        error make {
+            msg: $"($job.id) [($job.implementation)]: ($off) passes ended without rows from or composed by ($enables | str join ', '); the packages it enables are not on"
+        }
+    }
     let samples = $matched | where superseded? != true
     {
         commands: ($samples | get command | uniq)
@@ -193,6 +203,34 @@ export def unanswered [
         | is-not-empty
         let ends_pass = ($it.index + 1) mod $per_pass == 0
         not $searched or ($ends_pass and not $shown)
+    }
+    | length
+}
+
+# The broker's declarative base turning on each of `packages`, bundled ones named
+# `bundled:<name>`, as `extension-grants.toml` beside config.toml does.
+export def enabled-grants [packages: list<string>]: nothing -> string {
+    {
+        version: 1
+        packages: ($packages | each {|package| {$package: {enabled: true}} } | into record)
+    }
+    | to toml
+}
+
+# How many passes, `per_pass` drawn keypresses each, ended without a row from each of
+# `packages` or one carrying a kind action it composes: a variant that turns a package on beside
+# a feature it doesn't answer, such as one adding default actions to the main search's apps, must
+# show it on, or it measures the feature without it.
+export def unenabled [samples: list<record>, packages: list<string>, per_pass: int]: nothing -> int {
+    if ($packages | is-empty) {
+        return 0
+    }
+    $samples
+    | enumerate
+    | where {|it| ($it.index + 1) mod $per_pass == 0 and $it.item.superseded? != true }
+    | where {|it|
+        let present = ($it.item.packages? | default {} | values) ++ ($it.item.composed? | default [])
+        $packages | any {|package| $package not-in $present }
     }
     | length
 }
@@ -262,6 +300,7 @@ def summarize [job: record, runs: list<record>]: nothing -> record {
         typed: $job.typed
         provider: $job.setup.provider
         package: $job.setup.package?
+        enables: $job.setup.enables?
         budget_ms: $job.setup.budget_ms?
         commands: (
             $runs

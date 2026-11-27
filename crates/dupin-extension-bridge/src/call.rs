@@ -9,11 +9,11 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use dupin_broker::{
-    ClipboardAccess, ConsentState, ContextAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope,
-    ScopeKey, ScopeName, StorageOp, WindowsAccess,
+    AppsAccess, ClipboardAccess, ConsentState, ContextAccess, FilesAccess, FilesKind, Method, Permit,
+    Request, Scope, ScopeKey, ScopeName, StorageOp, WindowsAccess,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, exec, files, windows};
+use dupin_host_services::{apps, calendar, exec, files, windows};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -208,6 +208,34 @@ struct Range {
     limit: Option<u64>,
     order: Option<calendar::Order>,
 }
+
+/// The app a guest names, by its process or by its bundle's absolute path.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppArgs {
+    pid: Option<u32>,
+    path: Option<String>,
+}
+
+impl AppArgs {
+    fn target(self) -> Result<apps::Target, Failure> {
+        match (self.pid, self.path) {
+            (Some(pid), None) => Ok(apps::Target::Pid(pid)),
+            (None, Some(path)) => {
+                bounded(&path, "path", MAX_APP_PATH_BYTES)?;
+                if !path.starts_with('/') {
+                    return Err(Failure::invalid("`path` must be absolute"));
+                }
+                Ok(apps::Target::Path(path))
+            }
+            _ => Err(Failure::invalid(
+                "name the app by exactly one of `pid` and `path`",
+            )),
+        }
+    }
+}
+
+const MAX_APP_PATH_BYTES: usize = 4096;
 
 /// A frame as the guest sends it; the windows service checks its bounds.
 #[derive(Deserialize)]
@@ -456,6 +484,25 @@ impl Session {
                     .windows
                     .set_frame(windows::Frame::new(x, y, width, height))?;
                 Ok(json!({ "frame": frame }))
+            }
+            "apps.running" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Apps(AppsAccess::Read), asker)?;
+                let running = self.bridge.services.apps.running()?;
+                self.release(&permit, asker)?;
+                Ok(json!({ "apps": running }))
+            }
+            "apps.hide" | "apps.quit" | "apps.forceQuit" => {
+                let target = decode::<AppArgs>(args)?.target()?;
+                let permit = self.permit(&Request::Apps(AppsAccess::Control), asker)?;
+                // Hiding or quitting is the effect, so the permit is checked again just before it.
+                self.release(&permit, asker)?;
+                let services = &self.bridge.services.apps;
+                let outcome = match op {
+                    "apps.hide" => services.hide(&target)?,
+                    _ => services.quit(&target, op == "apps.forceQuit")?,
+                };
+                Ok(json!({ "outcome": outcome }))
             }
             "context.frontmost" => {
                 let Nothing {} = decode(args)?;

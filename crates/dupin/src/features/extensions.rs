@@ -118,7 +118,10 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
             }
             continue;
         }
-        let keyword = &extension.keyword;
+        // Only a package that ships as a built-in may leave its keyword out.
+        let Some(keyword) = &extension.keyword else {
+            continue;
+        };
         let holder = configured.registry.holder(keyword).map(|holder| match holder {
             dupin_core::KeywordHolder::Web(_) => "a web search in config.toml",
             dupin_core::KeywordHolder::Command(_) => "another command",

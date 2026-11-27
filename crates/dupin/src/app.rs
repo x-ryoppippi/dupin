@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
 
-use crate::{
-    backdrop, control, hotkey, latency, log, prefs, scripts, settings, snapshots, trace, ui, update, view,
-};
+use crate::{backdrop, control, hotkey, latency, log, prefs, scripts, settings, trace, ui, update, view};
 
 /// The panel with nothing below the field: the window's first size, before it fits its content.
 pub(crate) const HEADER_HEIGHT: f32 = view::HEADER_H;
@@ -74,6 +72,7 @@ pub(crate) fn run() {
     let prefs = App::new(AppSpec {
         fonts,
         families: FAMILIES,
+        on_key: Some(prefs::Prefs::key),
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
     .windowless()
@@ -104,28 +103,7 @@ pub(crate) fn run() {
             prefs.update(|s, _| s.refresh_permissions());
         }
     });
-    let snapshots = App::new(AppSpec {
-        fonts,
-        families: FAMILIES,
-        on_key: Some(snapshots::Snapshots::key),
-        ..AppSpec::new(
-            "Dupin Snapshots",
-            (900.0, 600.0),
-            || unreachable!(),
-            snapshots::view,
-        )
-    })
-    .windowless()
-    .on_window(|window| remember_frame(window, "Dupin Snapshots"))
-    .on_close(snapshots::Snapshots::closed);
-    let snapshots_handle = snapshots.handle();
     let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let snapshots = snapshots.init({
-        let panel = handle.clone();
-        let me = snapshots_handle.clone();
-        let running = running.clone();
-        move || snapshots::Snapshots::new(panel, me, running)
-    });
     let scripts = App::new(AppSpec {
         fonts,
         families: FAMILIES,
@@ -171,19 +149,20 @@ pub(crate) fn run() {
     let prefs = prefs.init({
         let calendar_access = calendar_access.clone();
         let locked_keys = locked_keys.clone();
-        let (config, binding, panel, me, updater, settings) = (
+        let (config, binding, panel, me, updater, settings, running) = (
             current_config.clone(),
             binding.clone(),
             handle.clone(),
             prefs_handle.clone(),
             updater.clone(),
             settings.clone(),
+            running.clone(),
         );
         move || {
             prefs::Prefs::new(
                 (config, locked_keys),
                 binding,
-                (panel, me),
+                (panel, me, running),
                 updater,
                 settings,
                 welcome,
@@ -214,7 +193,6 @@ pub(crate) fn run() {
                     ui::Windows {
                         panel: handle,
                         prefs: prefs_handle,
-                        snapshots: snapshots_handle,
                         scripts: scripts_handle,
                     },
                     updater,
@@ -232,7 +210,6 @@ pub(crate) fn run() {
             }
         })
         .on_ready(move |window| {
-            crate::extensions::headless_ready();
             let panel = window.clone();
             handle.update(move |ui, _| ui.set_panel_window(panel));
             install_quick_look(window, &handle, &quick_look);
@@ -263,19 +240,13 @@ pub(crate) fn run() {
                 ..Default::default()
             })
             .into();
-        let snapshots: rune::AnyWindowSpec = WindowSpec::from_app("snapshots", snapshots)
-            .options(WindowOptions {
-                min_size: Some((720.0, 420.0)),
-                ..Default::default()
-            })
-            .into();
         let scripts: rune::AnyWindowSpec = WindowSpec::from_app("scripts", scripts)
             .options(WindowOptions {
                 min_size: Some((720.0, 420.0)),
                 ..Default::default()
             })
             .into();
-        [panel, prefs, snapshots, scripts]
+        [panel, prefs, scripts]
     });
 }
 

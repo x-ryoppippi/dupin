@@ -1,0 +1,80 @@
+{
+	"fixture": 1,
+	"description": "Until listing the running apps is allowed, quit lists nothing and leaves the request to allow it to Dupin.",
+	"environment": {
+		"now": "2026-11-26T12:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"apps": {
+			"running": [
+				{
+					"active": true,
+					"bundleId": "com.apple.Safari",
+					"hidden": false,
+					"name": "Safari",
+					"path": "/Applications/Safari.app",
+					"pid": 321
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.Notes",
+					"hidden": false,
+					"name": "Notes",
+					"path": "/System/Applications/Notes.app",
+					"pid": 412
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.Music",
+					"hidden": true,
+					"name": "Music",
+					"path": "/System/Applications/Music.app",
+					"pid": 518
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.Preview",
+					"hidden": false,
+					"name": "Preview",
+					"path": "/System/Applications/Preview.app",
+					"pid": 640
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.finder",
+					"hidden": false,
+					"name": "Finder",
+					"path": "/System/Library/CoreServices/Finder.app",
+					"pid": 201
+				}
+			]
+		},
+		"consent": {
+			"apps:read": "pending"
+		}
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"error": {
+					"code": "items-threw",
+					"column": 16,
+					"file": "dupin",
+					"hint": "Catch the error inside items, or return an item that explains the problem.",
+					"line": 18,
+					"message": "items threw DupinError: Allow the extension to see which apps are running first."
+				},
+				"rows": []
+			}
+		}
+	]
+}

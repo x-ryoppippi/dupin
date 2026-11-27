@@ -1,0 +1,6 @@
+{
+	"events": [
+		{ "t": 0.5, "type": "type", "text": "quit " },
+		{ "t": 3.0, "type": "mark", "name": "end" }
+	]
+}

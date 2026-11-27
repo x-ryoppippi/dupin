@@ -348,6 +348,31 @@ fn windows_declares_read_and_arrange_only() {
 }
 
 #[test]
+fn apps_declares_read_and_control_only() {
+    for (declared, expected) in [
+        (
+            json!({ "apps": ["quit"] }),
+            ("invalid-value", "capabilities.apps[0]"),
+        ),
+        (json!({ "apps": [] }), ("empty", "capabilities.apps")),
+        (
+            json!({ "apps": ["read", "read"] }),
+            ("duplicate", "capabilities.apps[1]"),
+        ),
+        (
+            json!({ "apps": "control" }),
+            ("invalid-type", "capabilities.apps"),
+        ),
+    ] {
+        assert_eq!(
+            problem(declared.clone()),
+            (expected.0, expected.1.into()),
+            "{declared}"
+        );
+    }
+}
+
+#[test]
 fn context_declares_frontmost_and_document_only() {
     for (declared, expected) in [
         (

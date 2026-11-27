@@ -57,14 +57,14 @@ impl Ui {
                 call.finish(Err("Busy: picker active".into()));
             }
             Command::SnapshotsList {} | Command::SnapshotsRead { .. } | Command::SnapshotsOpen { .. } => {
-                self.snapshots.update_if(move |s, _| {
-                    s.control(call);
+                self.prefs.update_if(move |prefs, _| {
+                    prefs.snapshots.control(call);
                     false
                 });
             }
             Command::SnapshotsClose {} => {
                 self.snapshots_after_close = false;
-                self.snapshots.update(move |s, _| s.control_close(call));
+                self.prefs.update(move |prefs, _| prefs.close_snapshots(call));
             }
             Command::Open { query } => {
                 if self.picker.is_some() {

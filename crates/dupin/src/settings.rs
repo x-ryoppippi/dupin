@@ -233,6 +233,28 @@ script = "missing.sh"
     }
 
     #[test]
+    fn hiding_an_action_the_kind_lacks_is_invalid_where_it_is_read() {
+        let dir = scratch("invalid-hide");
+        let path = dir.join("config.toml");
+        let source = "file_limit = 37\n[advanced.kinds.file]\nhide = [\"quicklook\"]\n";
+        std::fs::write(&path, source).unwrap();
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(config, Config::default());
+        assert!(problem.unwrap().starts_with("config.toml is invalid at line 2"));
+        let problem = check(source).unwrap_err();
+        assert!(
+            problem.contains(
+                "advanced.kinds.file.hide names `quicklook`, which isn't one of the file kind's actions"
+            ),
+            "{problem}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn reads_only_regular_files_including_through_links() {
         use std::os::unix::ffi::OsStrExt;
 

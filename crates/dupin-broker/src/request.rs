@@ -1,8 +1,8 @@
 use std::path::{Component, Path};
 
 use crate::scope::{
-    ClipboardAccess, ContextAccess, FilesAccess, Method, Origin, RowField, RowKind, Scope, ScopeKey,
-    ScopeName, StorageOp, WindowsAccess,
+    AppsAccess, ClipboardAccess, ContextAccess, FilesAccess, Method, Origin, RowField, RowKind, Scope,
+    ScopeKey, ScopeName, StorageOp, WindowsAccess,
 };
 
 /// One operation a host service is about to perform for a package.
@@ -45,6 +45,8 @@ pub enum Request {
     Windows(WindowsAccess),
     /// Handing the package what Dupin noted about where the user was when the panel opened.
     Context(ContextAccess),
+    /// Listing the running apps, or hiding or quitting one.
+    Apps(AppsAccess),
     /// Handing the package `field` of rows of `kind` that Dupin's own sources found.
     Rows {
         kind: RowKind,
@@ -83,6 +85,7 @@ impl Request {
             Self::CalendarRead { .. } => ScopeKey::Calendar,
             Self::Windows(access) => ScopeKey::Windows(*access),
             Self::Context(access) => ScopeKey::Context(*access),
+            Self::Apps(access) => ScopeKey::Apps(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
             Self::Query => ScopeKey::Query,
         })
@@ -97,6 +100,7 @@ impl Request {
             Self::Script { .. } | Self::SnippetsWrite => true,
             Self::Clipboard(access) => *access != ClipboardAccess::Watch,
             Self::Windows(access) => *access == WindowsAccess::Arrange,
+            Self::Apps(access) => *access == AppsAccess::Control,
             Self::Files { .. }
             | Self::Storage { .. }
             | Self::StorageSync

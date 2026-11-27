@@ -1,0 +1,5 @@
+auto_update = false
+
+[advanced.kinds.app]
+hide = ["quick-look"]
+order = ["reveal"]

@@ -73,7 +73,6 @@ enum PendingPaste {
 pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
-    pub snapshots: AppHandle<crate::snapshots::Snapshots>,
     pub scripts: AppHandle<crate::scripts::output::Output>,
 }
 
@@ -168,6 +167,9 @@ pub struct Ui {
     pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
     pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
+    /// Extension actions a headless run's frames wait for, which haven't handed over their
+    /// results yet.
+    headless_acting: usize,
     extensions: Extensions,
     calendar_access: dupin_mac::privacy::CalendarAccess,
     _apps_watcher: Option<AppsWatcher>,
@@ -193,7 +195,6 @@ pub struct Ui {
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
-    snapshots: AppHandle<crate::snapshots::Snapshots>,
     script_output: AppHandle<crate::scripts::output::Output>,
     script_output_after_close: Option<crate::scripts::runner::RunId>,
 }
@@ -211,7 +212,6 @@ impl Ui {
         let Windows {
             panel: me,
             prefs,
-            snapshots,
             scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
@@ -304,7 +304,7 @@ impl Ui {
             .map(|(id, provider)| (id.clone(), spawn_searcher(me.clone(), id, provider)))
             .collect();
         let sources = registration.session.command_ids();
-        snapshots.update(move |s, _| s.set_sources(sources));
+        prefs.update(move |prefs, _| prefs.snapshots.set_sources(sources));
         me.update(|s, tx| s.refresh_default(tx));
         let mut query = TextEdit::new("");
         query.focused = true;
@@ -369,6 +369,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
+            headless_acting: 0,
             extensions: Extensions::new(bridge, registration.ports),
             calendar_access,
             _apps_watcher: apps_watcher,
@@ -402,7 +403,6 @@ impl Ui {
             quick_look,
             me,
             prefs,
-            snapshots,
         };
         ui.watch_extensions(config.extensions);
         ui
@@ -414,6 +414,7 @@ impl Ui {
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        crate::extensions::play_headless_copies(clock);
         self.poll_picker(clock, tx);
         let notice_expired = self.notices.expire(clock);
         self.poll_searches(clock, tx) || notice_expired

@@ -68,7 +68,7 @@ export def snapshot-stage [out: path] {
         poll $out snapshots-window {|r| $r.ok and (
             $r.data?
             | default []
-            | any {|w| $w.title == 'Dupin Snapshots' and $w.is_focused }
+            | any {|w| $w.title == 'Dupin Settings' and $w.is_focused }
         ) } list-windows --app $DUPIN | ignore
         (poll
             $out
@@ -241,7 +241,7 @@ export def snapshot-stage [out: path] {
         (poll
             $out
             snapshots-closed
-            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Settings' }) }
             list-windows
             --app
             $DUPIN

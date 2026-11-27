@@ -8,8 +8,8 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 
 ## What you see
 
-- A sidebar of pages: General, Search, Keywords, Snippets, Appearance, Permissions, Sync, Updates and more.
-- At the foot of the sidebar: **Show Welcome**, **Open Snapshots** and **Acknowledgements**.
+- A sidebar of pages: General, Search, Keywords, Snippets, Snapshots, Appearance, Permissions, Sync, Updates and more.
+- At the foot of the sidebar: **Show Welcome** and **Acknowledgements**.
 - At the foot of General, **Advanced** shows the rows you rarely change: System Command Automation, the anonymous usage ping, Relaunch and Configuration.
 - Rows a read-only `config.toml` sets are locked and marked **Managed by Nix** or **Set in config.toml**.
 

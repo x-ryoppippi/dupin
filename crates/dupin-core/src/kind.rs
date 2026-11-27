@@ -6,16 +6,37 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use crate::config::{KindAction, KindActions};
+use crate::config::{KindAction, KindActions, KindConfig};
 use crate::item::Transfer;
-use crate::{Action, Item, ItemAction, Payload, ShareTarget};
+use crate::{Action, Condition, Item, ItemAction, Payload, ShareTarget};
 
-/// The ID of the action that shows a file in Quick Look, which Space runs.
+/// The ID of the action that shows a file in Quick Look, which ⌘Y runs.
 pub const QUICK_LOOK: &str = "quick-look";
+
+/// The IDs of the file kind's own actions, in the order its rows list them: `browse` only on
+/// a folder, and the actions from `rename` to `compress` only on a name that is UTF-8.
+/// `[advanced.kinds.file]` `hide` and `order` name them.
+pub(crate) const FILE_ACTIONS: [&str; 12] = [
+    "open",
+    "browse",
+    "open-with",
+    "reveal",
+    QUICK_LOOK,
+    "copy-name",
+    "rename",
+    "move-to",
+    "copy-to",
+    "duplicate",
+    "compress",
+    "trash",
+];
+
+/// The IDs of the app kind's own actions, in the order its rows list them.
+pub(crate) const APP_ACTIONS: [&str; 3] = ["open", "reveal", QUICK_LOOK];
 
 /// The kinds Dupin registers: `text`, `url`, `file` and `app`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KindName {
+pub enum KindName {
     Text,
     Url,
     File,
@@ -59,6 +80,49 @@ pub enum Producer {
     Extension,
 }
 
+/// What must hold of a row before a package's kind action is offered on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Availability {
+    /// The app the row stands for is running.
+    Running,
+}
+
+/// A kind action a package that runs now provides, as its manifest declares it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Provided {
+    pub kind: KindName,
+    pub package: String,
+    pub name: String,
+    /// What the action screen calls it when Dupin composes it by default.
+    pub title: Option<String>,
+    /// Ask before running it, wherever it is composed.
+    pub confirm: bool,
+    pub availability: Option<Availability>,
+    /// Composed onto every row of its kind, unless config.toml adds it itself.
+    pub default: bool,
+}
+
+impl Provided {
+    fn is(&self, kind: KindName, package: &str, name: &str) -> bool {
+        self.kind == kind && self.package == package && self.name == name
+    }
+
+    /// `action` as this declaration asks for it on the row `subject`, titled `title`.
+    fn shape(&self, action: ItemAction, subject: &Subject, title: &str) -> ItemAction {
+        let mut action = action;
+        if self.confirm {
+            let verb = action.title.trim_end_matches('…').to_owned();
+            action = action.confirm(&format!("{verb} “{title}”?"), &verb);
+        }
+        match (self.availability, subject) {
+            (Some(Availability::Running), Subject::App(path)) => {
+                action.when(Condition::Running(path.clone()))
+            }
+            _ => action,
+        }
+    }
+}
+
 impl Subject {
     pub(crate) fn value_bytes(&self) -> usize {
         match self {
@@ -81,7 +145,7 @@ impl Subject {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Resolved {
     /// In the order the action menu lists them.
-    pub actions: Vec<ItemAction>,
+    pub(crate) actions: Vec<ItemAction>,
     /// The action ID Enter runs.
     pub(crate) primary: Option<String>,
     /// The action ID ⌘Enter runs.
@@ -107,6 +171,8 @@ pub struct Kinds {
     app: Arc<dyn Kind>,
     /// What `[advanced.kinds]` adds, shared by every clone so a reload reaches each source.
     configured: Arc<RwLock<KindActions>>,
+    /// The kind actions the packages that run now provide, shared as `configured` is.
+    provided: Arc<RwLock<Vec<Provided>>>,
 }
 
 impl Kinds {
@@ -118,15 +184,25 @@ impl Kinds {
             file: Arc::new(FileKind { share }),
             app: Arc::new(AppKind),
             configured: Arc::default(),
+            provided: Arc::default(),
         }
     }
 
-    /// Give each kind the actions `actions` lists for it after its own, for rows resolved from
-    /// now on. Whether they differ from the ones it had.
+    /// Give each kind the actions `actions` lists for it after its own, arranged by its `hide`
+    /// and `order`, for rows resolved from now on. Whether they differ from the ones it had.
     pub fn configure(&self, actions: &KindActions) -> bool {
         let mut configured = self.configured.write().unwrap_or_else(PoisonError::into_inner);
         let changed = *configured != *actions;
         configured.clone_from(actions);
+        changed
+    }
+
+    /// Hand over the kind actions the packages that run now provide, for rows resolved from now
+    /// on. Whether they differ from the ones before.
+    pub fn provide(&self, provided: Vec<Provided>) -> bool {
+        let mut current = self.provided.write().unwrap_or_else(PoisonError::into_inner);
+        let changed = *current != provided;
+        *current = provided;
         changed
     }
 
@@ -139,31 +215,47 @@ impl Kinds {
         }
     }
 
-    pub fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
+    /// The actions of a row Dupin produced for `subject`, titled `title`: its kind's own, then
+    /// the ones config.toml adds, then the ones packages compose by default, arranged by the
+    /// kind's `hide` and `order`.
+    fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
         let mut resolved = self.get(subject.kind()).actions(subject, title);
-        resolved.actions.extend(self.configured(subject, Producer::Dupin));
+        let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
+        let provided = self.provided.read().unwrap_or_else(PoisonError::into_inner);
+        let config = kind_config(&configured, subject.kind());
+        let mut named: Vec<_> = std::mem::take(&mut resolved.actions)
+            .into_iter()
+            .map(|action| (Some(action.id.clone()), action))
+            .collect();
+        named.extend(composed(config, &provided, subject, title, Producer::Dupin));
+        resolved.actions = arrange(named, config);
         resolved
     }
 
-    /// The actions config.toml adds for `subject`, which follow its kind's own. A row
-    /// `producer` made takes an extension's kind action only when Dupin produced it.
-    pub fn configured(&self, subject: &Subject, producer: Producer) -> Vec<ItemAction> {
+    /// The kind's own action Enter runs on a row of `subject`, as an extension's row that
+    /// copies or opens borrows it.
+    pub fn primary(&self, subject: &Subject, title: &str) -> Option<ItemAction> {
+        let resolved = self.get(subject.kind()).actions(subject, title);
+        let primary = resolved.primary?;
+        resolved.actions.into_iter().find(|action| action.id == primary)
+    }
+
+    /// The actions config.toml adds for `subject`, titled `title`, which follow its kind's own,
+    /// then the ones packages compose by default. A row `producer` made takes a package's kind
+    /// action only when Dupin produced it.
+    pub fn configured(&self, subject: &Subject, title: &str, producer: Producer) -> Vec<ItemAction> {
         let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
-        let kind = subject.kind();
-        let actions = match kind {
-            KindName::Text => &configured.text.actions,
-            KindName::Url => &configured.url.actions,
-            KindName::File => &configured.file.actions,
-            KindName::App => &configured.app.actions,
-        };
-        actions
-            .iter()
-            .enumerate()
-            .filter(|(_, action)| producer == Producer::Dupin || action.extension.is_none())
-            .filter_map(|(index, action)| {
-                configured_action(action, &configured_id(kind.as_str(), index), subject)
-            })
-            .collect()
+        let provided = self.provided.read().unwrap_or_else(PoisonError::into_inner);
+        composed(
+            kind_config(&configured, subject.kind()),
+            &provided,
+            subject,
+            title,
+            producer,
+        )
+        .into_iter()
+        .map(|(_, action)| action)
+        .collect()
     }
 
     /// A file or folder row, as every native file source shows one.
@@ -194,10 +286,128 @@ impl Kinds {
     }
 }
 
+fn kind_config(configured: &KindActions, kind: KindName) -> &KindConfig {
+    match kind {
+        KindName::Text => &configured.text,
+        KindName::Url => &configured.url,
+        KindName::File => &configured.file,
+        KindName::App => &configured.app,
+    }
+}
+
+/// The actions `config` adds for `subject`, titled `title`, then the ones `provided` composes
+/// by default that `config` doesn't add itself, each with the name `hide` and `order` know it
+/// by: a package's kind action is `<package>/<action>`, and a script or URL action has none,
+/// since its place in `actions` already says where it goes.
+fn composed(
+    config: &KindConfig,
+    provided: &[Provided],
+    subject: &Subject,
+    title: &str,
+    producer: Producer,
+) -> Vec<(Option<String>, ItemAction)> {
+    let kind = subject.kind();
+    let declared = |reference: Option<&str>| {
+        let (package, name) = crate::config::contribution(reference?)?;
+        provided.iter().find(|found| found.is(kind, package, name))
+    };
+    let mut actions: Vec<_> = config
+        .actions
+        .iter()
+        .enumerate()
+        .filter(|(_, action)| producer == Producer::Dupin || action.extension.is_none())
+        .filter_map(|(index, action)| {
+            let item = configured_action(action, &configured_id(kind.as_str(), index), subject)?;
+            let item = match declared(action.extension.as_deref()) {
+                Some(declaration) => declaration.shape(item, subject, title),
+                None => item,
+            };
+            Some((action.extension.clone(), item))
+        })
+        .collect();
+    if producer == Producer::Dupin {
+        actions.extend(
+            provided
+                .iter()
+                .filter(|declaration| declaration.kind == kind && declaration.default)
+                .filter(|declaration| !added(config, &declaration.package, &declaration.name))
+                .filter_map(|declaration| {
+                    let item = package_action(
+                        &provided_id(kind.as_str(), &declaration.package, &declaration.name),
+                        declaration.title.as_deref()?,
+                        &declaration.package,
+                        &declaration.name,
+                        subject,
+                    );
+                    Some((
+                        Some(format!("{}/{}", declaration.package, declaration.name)),
+                        declaration.shape(item, subject, title),
+                    ))
+                }),
+        );
+    }
+    actions
+}
+
+/// `actions` with the ones `config.order` names first, in its order, then the rest in theirs,
+/// and the ones `config.hide` names left out of the action screen. A hidden action keeps its
+/// route and shortcut: Enter, ⌘Enter and ⌘Y still find it.
+fn arrange(actions: Vec<(Option<String>, ItemAction)>, config: &KindConfig) -> Vec<ItemAction> {
+    if config.hide.is_empty() && config.order.is_empty() {
+        return actions.into_iter().map(|(_, action)| action).collect();
+    }
+    let mut placed: Vec<_> = actions
+        .into_iter()
+        .map(|(name, mut action)| {
+            let name = name.as_deref();
+            let place = name
+                .and_then(|name| config.order.iter().position(|ordered| ordered == name))
+                .unwrap_or(config.order.len());
+            if name.is_some_and(|name| config.hide.iter().any(|hidden| hidden == name)) {
+                action.hidden = true;
+            }
+            (place, action)
+        })
+        .collect();
+    placed.sort_by_key(|(place, _)| *place);
+    placed.into_iter().map(|(_, action)| action).collect()
+}
+
 /// The ID of the `index`th action config.toml adds to `kind`, which no source's own action
 /// takes, so a row with both text and a URL tells their configured actions apart.
 pub fn configured_id(kind: &str, index: usize) -> String {
     format!("configured-{kind}-{index}")
+}
+
+/// The ID of the kind action `package` provides as `name` and Dupin composes by default.
+fn provided_id(kind: &str, package: &str, name: &str) -> String {
+    format!("provided-{kind}-{package}-{name}")
+}
+
+/// Whether config.toml's `actions` already add `package`'s `name` to this kind, under a title
+/// of its own, so its default isn't added twice.
+fn added(config: &KindConfig, package: &str, name: &str) -> bool {
+    config
+        .actions
+        .iter()
+        .filter_map(|action| action.extension.as_deref())
+        .any(|reference| crate::config::contribution(reference) == Some((package, name)))
+}
+
+/// The kind action `package` provides as `name`, run on `subject`.
+fn package_action(id: &str, title: &str, package: &str, name: &str, subject: &Subject) -> ItemAction {
+    ItemAction::new(
+        id,
+        title,
+        Action::Extension {
+            extension: package.to_owned(),
+            request: crate::ExtensionRequest::Kind {
+                action: name.to_owned(),
+                subject: subject.clone(),
+            },
+        },
+    )
+    .keep_open()
 }
 
 /// `action` for `subject`, or none when the subject has no value the action can take: a path
@@ -218,20 +428,7 @@ fn configured_action(action: &KindAction, id: &str, subject: &Subject) -> Option
         },
         (None, None) => {
             let (package, name) = crate::config::contribution(action.extension.as_deref()?)?;
-            return Some(
-                ItemAction::new(
-                    id,
-                    &action.title,
-                    Action::Extension {
-                        extension: package.to_owned(),
-                        request: crate::ExtensionRequest::Kind {
-                            action: name.to_owned(),
-                            subject: subject.clone(),
-                        },
-                    },
-                )
-                .keep_open(),
-            );
+            return Some(package_action(id, &action.title, package, name, subject));
         }
         (None, Some(template)) => {
             let encode = dupin_plugin_protocol::web_search::percent_encode;
@@ -641,6 +838,133 @@ mod tests {
         assert_eq!(url.primary.as_deref(), Some("open"));
     }
 
+    fn running_apps(name: &str, title: &str, confirm: bool, default: bool) -> Provided {
+        Provided {
+            kind: KindName::App,
+            package: "running-apps".into(),
+            name: name.into(),
+            title: Some(title.into()),
+            confirm,
+            availability: Some(Availability::Running),
+            default,
+        }
+    }
+
+    #[test]
+    fn a_packages_default_kind_actions_follow_configured_ones_and_hide_and_order_arrange_them() {
+        let kinds = kinds();
+        let path = PathBuf::from("/Applications/Safari.app");
+        let app = |kinds: &Kinds| kinds.app(path.clone(), "Safari".into(), vec![]);
+        let native = ids(&app(&kinds).actions).len();
+        assert!(kinds.provide(vec![
+            running_apps("hide", "Hide", false, true),
+            running_apps("quit", "Quit", false, true),
+            running_apps("quit_forcibly", "Force Quit…", true, true),
+            running_apps("details", "Details", false, false),
+        ]));
+        let same = kinds.provided.read().unwrap().clone();
+        assert!(!kinds.provide(same));
+        let item = app(&kinds);
+        assert_eq!(
+            ids(&item.actions)[native..],
+            [
+                "provided-app-running-apps-hide",
+                "provided-app-running-apps-quit",
+                "provided-app-running-apps-quit_forcibly"
+            ]
+        );
+        let force = item
+            .item_action("provided-app-running-apps-quit_forcibly")
+            .unwrap();
+        assert_eq!(force.title, "Force Quit…");
+        let confirmation = force.confirmation().unwrap();
+        assert_eq!(
+            (confirmation.prompt.as_str(), confirmation.button.as_str()),
+            ("Force Quit “Safari”?", "Force Quit")
+        );
+        assert_eq!(force.condition(), Some(&Condition::Running(path.clone())));
+        assert_eq!(
+            force.action,
+            Action::Extension {
+                extension: "running-apps".into(),
+                request: crate::ExtensionRequest::Kind {
+                    action: "quit_forcibly".into(),
+                    subject: Subject::App(path.clone()),
+                },
+            }
+        );
+        assert!(
+            item.item_action("provided-app-running-apps-quit")
+                .unwrap()
+                .confirmation()
+                .is_none()
+        );
+        assert!(
+            kinds
+                .configured(&Subject::App(path.clone()), "Safari", Producer::Extension)
+                .is_empty(),
+            "an extension's rows never take a package's action"
+        );
+        assert!(
+            ids(&kinds.file("/a.txt".into(), "a.txt".into(), vec![], false).actions)
+                .iter()
+                .all(|id| !id.starts_with("provided-")),
+            "an app action stays on app rows"
+        );
+
+        kinds.configure(&configured(
+            r#"
+[advanced.kinds.app]
+hide = ["running-apps/hide"]
+order = ["open", "running-apps/quit"]
+"#,
+        ));
+        assert_eq!(
+            listed(&app(&kinds).actions),
+            [
+                "open",
+                "provided-app-running-apps-quit",
+                "reveal",
+                QUICK_LOOK,
+                "provided-app-running-apps-quit_forcibly"
+            ],
+            "`hide` and `order` arrange a default action as they do a native one"
+        );
+
+        kinds.configure(&configured(
+            r#"
+[[advanced.kinds.app.actions]]
+title = "Force Quit Now"
+extension = "running-apps/quit_forcibly"
+"#,
+        ));
+        let item = app(&kinds);
+        assert_eq!(
+            ids(&item.actions)[native..],
+            [
+                configured_id("app", 0).as_str(),
+                "provided-app-running-apps-hide",
+                "provided-app-running-apps-quit"
+            ],
+            "an action config.toml adds under its own title isn't added again by default"
+        );
+        let own = item.item_action(&configured_id("app", 0)).unwrap();
+        assert_eq!(
+            own.confirmation().unwrap().prompt,
+            "Force Quit Now “Safari”?",
+            "what the package declares holds wherever it is composed"
+        );
+        assert_eq!(own.condition(), Some(&Condition::Running(path.clone())));
+
+        kinds.configure(&KindActions::default());
+        assert!(kinds.provide(Vec::new()));
+        assert_eq!(
+            ids(&app(&kinds).actions).len(),
+            native,
+            "a package that stops takes its defaults with it"
+        );
+    }
+
     fn configured(source: &str) -> KindActions {
         crate::Config::parse(source).unwrap().advanced.kinds
     }
@@ -750,6 +1074,144 @@ url = "https://web.archive.org/save/{url}"
                 },
                 paths: payload.paths.clone()
             }
+        );
+    }
+
+    #[test]
+    fn every_native_action_has_its_documented_id_in_the_documented_order() {
+        let folder = kinds().file("/fixture/folder".into(), "folder".into(), vec![], true);
+        assert_eq!(ids(&folder.actions), FILE_ACTIONS);
+        let file = kinds().file("/fixture/a.txt".into(), "a.txt".into(), vec![], false);
+        let without_browse: Vec<_> = FILE_ACTIONS.into_iter().filter(|id| *id != "browse").collect();
+        assert_eq!(ids(&file.actions), without_browse);
+        let app = kinds().app("/Applications/Safari.app".into(), "Safari".into(), vec![]);
+        assert_eq!(ids(&app.actions), APP_ACTIONS);
+    }
+
+    fn listed(actions: &[ItemAction]) -> Vec<&str> {
+        actions
+            .iter()
+            .filter(|action| action.is_listed())
+            .map(|action| action.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn hide_and_order_arrange_the_list_and_keep_routes_and_shortcuts() {
+        let kinds = kinds();
+        let path = PathBuf::from("/fixture/a.txt");
+        let before = kinds.file(path.clone(), "a.txt".into(), vec![], false);
+        kinds.configure(&configured(
+            r#"
+[advanced.kinds.file]
+hide = ["quick-look", "open", "duplicate"]
+order = ["trash", "reveal"]
+
+[advanced.kinds.app]
+order = ["quick-look"]
+"#,
+        ));
+        let item = kinds.file(path.clone(), "a.txt".into(), vec![], false);
+        assert_eq!(
+            listed(&item.actions),
+            [
+                "trash",
+                "reveal",
+                "open-with",
+                "copy-name",
+                "rename",
+                "move-to",
+                "copy-to",
+                "compress"
+            ]
+        );
+        assert_eq!(item.actions.len(), before.actions.len(), "hidden, not removed");
+        assert_eq!(
+            (item.primary.as_deref(), item.alternate.as_deref()),
+            (Some("open"), Some("reveal"))
+        );
+        assert_eq!(item.action("open"), Some(&Action::Open(path.clone())));
+        assert_eq!(item.action(QUICK_LOOK), Some(&Action::Preview(path)));
+        assert!(item.has_actions());
+
+        let folder = kinds.file("/fixture/folder".into(), "folder".into(), vec![], true);
+        assert_eq!(
+            listed(&folder.actions)[..4],
+            ["trash", "reveal", "browse", "open-with"]
+        );
+        let app = kinds.app("/Applications/Safari.app".into(), "Safari".into(), vec![]);
+        assert_eq!(listed(&app.actions), [QUICK_LOOK, "open", "reveal"]);
+        assert_eq!(
+            listed(&kinds.resolve(&Subject::Text("x".into()), "x").actions),
+            ["copy"]
+        );
+
+        kinds.configure(&KindActions::default());
+        assert_eq!(
+            kinds.file("/fixture/a.txt".into(), "a.txt".into(), vec![], false),
+            before
+        );
+    }
+
+    #[test]
+    fn order_places_a_packages_kind_action_and_leaves_script_and_url_actions_in_theirs() {
+        let kinds = kinds();
+        kinds.configure(&configured(
+            r#"
+[advanced.kinds.app]
+order = ["uploader/upload", "reveal"]
+hide = ["uploader/send"]
+
+[[advanced.kinds.app.actions]]
+title = "Run"
+script = "run"
+
+[[advanced.kinds.app.actions]]
+title = "Upload"
+extension = "uploader/upload"
+
+[[advanced.kinds.app.actions]]
+title = "Send"
+extension = "uploader/send"
+
+[[advanced.kinds.app.actions]]
+title = "Search"
+url = "https://search.example/?q={name}"
+"#,
+        ));
+        let app = kinds.app("/Applications/Safari.app".into(), "Safari".into(), vec![]);
+        assert_eq!(
+            listed(&app.actions),
+            [
+                &configured_id("app", 1),
+                "reveal",
+                "open",
+                QUICK_LOOK,
+                &configured_id("app", 0),
+                &configured_id("app", 3),
+            ]
+        );
+        assert!(
+            app.item_action(&configured_id("app", 2))
+                .is_some_and(|action| !action.is_listed())
+        );
+    }
+
+    #[test]
+    fn an_extensions_copy_borrows_the_kinds_own_action_whatever_the_order() {
+        let kinds = kinds();
+        kinds.configure(&configured(
+            "[[advanced.kinds.text.actions]]\ntitle = \"Translate\"\nurl = \"https://translate.example/?q={text}\"",
+        ));
+        assert_eq!(
+            kinds.primary(&Subject::Text("x".into()), "x"),
+            Some(ItemAction::new("copy", "Copy", Action::Copy("x".into())))
+        );
+        assert_eq!(
+            kinds
+                .primary(&Subject::Url("https://example.com".into()), "Example")
+                .map(|action| action.id),
+            Some("open".into())
         );
     }
 }

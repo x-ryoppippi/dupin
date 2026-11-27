@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dupin_extension_bridge::Failure;
 use dupin_extension_bridge::services;
@@ -40,6 +40,8 @@ const MAX_EXPRESSION_BYTES: usize = 512;
 // was typed, which it allows 16 levels.
 const MAX_PARENTHESIS_DEPTH: usize = 17;
 const MAX_ANSWER_BYTES: usize = 256;
+/// The processor time fend may spend on one expression on the thread working it out: what an
+/// expression costs, which a busy Mac keeping the thread waiting doesn't add to.
 const EVALUATION_BUDGET: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Default)]
@@ -51,7 +53,7 @@ impl services::Calculator for Calculator {
     fn evaluate(&self, expression: &str, cancelled: &AtomicBool) -> Result<Value, Failure> {
         let budget = Budget {
             cancelled,
-            deadline: Instant::now() + EVALUATION_BUDGET,
+            until: thread_processor_time().saturating_add(EVALUATION_BUDGET),
         };
         let currency = self.currency.enabled();
         let snapshot = currency.then(|| self.currency.snapshot()).flatten();
@@ -61,13 +63,27 @@ impl services::Calculator for Calculator {
 
 struct Budget<'a> {
     cancelled: &'a AtomicBool,
-    deadline: Instant,
+    /// The thread's processor time at which fend is stopped.
+    until: Duration,
 }
 
 impl Interrupt for Budget<'_> {
     fn should_interrupt(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed) || Instant::now() >= self.deadline
+        self.cancelled.load(Ordering::Relaxed) || thread_processor_time() >= self.until
     }
+}
+
+/// The processor time the calling thread has used, or none left to spend where it can't be read.
+fn thread_processor_time() -> Duration {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `time` is the struct the call fills.
+    if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) } != 0 {
+        return Duration::MAX;
+    }
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
 }
 
 fn evaluation(
@@ -242,9 +258,9 @@ mod tests {
 
     #[test]
     fn expensive_work_is_interrupted() {
-        let start = Instant::now();
+        let start = thread_processor_time();
         assert_eq!(result("2^2^40"), None);
-        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(thread_processor_time() - start < Duration::from_secs(1));
         let cancelled = AtomicBool::new(true);
         assert_eq!(
             Calculator::default().evaluate("1+1", &cancelled).unwrap(),

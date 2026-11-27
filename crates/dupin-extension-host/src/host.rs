@@ -176,6 +176,7 @@ pub struct Host {
 struct Shared {
     launch: Launcher,
     environment: Option<Environment>,
+    clock: Clock,
     /// [`TICK`], unless a test checks that nothing waits for it.
     tick: Duration,
     workers: Arc<Workers>,
@@ -250,15 +251,36 @@ impl Host {
 
     /// A host whose guests see the clock and `Math.random` `environment` fixes, as a fixture
     /// replays them; with none, the real ones.
-    pub fn fixed(launch: Launcher, environment: Option<Environment>) -> Self {
+    pub(crate) fn fixed(launch: Launcher, environment: Option<Environment>) -> Self {
         Self::ticking(launch, environment, TICK)
     }
 
+    /// A host for a fixture's replay, as [`Host::fixed`] but measuring its calls' deadlines in
+    /// the processor time its helpers spend on them, from [`Host::now`]: a replay checks what
+    /// the guest does in the time the launcher gives it, which a busy machine's wait for a
+    /// processor isn't part of.
+    pub fn replaying(launch: Launcher, environment: Option<Environment>) -> Self {
+        Self::build(
+            launch,
+            environment,
+            TICK,
+            Clock::Processor {
+                origin: Instant::now(),
+                spent: Mutex::default(),
+            },
+        )
+    }
+
     pub(crate) fn ticking(launch: Launcher, environment: Option<Environment>, tick: Duration) -> Self {
+        Self::build(launch, environment, tick, Clock::Wall)
+    }
+
+    fn build(launch: Launcher, environment: Option<Environment>, tick: Duration, clock: Clock) -> Self {
         Self {
             shared: Arc::new(Shared {
                 launch,
                 environment,
+                clock,
                 tick,
                 workers: Arc::default(),
                 state: Mutex::default(),
@@ -266,6 +288,12 @@ impl Host {
                 next_call: AtomicU64::new(1),
             }),
         }
+    }
+
+    /// The moment on this host's clock, which every deadline handed to it is measured against:
+    /// the wall clock's, or for a [`Host::replaying`] host, a moment its helpers' work advances.
+    pub fn now(&self) -> Instant {
+        self.shared.clock.now()
     }
 
     /// Compiles every module of `sources` in a helper started for this compile alone, which
@@ -297,13 +325,7 @@ impl Host {
             work: Work::Compile,
             allowance,
         };
-        let (answer, tail) = self.alone(
-            request,
-            |helper| helper.started + HANDSHAKE,
-            || Instant::now() + limit,
-            is_cancelled,
-            &no_services(),
-        )?;
+        let (answer, tail) = self.alone(request, None, |now| now + limit, is_cancelled, &no_services())?;
         let Answer::Compiled { modules } = answer else {
             return Err(mismatch());
         };
@@ -388,7 +410,7 @@ impl Host {
         };
         let request = Request::run(package, call, Work::Items);
         catalogue_page(
-            self.alone(request, |_| deadline, || deadline, is_cancelled, services)?,
+            self.alone(request, Some(deadline), |_| deadline, is_cancelled, services)?,
             package,
         )
     }
@@ -494,8 +516,8 @@ impl Host {
         };
         match self.alone(
             Request::run(package, call, Work::Action),
+            Some(deadline),
             |_| deadline,
-            || deadline,
             is_cancelled,
             services,
         )? {
@@ -536,8 +558,8 @@ impl Host {
         };
         match self.alone(
             Request::run(package, call, Work::Event),
+            Some(deadline),
             |_| deadline,
-            || deadline,
             is_cancelled,
             services,
         )? {
@@ -612,16 +634,19 @@ impl Host {
             Some(helper) => helper,
             None => lease.helper.insert(Helper::start(&self.shared.launch)?),
         };
-        match helper.greet(&request, deadline, self.shared.tick, is_cancelled) {
+        let meter = Meter::start(&self.shared.clock, helper, Some(deadline));
+        match helper.greet(&request, &meter, self.shared.tick, is_cancelled) {
             Greeting::Ready => {}
             // A helper still starting is kept, so the next call doesn't pay for another start.
             Greeting::Waiting(error) => return Err(error),
             Greeting::Failed(error) => {
+                drop(meter);
                 lease.helper = None;
                 return Err(error);
             }
         }
-        let answer = helper.run(id, request, &self.shared, deadline, is_cancelled, services);
+        let answer = helper.run(id, request, &self.shared, &meter, is_cancelled, services);
+        drop(meter);
         if answer.is_err() {
             lease.helper = None;
         }
@@ -629,24 +654,27 @@ impl Host {
     }
 
     /// Runs `request` in a helper started for it alone and stopped when it ends, which neither
-    /// waits for nor holds a resident helper. `greet_by` is read from the new helper as it
-    /// starts and `deadline` once it is ready.
+    /// waits for nor holds a resident helper. The helper must be ready by `greet_by`, or within
+    /// the handshake without one, and `deadline` is read, given the clock's moment, once it is.
     fn alone(
         &self,
         request: Request<'_>,
-        greet_by: impl FnOnce(&Helper) -> Instant,
-        deadline: impl FnOnce() -> Instant,
+        greet_by: Option<Instant>,
+        deadline: impl FnOnce(Instant) -> Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
         let mut helper = Helper::start(&self.shared.launch)?;
-        match helper.greet(&request, greet_by(&helper), self.shared.tick, is_cancelled) {
+        let mut meter = Meter::start(&self.shared.clock, &helper, greet_by);
+        match helper.greet(&request, &meter, self.shared.tick, is_cancelled) {
             Greeting::Ready => {}
             Greeting::Waiting(error) | Greeting::Failed(error) => return Err(error),
         }
         let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
-        let deadline = deadline();
-        settle(helper.run(id, request, &self.shared, deadline, is_cancelled, services))
+        meter.deadline = Some(deadline(meter.now()));
+        let answer = helper.run(id, request, &self.shared, &meter, is_cancelled, services);
+        drop(meter);
+        settle(answer)
     }
 
     /// Waits for `domain`'s helper to be free, unless the caller gives up first.
@@ -682,7 +710,7 @@ impl Host {
                 slot.waiting -= 1;
                 return Err(RunError::Cancelled);
             }
-            if Instant::now() >= deadline {
+            if self.shared.clock.now() >= deadline {
                 slot.waiting -= 1;
                 return Err(RunError::Failed(deadline_passed(request.work, request.entry)));
             }
@@ -859,11 +887,11 @@ impl Helper {
         })
     }
 
-    /// Waits for the helper's hello, but no longer than the call may wait.
+    /// Waits for the helper's hello, but no longer than the call may wait, if it has a deadline.
     fn greet(
         &mut self,
         request: &Request<'_>,
-        deadline: Instant,
+        meter: &Meter<'_>,
         tick: Duration,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Greeting {
@@ -897,14 +925,13 @@ impl Helper {
                     return didnt_start();
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    let now = Instant::now();
-                    if now >= self.started + HANDSHAKE {
+                    if meter.since(self.started) >= HANDSHAKE {
                         return didnt_start();
                     }
                     if is_cancelled() {
                         return Greeting::Waiting(RunError::Cancelled);
                     }
-                    if now >= deadline {
+                    if meter.passed(Duration::ZERO) {
                         return Greeting::Waiting(RunError::Failed(
                             Diagnostic::new(
                                 "host-starting",
@@ -964,13 +991,13 @@ impl Helper {
         id: u64,
         request: Request<'_>,
         shared: &Shared,
-        deadline: Instant,
+        meter: &Meter<'_>,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
-        let mut answer = self.exchange(id, &request, shared, deadline, is_cancelled, services)?;
+        let mut answer = self.exchange(id, &request, shared, meter, is_cancelled, services)?;
         if matches!(answer.0, Answer::Missing) && request.package.is_some_and(|name| self.held.forget(name)) {
-            answer = self.exchange(id, &request, shared, deadline, is_cancelled, services)?;
+            answer = self.exchange(id, &request, shared, meter, is_cancelled, services)?;
         }
         if matches!(answer.0, Answer::Missing) {
             return Err(mismatch());
@@ -983,7 +1010,7 @@ impl Helper {
         id: u64,
         request: &Request<'_>,
         shared: &Shared,
-        deadline: Instant,
+        meter: &Meter<'_>,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
@@ -992,7 +1019,7 @@ impl Helper {
             let bytes = request.tail.iter().map(|part| part.len()).sum();
             self.held.hold(name, (), bytes);
         }
-        let remaining = deadline.saturating_duration_since(Instant::now());
+        let remaining = meter.remaining();
         let (modules, tail): (_, &[&[u8]]) = if held {
             (None, &[])
         } else {
@@ -1001,6 +1028,7 @@ impl Helper {
         let message = ToHelper::Run {
             id,
             deadline_ms: remaining.as_millis() as u64,
+            processor_time: matches!(shared.clock, Clock::Processor { .. }),
             entry: request.entry.into(),
             package: request.package,
             modules,
@@ -1011,9 +1039,10 @@ impl Helper {
         let footprint_limit = FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64 + request.allowance;
         self.footprint_limit = footprint_limit;
         let mut cancelled = None;
+        // Services keep to the wall clock, so they are given the time left as a moment on it.
         let mut requests = Requests::new(
             services.clone(),
-            deadline,
+            Instant::now() + remaining,
             id,
             self.socket.clone(),
             shared.workers.clone(),
@@ -1057,7 +1086,7 @@ impl Helper {
             if cancelled.is_some_and(|since| since.elapsed(self.child.id(), now) >= GRACE) {
                 return Err(RunError::Cancelled);
             }
-            if now >= deadline + GRACE {
+            if meter.passed(GRACE) {
                 return Err(RunError::Failed(deadline_passed(request.work, request.entry)));
             }
             if footprint(self.child.id()).is_some_and(|bytes| bytes > footprint_limit) {
@@ -1301,6 +1330,97 @@ fn footprint(pid: u32) -> Option<u64> {
         unsafe { libc::proc_pid_rusage(pid as i32, libc::RUSAGE_INFO_V2, usage.as_mut_ptr().cast()) };
     // SAFETY: a zero status means the call filled `usage`.
     (status == 0).then(|| unsafe { usage.assume_init() }.ri_phys_footprint)
+}
+
+/// What a host measures its calls' deadlines on.
+enum Clock {
+    /// The wall clock: the launcher answers a person, who waits however busy the Mac is.
+    Wall,
+    /// The processor time its helpers spent on its calls, as a moment after `origin`.
+    Processor { origin: Instant, spent: Mutex<Duration> },
+}
+
+impl Clock {
+    fn now(&self) -> Instant {
+        match self {
+            Clock::Wall => Instant::now(),
+            Clock::Processor { origin, spent } => {
+                *origin + *spent.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            }
+        }
+    }
+}
+
+/// A call's deadline, if it has one yet, read on its host's clock while one helper works on it.
+/// On a processor clock the moment moves with the helper's processor time, and what the helper
+/// spent is added to the clock once the reading ends.
+struct Meter<'a> {
+    clock: &'a Clock,
+    deadline: Option<Instant>,
+    pid: u32,
+    from: Instant,
+    /// The helper's processor time when the reading began, and when it was last read; the last
+    /// stands once the helper has exited.
+    used: Duration,
+    last: std::cell::Cell<Duration>,
+}
+
+impl<'a> Meter<'a> {
+    fn start(clock: &'a Clock, helper: &Helper, deadline: Option<Instant>) -> Self {
+        let pid = helper.child.id();
+        let used = processor_time(pid).unwrap_or_default();
+        Self {
+            clock,
+            deadline,
+            pid,
+            from: clock.now(),
+            used,
+            last: std::cell::Cell::new(used),
+        }
+    }
+
+    fn now(&self) -> Instant {
+        match self.clock {
+            Clock::Wall => Instant::now(),
+            Clock::Processor { .. } => self.from + self.read().saturating_sub(self.used),
+        }
+    }
+
+    /// Whether the deadline passed `grace` ago.
+    fn passed(&self, grace: Duration) -> bool {
+        self.deadline
+            .is_some_and(|deadline| self.now() >= deadline + grace)
+    }
+
+    fn remaining(&self) -> Duration {
+        self.deadline.map_or(Duration::ZERO, |deadline| {
+            deadline.saturating_duration_since(self.now())
+        })
+    }
+
+    /// How long ago the helper started at `started` on the wall clock, measured on this clock.
+    fn since(&self, started: Instant) -> Duration {
+        match self.clock {
+            Clock::Wall => started.elapsed(),
+            Clock::Processor { .. } => self.read(),
+        }
+    }
+
+    fn read(&self) -> Duration {
+        if let Some(time) = processor_time(self.pid) {
+            self.last.set(time.max(self.last.get()));
+        }
+        self.last.get()
+    }
+}
+
+impl Drop for Meter<'_> {
+    fn drop(&mut self) {
+        if let Clock::Processor { spent, .. } = self.clock {
+            let used = self.read().saturating_sub(self.used);
+            *spent.lock().unwrap_or_else(std::sync::PoisonError::into_inner) += used;
+        }
+    }
 }
 
 /// A moment in a helper's processor time, or on the wall clock where that can't be read.

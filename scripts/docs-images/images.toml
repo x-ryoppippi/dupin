@@ -204,6 +204,13 @@ window = "prefs"
 width = 760
 
 [[images]]
+page = "snapshots"
+name = "settings"
+scenario = "scripts/docs-images/settings-snapshots.json"
+window = "prefs"
+width = 960
+
+[[images]]
 page = "settings"
 name = "appearance"
 scenario = "scripts/docs-images/settings-appearance.json"
@@ -226,10 +233,22 @@ width = 760
 
 [[images]]
 page = "philosophy"
-name = "snapshots-window"
-scenario = "scripts/docs-images/snapshots-window.json"
-window = "snapshots"
-width = 760
+name = "snapshots-page"
+scenario = "scripts/docs-images/settings-snapshots.json"
+window = "prefs"
+width = 960
+
+[[images]]
+page = "running-apps"
+name = "list"
+extension = "extensions/running-apps"
+fixture = "list.json"
+step = 1
+
+[[images]]
+page = "running-apps"
+name = "actions"
+scenario = "scripts/headless/running-apps-actions.json"
 
 [[images]]
 page = "philosophy"

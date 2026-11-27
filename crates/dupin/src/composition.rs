@@ -8,12 +8,12 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dupin_broker::{RowField, RowKind};
 use dupin_core::config::{Advanced, contribution};
 use dupin_core::filter::{BatchStage, Filters, Hit, Sorter, SourceFilters, Stages};
-use dupin_core::kind::{Kinds, Subject};
+use dupin_core::kind::{KindName, Kinds, Provided, Subject};
 use dupin_extension_bridge::{Bridge, Request, Trigger};
 use dupin_js_runtime::{FilterInput, FilterStage};
 use dupin_mac::kinds::Rows;
@@ -55,6 +55,15 @@ impl Composition {
     /// Where the packages a composed filter runs in are handed over.
     pub fn guests(&self) -> &Arc<Guests> {
         &self.guests
+    }
+
+    /// The packages that run now, whose filters composed onto a source run in them and whose
+    /// kind actions the kinds compose. Whether the kinds' actions changed, which rows already
+    /// built lack.
+    pub fn set_extensions(&self, extensions: Vec<Arc<Extension>>) -> bool {
+        let provided = provided(&extensions);
+        self.guests.set_extensions(extensions);
+        self.kinds.provide(provided)
     }
 
     /// What the source `name`, which matches its own candidates, builds its rows with.
@@ -312,7 +321,11 @@ impl BatchStage for GuestFilter {
             Some(query.to_owned()),
             titles.iter().map(|title| (*title).to_owned()),
         );
-        let hits = match extension.filter(&self.filter, &input, Instant::now() + FILTER_DEADLINE) {
+        let hits = match extension.filter(
+            &self.filter,
+            &input,
+            crate::extensions::deadline_in(FILTER_DEADLINE),
+        ) {
             Ok(hits) => hits,
             Err(dupin_js_runtime::RunError::Failed(diagnostic)) => {
                 self.guests
@@ -338,6 +351,37 @@ impl BatchStage for GuestFilter {
                 })
                 .collect(),
         )
+    }
+}
+
+/// The kind actions `extensions` provide, each package's in the order of their names.
+fn provided(extensions: &[Arc<Extension>]) -> Vec<Provided> {
+    extensions
+        .iter()
+        .flat_map(|extension| {
+            extension
+                .provides
+                .kinds
+                .iter()
+                .map(|((kind, name), provision)| Provided {
+                    kind: kind_name(*kind),
+                    package: extension.id.clone(),
+                    name: name.clone(),
+                    title: provision.title.clone(),
+                    confirm: provision.confirm,
+                    availability: provision.availability,
+                    default: provision.default,
+                })
+        })
+        .collect()
+}
+
+fn kind_name(kind: RowKind) -> KindName {
+    match kind {
+        RowKind::Text => KindName::Text,
+        RowKind::Url => KindName::Url,
+        RowKind::File => KindName::File,
+        RowKind::App => KindName::App,
     }
 }
 
@@ -380,15 +424,28 @@ pub fn summary(advanced: &Advanced) -> Vec<String> {
         lines.push(format!("Main search also searches {}", appended.join(", ")));
     }
     let kinds = &advanced.kinds;
-    for (kind, actions) in [
-        ("Text", &kinds.text.actions),
-        ("URL", &kinds.url.actions),
-        ("File", &kinds.file.actions),
-        ("App", &kinds.app.actions),
+    for (kind, config) in [
+        ("Text", &kinds.text),
+        ("URL", &kinds.url),
+        ("File", &kinds.file),
+        ("App", &kinds.app),
     ] {
-        if !actions.is_empty() {
-            let titles: Vec<_> = actions.iter().map(|action| action.title.as_str()).collect();
+        if !config.actions.is_empty() {
+            let titles: Vec<_> = config
+                .actions
+                .iter()
+                .map(|action| action.title.as_str())
+                .collect();
             lines.push(format!("{kind} actions: {}", titles.join(", ")));
+        }
+        if !config.order.is_empty() {
+            lines.push(format!(
+                "{kind} actions listed first: {}",
+                config.order.join(", ")
+            ));
+        }
+        if !config.hide.is_empty() {
+            lines.push(format!("{kind} actions hidden: {}", config.hide.join(", ")));
         }
     }
     lines
@@ -495,6 +552,9 @@ script = "open-in-zed"
 [[advanced.kinds.text.actions]]
 title = "Translate"
 url = "https://translate.example/?q={text}"
+[advanced.kinds.app]
+hide = ["quick-look"]
+order = ["reveal"]
 "#,
         );
         assert_eq!(
@@ -504,6 +564,8 @@ url = "https://translate.example/?q={text}"
                 "Main search also searches files",
                 "Text actions: Translate",
                 "File actions: Open in Zed",
+                "App actions listed first: reveal",
+                "App actions hidden: quick-look",
             ]
         );
     }
@@ -640,13 +702,10 @@ export const filters = {
         assert_eq!(scores, [Some(6), None, Some(25)]);
 
         composition.apply(&advanced("[advanced.sources.apps]\nsorter = \"kana/spin\""));
-        let started = Instant::now();
+        let started = crate::extensions::host_now();
         assert_eq!(stages().batch_order(&titles), None, "an overrun falls back");
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "{:?}",
-            started.elapsed()
-        );
+        let spent = crate::extensions::host_now() - started;
+        assert!(spent < Duration::from_secs(2), "{spent:?}");
 
         composition.apply(&advanced("[advanced.sources.apps]\nmatcher = \"kana/longest\""));
         assert_eq!(
@@ -684,7 +743,7 @@ export const filters = {
             path: "/Users/test/a.txt".into(),
             folder: false,
         };
-        let native = composition.kinds().configured(&file, Producer::Dupin);
+        let native = composition.kinds().configured(&file, "a.txt", Producer::Dupin);
         assert_eq!(
             native,
             [dupin_core::ItemAction::new(
@@ -704,11 +763,17 @@ export const filters = {
         assert!(
             composition
                 .kinds()
-                .configured(&text, Producer::Extension)
+                .configured(&text, "Text", Producer::Extension)
                 .is_empty(),
             "another extension's rows never reach a package's kind action"
         );
-        assert_eq!(composition.kinds().configured(&text, Producer::Dupin).len(), 1);
+        assert_eq!(
+            composition
+                .kinds()
+                .configured(&text, "Text", Producer::Dupin)
+                .len(),
+            1
+        );
         assert_eq!(row_kind(&file), RowKind::File);
         assert_eq!(row_field(&file, RowField::Name).as_deref(), Some("a.txt"));
         assert_eq!(

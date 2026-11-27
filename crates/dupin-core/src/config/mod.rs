@@ -21,7 +21,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub use advanced::{Advanced, KindAction, KindActions, Route, Routes, SourceStages, contribution};
+pub use advanced::{
+    Advanced, KindAction, KindActions, KindConfig, Route, Routes, SourceStages, contribution,
+};
 use aliases::check_command_name;
 pub use aliases::{AliasTarget, Aliases, MAX_ALIASES, check_alias};
 pub use calendar::Calendar;

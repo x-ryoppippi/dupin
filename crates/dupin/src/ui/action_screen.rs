@@ -7,6 +7,15 @@ use super::{ICON_SIZE, Ui};
 
 pub const SEND_TO: &str = "Send to…";
 
+/// Leave out the actions whose condition doesn't hold now: an app's that need it running, by
+/// `running`. They are checked as the action screen opens, never as rows are built.
+fn offered(actions: &mut Vec<ItemAction>, running: impl Fn(&std::path::Path) -> bool) {
+    actions.retain(|action| match action.condition() {
+        None => true,
+        Some(dupin_core::Condition::Running(path)) => running(path),
+    });
+}
+
 pub struct ActionScreen {
     pub key: String,
     pub item: dupin_core::Item,
@@ -53,6 +62,34 @@ enum ActionKey {
 }
 
 impl ActionScreen {
+    /// The screen for the row `item`, whose result key is `key`, listing what its kind doesn't
+    /// hide; asking to confirm `confirmation` opens on that action's prompt, as Enter does on
+    /// an action that needs one, hidden or not.
+    fn new(key: String, mut item: dupin_core::Item, confirmation: Option<String>) -> Option<Self> {
+        item.actions
+            .retain(|action| action.is_listed() || confirmation.as_ref() == Some(&action.id));
+        let (selected, stage) = if let Some(action_id) = confirmation {
+            let selected = item.actions.iter().position(|action| action.id == action_id)?;
+            crate::trace::action_screen("confirm");
+            (
+                selected,
+                ActionStage::Confirm {
+                    action_id,
+                    selected: 0,
+                    from_list: false,
+                },
+            )
+        } else {
+            (0, ActionStage::List)
+        };
+        Some(Self {
+            key,
+            item,
+            selected,
+            stage,
+        })
+    }
+
     fn accept_applications(
         &mut self,
         key: &str,
@@ -182,28 +219,16 @@ impl Ui {
         else {
             return;
         };
-        let (selected, stage) = if let Some(action_id) = confirmation {
-            let Some(selected) = item.actions.iter().position(|action| action.id == action_id) else {
-                return;
-            };
-            crate::trace::action_screen("confirm");
-            (
-                selected,
-                ActionStage::Confirm {
-                    action_id,
-                    selected: 0,
-                    from_list: false,
-                },
-            )
-        } else {
-            (0, ActionStage::List)
-        };
-        self.action_screen = Some(ActionScreen {
-            key: id,
-            item: item.clone(),
-            selected,
-            stage,
-        });
+        let mut item = item.clone();
+        if item.actions.iter().any(|action| action.condition().is_some()) {
+            let running = crate::features::apps::running();
+            offered(&mut item.actions, |path| {
+                dupin_mac::running_apps::is_running(&running, path)
+            });
+        }
+        if let Some(screen) = ActionScreen::new(id, item, confirmation) {
+            self.action_screen = Some(screen);
+        }
     }
 
     pub fn actions(&mut self, id: &str, tx: &mut Tx) {
@@ -416,7 +441,7 @@ impl Ui {
         let running = self.running.clone();
         running.fetch_add(1, Ordering::AcqRel);
         std::thread::spawn(move || {
-            let searches = web.searches(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE);
+            let searches = web.searches(crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE));
             me.update(move |ui, _| ui.web_receivers_found(&key, &web, &searches));
             running.fetch_sub(1, Ordering::AcqRel);
         });
@@ -553,6 +578,14 @@ mod action_screen_tests {
     }
 
     fn fixture() -> (Session, ActionScreen) {
+        fixture_with(Item::path(
+            PathBuf::from("/fixture/example"),
+            "Example".into(),
+            vec![],
+        ))
+    }
+
+    fn fixture_with(item: Item) -> (Session, ActionScreen) {
         let origin = CommandId::new("sample.search").unwrap();
         let mut registry = CommandRegistry::new(origin.clone(), None);
         registry
@@ -582,11 +615,7 @@ mod action_screen_tests {
             origin,
             Delivery::Batch {
                 generation,
-                items: vec![Item::path(
-                    PathBuf::from("/fixture/example"),
-                    "Example".into(),
-                    vec![],
-                )],
+                items: vec![item],
             },
         );
         session.intent(Intent::Actions);
@@ -597,6 +626,26 @@ mod action_screen_tests {
             stage: ActionStage::List,
         };
         (session, screen)
+    }
+
+    #[test]
+    fn an_action_that_needs_its_app_running_is_offered_only_while_it_runs() {
+        use dupin_core::{Action, Condition, ItemAction};
+        let safari = PathBuf::from("/Applications/Safari.app");
+        let actions = || {
+            vec![
+                ItemAction::new("open", "Open", Action::Open(safari.clone())),
+                ItemAction::new("hide", "Hide", Action::Open(safari.clone()))
+                    .when(Condition::Running(safari.clone())),
+            ]
+        };
+        let ids = |actions: Vec<ItemAction>| actions.into_iter().map(|action| action.id).collect::<Vec<_>>();
+        let mut running = actions();
+        offered(&mut running, |path| path == safari);
+        assert_eq!(ids(running), ["open", "hide"]);
+        let mut quit = actions();
+        offered(&mut quit, |_| false);
+        assert_eq!(ids(quit), ["open"]);
     }
 
     #[test]
@@ -687,5 +736,73 @@ mod action_screen_tests {
         assert_eq!(screen.key(&Key::Escape, false), ActionKey::Stay);
         assert!(matches!(screen.stage, ActionStage::List));
         assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
+    }
+
+    #[test]
+    fn a_hidden_action_leaves_the_list_but_keeps_its_route_and_shortcut() {
+        use dupin_core::kind::QUICK_LOOK;
+
+        let kinds = dupin_mac::kinds::native();
+        kinds.configure(
+            &dupin_core::Config::parse(
+                "[advanced.kinds.file]\nhide = [\"open\", \"quick-look\"]\norder = [\"reveal\"]",
+            )
+            .unwrap()
+            .advanced
+            .kinds,
+        );
+        let path = PathBuf::from("/fixture/example.txt");
+        let item = kinds.file(path.clone(), "example.txt".into(), vec![], false);
+        let (mut session, _) = fixture_with(item.clone());
+        let key = session.result_key(0);
+
+        let screen = ActionScreen::new(key.clone(), item.clone(), None).unwrap();
+        let listed: Vec<_> = screen
+            .item
+            .actions
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "reveal",
+                "open-with",
+                "copy-name",
+                "rename",
+                "move-to",
+                "copy-to",
+                "duplicate",
+                "compress",
+                "trash"
+            ]
+        );
+        assert_eq!(
+            ActionScreen::new(key.clone(), item, Some("open".into()))
+                .unwrap()
+                .item
+                .item_action("open")
+                .map(|action| action.title.as_str()),
+            Some("Open"),
+            "a hidden action its route confirms is shown for the prompt"
+        );
+
+        assert_eq!(
+            session.intent(Intent::Open).unwrap().first(),
+            Some(&Effect::Run(Action::Open(path.clone()))),
+            "Enter still opens"
+        );
+        let (mut session, _) = fixture_with(kinds.file(path.clone(), "example.txt".into(), vec![], false));
+        assert_eq!(
+            session.intent(Intent::OpenAlternate).unwrap().first(),
+            Some(&Effect::Run(Action::Reveal(path.clone())))
+        );
+        let (mut session, _) = fixture_with(kinds.file(path.clone(), "example.txt".into(), vec![], false));
+        let key = session.result_key(0);
+        assert_eq!(
+            session.run_key_action(&key, QUICK_LOOK).first(),
+            Some(&Effect::Run(Action::Preview(path))),
+            "⌘Y still previews"
+        );
     }
 }
