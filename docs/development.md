@@ -120,12 +120,12 @@ nix shell --inputs-from . nixpkgs#nushell nixpkgs#cargo --command nu scripts/upd
 ## Build caching
 
 The [crate boundary experiment](../experiments/crate-boundaries/README.md)
-times representative edits. On a 6-CPU Testbox, an incremental `cargo build -p
-dupin` after editing a UI file, `dupin-core`'s session code or `dupin-mac` takes
-1.8–2.5 seconds, `cargo test --workspace --no-run` 1.8–3.0 and `cargo clippy`
-0.8–1.5. A docs-only edit rebuilds nothing. Alternating `build`, `test` and
+times representative edits. On the 12-CPU macOS 27 Testbox, an incremental
+`cargo build -p dupin` after editing a UI file, `dupin-core`'s session code or
+`dupin-mac` takes 2.8–3.6 seconds, `cargo test --workspace --no-run` 3.1–4.9 and
+`cargo clippy` 1.4–2.8. A docs-only edit rebuilds nothing. Alternating `build`, `test` and
 `clippy` rebuilds nothing either, so no feature difference between them
-forces rebuilds. A release build takes 79–92 seconds whichever crate changed,
+forces rebuilds. A release build takes 126–129 seconds whichever crate changed,
 because fat LTO recompiles the whole program. These numbers justify no
 crate split: editing the `dupin` crate already costs the least. New crates
 should stay leaves that depend on `serde` and `libc`, as the extension crates
@@ -138,21 +138,19 @@ manifest changed, and 16–18 seconds when everything came from the cache. 17
 runs could not download a path that the Hestia manifest still listed, because
 its pack had been evicted from the cache; nine of them rebuilt the app for a
 change that touched no Rust. Each `Cargo.lock` change stores about 1 GB of
-compiled dependencies. On the 6-CPU Testbox, the same step after a UI edit takes 107
-seconds instead of 142 now that Hawk reuses its dependencies, and the three
-dependency outputs that step builds together hold 1.03 GB (debug 353 MB,
-release 343 MB, Hawk 338 MB), where the debug output alone held 662 MB with
-debug info.
+compiled dependencies. On the 12-CPU Testbox, the same step after a UI edit
+takes 163 seconds, and the three dependency outputs that step builds together
+hold 1.19 GB (debug 406 MB, release 384 MB, Hawk 401 MB).
 
 sccache is not configured for local builds or CI. Cargo builds workspace
 crates incrementally in the dev profile, which sccache cannot cache, and those
 crates are all that an edit rebuilds. It can only replay third-party crates in
 a fresh target directory. In the
-[Cargo cache experiment](../experiments/cargo-cache/README.md) on the 6-CPU Testbox,
-a warm cache built a fresh target at a new path, as a new worktree has, in 46.5
-seconds against 48.8–49.5 without it, and a cold cache cost 1.2 seconds more.
-It only pays when a removed target is rebuilt at the same path: 18.1 seconds
-against 47.5. CI compiles through Nix, which caches whole dependency outputs
+[Cargo cache experiment](../experiments/cargo-cache/README.md) on the 12-CPU
+Testbox, a warm cache built a fresh target at a new path, as a new worktree has,
+in 47.5 seconds against 47.0–47.4 without it, and a cold cache cost 6.8 seconds
+more. It only pays when a removed target is rebuilt at the same path: 21.9
+seconds against 47.3. CI compiles through Nix, which caches whole dependency outputs
 instead. The development shell does not include sccache. A developer who often
 deletes and rebuilds the same target directory can run it from nixpkgs without
 installing it:

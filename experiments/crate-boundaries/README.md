@@ -32,26 +32,26 @@ which tagpr does for every release.
 
 ## Recorded run
 
-All runs used a Blacksmith Testbox (`blacksmith-6vcpu-macos-latest`, 6 CPUs,
-macOS 26.3) at `5f1ea19`, with Rust 1.99.1 and the dependency outputs already
+All runs used a Blacksmith Testbox (`blacksmith-12vcpu-macos-27`, 12 CPUs,
+macOS 27.0) at `983024e`, with Rust 1.99.1 and the dependency outputs already
 named 0.0.0.
 One machine and one sequence; the runner's load was not controlled.
 
 ### Cargo, local development
 
 Median of three runs, in seconds
-([incremental](results/2026-11-23-cargo-incremental.json)). The
+([incremental](results/2026-11-27-cargo-incremental.json)). The
 non-incremental and release columns are single runs with `CARGO_INCREMENTAL=0`
-([non-incremental](results/2026-11-23-cargo-non-incremental.json)) and
-`--release` ([release](results/2026-11-23-cargo-release.json)), for function
+([non-incremental](results/2026-11-27-cargo-non-incremental.json)) and
+`--release` ([release](results/2026-11-27-cargo-release.json)), for function
 body edits.
 
 | Edit                          | `build -p dupin` | `test --no-run` | `clippy` | non-incremental build | release build |
 | ----------------------------- | ---------------: | --------------: | -------: | --------------------: | ------------: |
-| dupin UI (`ui/keys.rs`)       |              1.8 |             1.8 |      0.8 |                   4.3 |          82.7 |
-| dupin-core session (`search`) |              2.5 |             3.0 |      1.5 |                   5.9 |          91.5 |
-| dupin-mac (`apps.rs`)         |              2.2 |             2.7 |      1.2 |                   6.8 |          78.7 |
-| docs only                     |              0.2 |             0.2 |      0.2 |                   0.2 |             — |
+| dupin UI (`ui/keys.rs`)       |              2.9 |             3.1 |      1.4 |                   8.5 |         126.1 |
+| dupin-core session (`search`) |              3.6 |             4.9 |      2.8 |                  10.6 |         129.2 |
+| dupin-mac (`apps.rs`)         |              3.2 |             4.5 |      2.3 |                   9.5 |         126.8 |
+| docs only                     |              0.2 |             0.2 |      0.3 |                   0.2 |             — |
 
 Each edit rebuilt only the edited crate and the workspace crates above it.
 No third-party unit was rebuilt, and alternating `build`, `test` and `clippy`
@@ -61,32 +61,30 @@ rebuilds. Appending an item and editing a function body cost the same.
 ### Nix checks
 
 Seconds per check, each built alone
-([results](results/2026-11-23-nix-checks.json)):
+([results](results/2026-11-27-nix-checks.json)):
 
 | Edit               | lint-and-test | hawk | dupin (release app) |
 | ------------------ | ------------: | ---: | ------------------: |
-| dupin UI           |          36.2 | 74.5 |               106.4 |
-| dupin-core session |          36.4 | 66.5 |               100.1 |
-| dupin-mac          |          34.3 | 63.5 |               103.8 |
-| docs only          |           0.1 |  0.1 |                 0.0 |
-| `VERSION` bump     |          39.4 | 63.7 |               101.5 |
+| dupin UI           |          68.6 | 15.8 |               144.6 |
+| dupin-core session |          68.1 | 15.9 |               144.6 |
+| dupin-mac          |          68.5 | 16.0 |               144.3 |
+| docs only          |           0.1 |  0.1 |                 0.1 |
+| `VERSION` bump     |          67.7 | 15.8 |               144.5 |
 
-Docs-only edits build nothing. The dependency outputs were reused for every
-edit, including the `VERSION` bump. Before this branch they carried the
-release version in their name, so each release rebuilt both.
+Docs-only edits build nothing. The dependency outputs, Hawk's included, were
+reused for every edit, including the `VERSION` bump.
 
 ## Reading
 
 Editing deeper in the graph costs a few seconds more, but no split of the
-`dupin` crate can save more than the 1.8 seconds an edit there takes now
-incrementally. Release builds take 79–92 seconds whichever crate changes:
+`dupin` crate can save more than the 2.9 seconds an edit there takes now
+incrementally. Release builds take 126–129 seconds whichever crate changes:
 fat LTO with one codegen unit recompiles the whole program after any edit,
 so compiling fewer crates first barely shortens it. Nix builds the workspace
 without incremental compilation, where the gap between the cheapest and the
-dearest edit is under three seconds.
+dearest edit is about two seconds.
 
-At the time of measurement the Hawk check rebuilt every dependency with its own
-toolchain on each edit, which is why it took about twice as long as Clippy and
-the tests together. With its dependencies cached like the others, Hawk took
-12 seconds after the UI edit, and building all three checks at once, as CI's
-`build` job does, took 107 seconds instead of 142.
+Hawk reuses its own dependency output, so it takes about 16 seconds after any
+of these edits. Building all three checks at once after the UI edit, as CI's
+`build` job does, took 163 seconds, 19 more than the release app alone, since
+the other two build alongside it.

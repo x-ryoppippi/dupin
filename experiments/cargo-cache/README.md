@@ -86,22 +86,22 @@ experiment tracked by [#95](https://github.com/x-ryoppippi/dupin/issues/95).
 
 ## Testbox run
 
-[A second run](results/2026-11-23-testbox-aarch64-darwin.json) on a Blacksmith
-Testbox (`VirtualMac2,1`, 6 CPUs, macOS 26.3) from `5f1ea19`, with Rust 1.99.1
+[A second run](results/2026-11-27-testbox-aarch64-darwin.json) on a Blacksmith
+Testbox (`VirtualMac2,1`, 12 CPUs, macOS 27.0) from `983024e`, with Rust 1.99.1
 and sccache 0.19.0, used the same script unchanged:
 
 | Case                                                | Seconds | Rust hits | Rust misses |
 | --------------------------------------------------- | ------: | --------: | ----------: |
-| Native, fresh target                                |  48.776 |         — |           — |
-| sccache, cold cache, fresh target                   |  49.987 |         0 |         236 |
-| sccache, warm cache, different fresh target path    |  46.469 |       194 |          42 |
-| Native, fresh-target control                        |  49.521 |         — |           — |
-| sccache, existing target                            |   0.298 |         — |           — |
-| Native, existing target                             |   0.341 |         — |           — |
-| sccache, warm cache, same target path after removal |  18.089 |       236 |           0 |
-| Native, same target path after removal              |  47.474 |         — |           — |
+| Native, fresh target                                |  47.038 |         — |           — |
+| sccache, cold cache, fresh target                   |  53.875 |         0 |         296 |
+| sccache, warm cache, different fresh target path    |  47.486 |       226 |          70 |
+| Native, fresh-target control                        |  47.388 |         — |           — |
+| sccache, existing target                            |   0.220 |         — |           — |
+| Native, existing target                             |   0.297 |         — |           — |
+| sccache, warm cache, same target path after removal |  21.891 |       296 |           0 |
+| Native, same target path after removal              |  47.289 |         — |           — |
 
-It repeats the local pattern: a warm cache saves about 3 seconds in a target
-directory at a new path, and about 29 seconds when the same path is rebuilt
-after removal. The working tree carried this branch's Nix changes, which do
-not affect Cargo builds.
+A warm cache no longer saves anything in a target directory at a new path: 70
+of 296 compilations still miss there, and the build takes as long as one
+without sccache. Rebuilding the same path after removal still saves about 25
+seconds, and a cold cache costs about 7 seconds more than building without it.
