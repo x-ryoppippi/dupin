@@ -6,6 +6,9 @@ use crate::ui::ICON_SIZE;
 use super::header::HEADER_H;
 use super::results::{LIST_PAD, RowLabels, text_row};
 
+/// The search icon on a system without the default symbol.
+const FALLBACK_SEARCH_GLYPH: &str = "⌕";
+
 pub struct ResolvedTheme {
     palette: tok::Theme,
     pub accent: Color,
@@ -55,7 +58,7 @@ impl ResolvedTheme {
     /// What stands before the query field while no command's chip does, in a slot as wide as a
     /// symbol's square so the field starts at the same place whatever the icon. Text is centred
     /// in it and may widen it rather than be cut. A symbol the system lacks falls back to the
-    /// default icon.
+    /// default symbol, and text stands in only when the system lacks that too.
     pub fn search_icon(&self) -> El {
         let size = crate::symbols::Size {
             square: crate::symbols::FIELD.square * self.scale,
@@ -63,14 +66,21 @@ impl ResolvedTheme {
         };
         let glyph = match &self.search_icon {
             dupin_core::config::SearchIcon::Symbol(name) => {
-                match crate::symbols::symbol(name, size, self.text_secondary) {
+                let pixels = crate::symbols::symbol(name, size, self.text_secondary).or_else(|| {
+                    crate::symbols::symbol(
+                        dupin_core::config::DEFAULT_SEARCH_SYMBOL,
+                        size,
+                        self.text_secondary,
+                    )
+                });
+                match pixels {
                     Some(pixels) => {
                         return el()
                             .key("search-icon")
                             .size(size.square, size.square)
                             .pixels(&pixels);
                     }
-                    None => dupin_core::config::DEFAULT_SEARCH_ICON,
+                    None => FALLBACK_SEARCH_GLYPH,
                 }
             }
             dupin_core::config::SearchIcon::Text(glyph) => glyph,

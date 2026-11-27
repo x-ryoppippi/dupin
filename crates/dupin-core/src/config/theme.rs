@@ -85,7 +85,7 @@ impl From<FontFamily> for String {
 }
 
 /// What stands before the query field. In config.toml: `"sf:"` and an SF Symbol's name
-/// (`"sf:sparkle"`), or a few characters of text (`"⌕"`, the default).
+/// (`"sf:magnifyingglass"`, the default), or a few characters of text (`"⌕"`).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(from = "String", into = "String")]
 pub enum SearchIcon {
@@ -95,15 +95,15 @@ pub enum SearchIcon {
     Text(String),
 }
 
-/// The search icon a theme without one shows, and one whose symbol the system lacks.
-pub const DEFAULT_SEARCH_ICON: &str = "⌕";
+/// The SF Symbol a theme without a search icon shows, and one whose symbol the system lacks.
+pub const DEFAULT_SEARCH_SYMBOL: &str = "magnifyingglass";
 
 /// The most characters a text search icon holds: room for a joined emoji, not for a word.
 const MAX_SEARCH_ICON_TEXT: usize = 8;
 
 impl Default for SearchIcon {
     fn default() -> Self {
-        SearchIcon::Text(DEFAULT_SEARCH_ICON.into())
+        SearchIcon::Symbol(DEFAULT_SEARCH_SYMBOL.into())
     }
 }
 
@@ -288,7 +288,10 @@ mod tests {
     fn search_icon_is_a_symbol_or_short_text() {
         use super::SearchIcon;
         let read = |v: &str| Config::parse(&format!("[theme]\nsearch_icon = \"{v}\""));
-        assert_eq!(Theme::default().search_icon, SearchIcon::Text("⌕".into()));
+        assert_eq!(
+            Theme::default().search_icon,
+            SearchIcon::Symbol("magnifyingglass".into())
+        );
         assert_eq!(
             read("sf:sparkle").unwrap().theme.search_icon,
             SearchIcon::Symbol("sparkle".into())
