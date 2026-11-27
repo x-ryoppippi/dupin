@@ -65,9 +65,13 @@ let
           lib.elem kind [
             "clipboard"
             "windows"
+            "context"
+            "apps"
           ]
         then
           map (access: "${kind}:${access}") declared
+        else if kind == "rows" then
+          map (rowKind: "rows:${rowKind}") (lib.attrNames declared)
         else if kind == "http" then
           map (entry: "http:${entry.origin}") declared
         else if kind == "files" then
