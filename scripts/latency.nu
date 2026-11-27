@@ -45,6 +45,32 @@ export def display-groups [features: record, implementation?: string]: nothing -
     }
 }
 
+# The scenarios of `catalogue` with only the native implementations that `checkout`, a checkout
+# of another commit, declares, each config and `extensions` folder read from it. A native
+# baseline is that commit's app measured by this benchmark: its implementations are what parity
+# compares, while the scenarios and the harness are this commit's, so each result carries the
+# fingerprint a port measured here does.
+export def native-at [catalogue: record, checkout: path]: nothing -> record {
+    let declared = $checkout | path join scripts/latency/scenarios.toml
+    if not ($declared | path exists) {
+        error make {
+            msg: $"($checkout) declares no latency scenarios, so it has no native implementation to measure"
+        }
+    }
+    let features = open $declared
+    | get features
+    | transpose feature implementations
+    | where {|it| "native" in ($it.implementations | columns) }
+    | each {|it|
+        let setup = resolve $it.implementations native
+        | update config {|setup| $checkout | path join $setup.config }
+        | if $in.extensions? == null { $in } else { update extensions {|setup| $checkout | path join $setup.extensions } }
+        {$it.feature: {native: $setup}}
+    }
+    | into record
+    {features: $features, scenarios: $catalogue.scenarios}
+}
+
 # `measure-all` once for each display the implementations simulate, with
 # `DUPIN_HEADLESS_DISPLAY` set to it; an implementation's `display` (`<width>x<height>` points of
 # usable area) sizes the panel's list as such a display would, and one without it gets the
@@ -82,6 +108,10 @@ def measure-displays [
 # Each scenario runs `--runs` times, each in a fresh process. A run types the scenario
 # `--warmup` times unmeasured, then enough times for `--samples` measured keypresses, each
 # `--gap` after the last. The reported percentiles are the median of the runs' own.
+#
+# `--native-at` records a native baseline: it measures the native implementations another
+# commit's checkout declares with this commit's scenarios and harness, and the results name that
+# commit.
 def "main run" [
     --bin: path = "target/latency/dupin" # `cargo build --profile latency -p dupin`, or a debug build
     --out: path = "target/latency/results.json"
@@ -92,9 +122,17 @@ def "main run" [
     --fps: int = 1000 # Headless frame rate; a frame starts at most this often
     --only: string # Only the scenarios whose id contains this
     --implementation: string # Only this implementation of each feature
+    --native-at: path # A checkout of another commit: measure the native implementations it declares, with `--bin` built from it
 ]: nothing -> nothing {
+    let checkout = if $native_at == null {
+        null
+    } else {
+        $native_at | path expand
+    }
     let root = $env.FILE_PWD | path dirname
     cd $root
+    let catalogue = open scripts/latency/scenarios.toml
+    let catalogue = if $checkout == null { $catalogue } else { native-at $catalogue $checkout }
     let settings = {
         samples: $samples
         warmup: $warmup
@@ -103,14 +141,14 @@ def "main run" [
         fps: $fps
     }
     let results = (
-        measure-displays (open scripts/latency/scenarios.toml) $bin $settings
+        measure-displays $catalogue $bin $settings
         --only $only --implementation $implementation
     )
     let report = {
         schema: 1
         created: (date now | format date "%+")
         commit: (
-            ^git rev-parse HEAD
+            ^git -C ($checkout | default $root) rev-parse HEAD
             | complete
             | get stdout
             | str trim

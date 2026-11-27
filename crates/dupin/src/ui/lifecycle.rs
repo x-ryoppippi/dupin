@@ -64,7 +64,9 @@ impl Ui {
         }
         let visible = self.me.is_visible();
         crate::trace::panel("toggle", visible, self.shown);
-        if visible {
+        // A close Dupin asked for earlier in this turn leaves the window visible until Rune
+        // carries it out, so `shown` decides; dismissing then would drop the hotkey.
+        if visible && self.shown {
             self.dismiss(tx);
         } else {
             self.show(tx);
@@ -72,6 +74,17 @@ impl Ui {
     }
 
     pub(super) fn show(&mut self, tx: &mut Tx) {
+        if !self.shown && self.me.is_visible() {
+            // A close asked for this turn is still to come, and Rune carries it out after any
+            // show asked for in the same turn, which would hide the panel again.
+            self.show_after_close = true;
+            return;
+        }
+        self.show_now(tx);
+    }
+
+    fn show_now(&mut self, tx: &mut Tx) {
+        self.show_after_close = false;
         if self.selection_request == SelectionRequest::Reading {
             self.selection_request = SelectionRequest::Superseded;
         }
@@ -276,7 +289,10 @@ impl Ui {
             crate::trace::settings("panel closed");
             self.prefs.update(|prefs, _| prefs.open_settings());
         }
-        if !show_snapshots && !show_settings && self.relaunch.is_some() {
+        if self.show_after_close {
+            // After the blur the close brings, which would dismiss it again.
+            self.me.update(Self::show_now);
+        } else if !show_snapshots && !show_settings && self.relaunch.is_some() {
             // Rune clears the panel's visibility after this callback.
             self.me.update(Self::resume_restart);
         }
