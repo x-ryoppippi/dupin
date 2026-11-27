@@ -33,6 +33,13 @@ Install the Homebrew cask or build it with Nix; the [download page](https://dupi
 </details>
 
 <details>
+<summary>How do I uninstall it?</summary>
+
+Remove the app the way you installed it. Your configuration, encrypted data and its Keychain key stay until you delete them, which deletes the data for good ([Uninstalling](./uninstall.md)).
+
+</details>
+
+<details>
 <summary>Why doesn't <kbd>⌘</kbd><kbd>Space</kbd> open Dupin?</summary>
 
 macOS delivers a chord to only one app, so Spotlight's shortcut, or another launcher's, has to give it up first. [Freeing the hotkey](./features/hotkeys.md#freeing-the-hotkey) lists the steps, and Dupin reports a taken hotkey in the panel and its log.

@@ -22,6 +22,8 @@ cask "dupin" do
   zap trash: [
     "~/.config/dupin",
     "~/Library/Application Support/Dupin",
+    "~/Library/Caches/Dupin",
     "~/Library/Logs/Dupin",
+    "~/Library/Preferences/app.dupin.Dupin.plist",
   ]
 end

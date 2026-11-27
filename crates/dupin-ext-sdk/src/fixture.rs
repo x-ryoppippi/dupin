@@ -401,7 +401,7 @@ pub fn parse(name: &str, bytes: &[u8]) -> Result<Fixture, Diagnostic> {
             .map_or(message.as_str(), |(message, _)| message);
         invalid(message.to_owned())
             .at(line, column)
-            .hint("See Fixtures in docs/features/extensions.md for the format.")
+            .hint("See Fixtures in docs/features/extension-testing.md for the format.")
     })?;
     if fixture.fixture != VERSION {
         return Err(invalid(format!(
