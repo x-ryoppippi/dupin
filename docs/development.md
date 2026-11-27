@@ -60,6 +60,19 @@ Every workflow step that builds, tests, measures or formats calls a `just` recip
 
 `ci-check`, `ci-build` and `formatter` build for the current system, `nix eval --impure --raw --expr builtins.currentSystem`; `just system=<system> ci-check` picks another. The `*-measure`, `*-report`, `*-fetch-main` and `latency-parity` recipes pass their arguments to the script they name, so run without any they take its local defaults. What stays inline in a workflow is GitHub's own plumbing: the `changes` job's path filter, the signing keychain, publishing releases and the comment workflows.
 
+## Branch rules
+
+`main`'s ruleset lives in `.github/rulesets/main.json`, the body GitHub's [rulesets API](https://docs.github.com/en/rest/repos/rules) takes. It requires the CI `check` and `e2e` jobs and the CLA workflow's `cla` job from GitHub Actions, and nobody can bypass it, so auto-merge waits for all three. Every pull request reports each of them: `check` and `cla` always run, and `e2e` is skipped when only prose changed, which GitHub counts as passing. A required check that never reports blocks the merge, so gate a job behind a path filter the way `e2e` is, not with `paths-ignore`.
+
+Edit the file, then, with a token that can administer the repository:
+
+```sh
+just ruleset-diff   # how the live rulesets differ from .github/rulesets; fails when they do
+just ruleset-apply  # create or update each ruleset by name; one that already matches is left alone
+```
+
+Both take `--repo <owner>/<name>`, which defaults to the repository of the git remote. Apply after the change merges, then run `just ruleset-diff` again to confirm it matches.
+
 ## Remote development with Testbox
 
 The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
