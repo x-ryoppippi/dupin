@@ -22,7 +22,7 @@ jobs:
   # The flake only targets aarch64-darwin, so even these evaluate on macOS.
   check:
     # Apple silicon (M4); Dupin targets nothing else. Labels: docs.blacksmith.sh, "Instance Types".
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +94,7 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -149,7 +149,7 @@ jobs:
   extension-host:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -184,7 +184,7 @@ jobs:
   search-quality:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

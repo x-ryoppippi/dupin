@@ -3,4 +3,5 @@ self-hosted-runner:
   labels:
     - blacksmith-2vcpu-ubuntu-2404
     - blacksmith-6vcpu-macos-latest
+    - blacksmith-12vcpu-macos-27
     - blacksmith-6vcpu-macos-latest;scheduling=flex
