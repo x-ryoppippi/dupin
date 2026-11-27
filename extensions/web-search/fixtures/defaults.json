@@ -1,0 +1,82 @@
+{
+	"fixture": 1,
+	"description": "Without web_searches in config.toml, Google, GitHub, Apple Maps and YouTube are listed; Apple Maps needs a query.",
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"id": "g",
+						"title": "Search Google",
+						"subtitle": "g",
+						"actions": [{ "title": "Open in Browser", "url": "https://www.google.com/search?q=" }]
+					},
+					{
+						"id": "gh",
+						"title": "Search GitHub",
+						"subtitle": "gh",
+						"actions": [{ "title": "Open in Browser", "url": "https://github.com/search?q=" }]
+					},
+					{
+						"id": "yt",
+						"title": "Search YouTube",
+						"subtitle": "yt",
+						"actions": [
+							{ "title": "Open in Browser", "url": "https://www.youtube.com/results?search_query=" }
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "rust lifetimes",
+			"expect": {
+				"rows": [
+					{
+						"id": "g",
+						"title": "Search Google for rust lifetimes",
+						"subtitle": "g",
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "https://www.google.com/search?q=rust%20lifetimes"
+							}
+						]
+					},
+					{
+						"id": "gh",
+						"title": "Search GitHub for rust lifetimes",
+						"subtitle": "gh",
+						"actions": [
+							{ "title": "Open in Browser", "url": "https://github.com/search?q=rust%20lifetimes" }
+						]
+					},
+					{
+						"id": "maps",
+						"title": "Search Apple Maps for rust lifetimes",
+						"subtitle": "maps",
+						"actions": [{ "title": "Open in Maps", "url": "maps://?q=rust%20lifetimes" }]
+					},
+					{
+						"id": "yt",
+						"title": "Search YouTube for rust lifetimes",
+						"subtitle": "yt",
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "https://www.youtube.com/results?search_query=rust%20lifetimes"
+							}
+						]
+					}
+				],
+				"selected": 0
+			}
+		},
+		{ "select": 2, "expect": { "selected": 2 } },
+		{
+			"activate": "Open in Maps",
+			"expect": { "effect": { "url": "maps://?q=rust%20lifetimes" } }
+		}
+	]
+}

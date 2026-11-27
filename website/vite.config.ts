@@ -2,11 +2,19 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import { oxContentCustomHost, type OxContentOptions } from '@ox-content/vite-plugin';
 import { svelte } from '@rsvelte/vite-plugin-svelte';
 import { cloudflareRedirect } from '@ryoppippi/vite-plugin-cloudflare-redirect';
-import { defineConfig, type Plugin } from 'vite';
+import path from 'node:path';
+import { defineConfig } from 'vite';
+import { docsLinks } from './src/docs/links.ts';
+import { japaneseFont } from './src/fonts/index.ts';
 import { repo, siteName, siteUrl } from './src/site.ts';
 
 const oxContentOptions = {
-	search: false,
+	// The documentation is the Markdown in the repository's docs/, rendered as it is on GitHub.
+	srcDir: '../docs',
+	transformers: [docsLinks(path.resolve(import.meta.dirname, '..'))],
+	search: { limit: 40 },
+	// Where `cf build` puts the site's static assets, which the search index is one of.
+	outDir: '.cloudflare/output/v1/workers/default/assets',
 	docs: false,
 	icons: { include: ['src/**/*.{css,ts,svelte}'] },
 	siteMaps: { llms: false },
@@ -15,15 +23,14 @@ const oxContentOptions = {
 		siteUrl,
 		minifyHtml: true,
 		markdownSource: { alternate: true },
+		theme: { fonts: { named: { japanese: japaneseFont } } },
 	},
 } satisfies OxContentOptions;
-
-const workerEnvironment = 'redirect';
 
 export default defineConfig({
 	appType: 'mpa',
 	plugins: [
-		cloudflare({ viteEnvironment: { name: workerEnvironment } }),
+		cloudflare(),
 		svelte({ configFile: false }),
 		cloudflareRedirect({
 			mode: 'generate',
@@ -37,18 +44,7 @@ export default defineConfig({
 			oxContent: oxContentOptions,
 			dev: { routeDependencies: [{ path: 'src', kind: 'directory' }] },
 			build: { transformHtml: false },
-		}).map(
-			(plugin) =>
-				({
-					...plugin,
-					applyToEnvironment(environment) {
-						return (
-							environment.name !== workerEnvironment &&
-							(plugin.applyToEnvironment?.(environment) ?? true)
-						);
-					},
-				}) satisfies Plugin,
-		),
+		}),
 	],
 	build: { rollupOptions: { input: 'index.html' } },
 	// The site reads the logo and VERSION from the repository root, one level up.

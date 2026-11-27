@@ -8,7 +8,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # On main a run that started finishes, so every merge that waits gets checked; a newer push
+  # still replaces a queued run there, and supersedes a running one on a pull request.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -36,8 +38,9 @@ jobs:
               (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" ])))')"
           nix build --no-link "${checks[@]}"
 
-  # A pull request that only touches website/ cannot change the app, so build and e2e skip;
-  # skipped jobs still satisfy required checks, which paths-ignore would not.
+  # A pull request that only touches website/ or telemetry/ cannot change the app, so build and
+  # e2e skip; skipped jobs still satisfy required checks, which paths-ignore would not. The
+  # collector's ping schema is the exception: dupin-telemetry's test holds it to the Rust type.
   changes:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -67,9 +70,26 @@ jobs:
             (gh api --paginate $"repos/($env.GITHUB_REPOSITORY)/pulls/($env.PR)/files"
               --jq '.[] | .filename, (.previous_filename // empty)')
             | lines
-            | any {|path| not ($path | str starts-with 'website/') }
+            | any {|path|
+              let web = ($path | str starts-with 'website/') or ($path | str starts-with 'telemetry/')
+              (not $web) or ($path == 'telemetry/src/v1/ping-schema.gen.ts')
+            }
           }
           $"app=($app)\n" | save --append $env.GITHUB_OUTPUT
+
+  # The collector Worker in telemetry/: its tests, type check and build, which need no Mac.
+  telemetry:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nix-cache
+      - run: nix profile install --inputs-from . nixpkgs#nodejs nixpkgs#pnpm_12 nixpkgs#just
+      - run: just telemetry::test
+      - run: just telemetry::typecheck
+      - run: just telemetry::build
 
   build:
     needs: changes
@@ -97,11 +117,131 @@ jobs:
           path: ${{ runner.temp }}/Dupin.app.tar.gz
           if-no-files-found: error
 
+      # Size is informational (scripts/size.nu), so none of its steps can fail the build. Main's
+      # `size` artifacts are what pull requests compare with; size-comment.yml comments with it.
+      - name: Measure the app's size
+        continue-on-error: true
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/size.nu measure result/Applications/Dupin.app
+          --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/size/size.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
+        with:
+          name: size
+          path: ${{ runner.temp }}/size/size.json
+          if-no-files-found: error
+      - name: Compare the app's size with main
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/size.nu report "$RUNNER_TEMP/size/size.json"
+          --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+
+  # The extension host confines itself with sandbox_init, which macOS refuses inside the Nix
+  # build sandbox, so lint-and-test skips the tests that start it. They run here natively, where
+  # DUPIN_REQUIRE_EXTENSION_HOST turns any such skip into a failure. Every crate with such a test
+  # runs, found by skip_inside_a_sandbox!, so a crate that gains one can't stay untested.
+  extension-host:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        with:
+          cache-scope: extension-host
+
+      - name: Test the extension host outside the Nix sandbox
+        env:
+          DUPIN_REQUIRE_EXTENSION_HOST: '1'
+        run: |
+          while IFS= read -r crate; do
+            set -- "$@" "--package=$crate"
+          done < <(git grep -l 'skip_inside_a_sandbox!' -- 'crates/*.rs' | cut -d/ -f2 | sort -u)
+          test "$#" -gt 0
+          echo "Testing $*"
+          nix develop --command cargo test --locked "$@"
+
+  # Keypress latency, and the bundled extensions' parity with native (latency.yml).
+  latency:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    uses: ./.github/workflows/latency.yml
+
+  # How many keystrokes the main search needs before the row each case wants is first
+  # (scripts/search-quality.nu). Main's runs are the baseline pull requests are compared with, in
+  # the summary and in the comment search-quality-comment.yml keeps. A regression never fails
+  # the job; the benchmark itself failing, such as a case the corpus can't answer, does.
+  search-quality:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        with:
+          cache-scope: search-quality
+
+      - run: nix build .#dupin-search-quality --out-link result-search-quality
+
+      - name: Measure
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/search-quality.nu run --bin result-search-quality/bin/dupin-search-quality
+          --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/search-quality/results.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: search-quality
+          path: ${{ runner.temp }}/search-quality/results.json
+          if-no-files-found: error
+
+      - name: Compare with main
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/search-quality.nu report "$RUNNER_TEMP/search-quality/results.json"
+          --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+
+  # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
+  # a required check, so e2e runs whenever the app could have changed and fails itself when the
+  # build, the extension host tests, the latency parity check or the search-quality benchmark
+  # did.
   e2e:
-    needs: build
+    needs: [changes, build, extension-host, latency, search-quality]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 20
     steps:
+      - name: Require the build, the extension host tests, latency parity and search quality
+        if: >-
+          needs.build.result != 'success' || needs.extension-host.result != 'success' ||
+          needs.latency.result != 'success' || needs.search-quality.result != 'success'
+        env:
+          BUILD: ${{ needs.build.result }}
+          EXTENSION_HOST: ${{ needs.extension-host.result }}
+          LATENCY: ${{ needs.latency.result }}
+          SEARCH_QUALITY: ${{ needs.search-quality.result }}
+        run: |
+          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY, search-quality: $SEARCH_QUALITY"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

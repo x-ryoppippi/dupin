@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View, fuzzy};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View, fuzzy};
 use objc2::rc::autoreleasepool;
 use objc2_foundation::{NSBundle, NSDictionary, NSNumber, NSString};
 
@@ -89,6 +89,9 @@ fn valid_identifier(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
+/// What Snapshots' rows show, here and in its own keyword's list.
+pub const SNAPSHOTS_SYMBOL: &str = "camera.viewfinder";
+
 fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
     let mut items = Vec::new();
     for pane in panes {
@@ -97,7 +100,7 @@ fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
                 format!("settings:{}", pane.id),
                 &pane.title,
                 "System Settings",
-                Some(pane.bundle.clone()),
+                Some(dupin_core::Icon::File(pane.bundle.clone())),
                 Action::OpenUrl(format!("x-apple.systempreferences:{}", pane.id)),
                 found,
             ));
@@ -108,8 +111,18 @@ fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
             "settings:dupin".into(),
             "Dupin Settings",
             "Preferences",
-            None,
+            dupin_core::Icon::symbol("gearshape"),
             Action::OpenPreferences,
+            found,
+        ));
+    }
+    if let Some(found) = fuzzy::score(query, "Snapshots") {
+        items.push(item(
+            "settings:snapshots".into(),
+            "Snapshots",
+            "Dupin",
+            dupin_core::Icon::symbol(SNAPSHOTS_SYMBOL),
+            Action::OpenSnapshots(None),
             found,
         ));
     }
@@ -122,12 +135,13 @@ fn item(
     id: String,
     title: &str,
     subtitle: &str,
-    icon: Option<PathBuf>,
+    icon: Option<dupin_core::Icon>,
     action: Action,
     found: fuzzy::Match,
 ) -> Item {
     Item {
         id,
+        payload: Payload::text(title),
         view: View::Text {
             title: title.into(),
             subtitle: subtitle.into(),
@@ -193,6 +207,14 @@ mod tests {
         let items = rank(&[], "dupin settings", 10);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].action("open"), Some(&Action::OpenPreferences));
+    }
+
+    #[test]
+    fn the_snapshots_window_is_a_host_action() {
+        let items = rank(&[], "snapsh", 10);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].display_title(), "Snapshots");
+        assert_eq!(items[0].action("open"), Some(&Action::OpenSnapshots(None)));
     }
 
     #[test]

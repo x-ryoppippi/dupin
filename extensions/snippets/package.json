@@ -1,0 +1,19 @@
+{
+	"name": "snippets",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Snippets",
+		"keyword": "snip",
+		"icon": "sf:text.quote",
+		"main": "main.ts",
+		"capabilities": {
+			"clipboard": [
+				"paste"
+			],
+			"snippets": [
+				"write"
+			]
+		}
+	}
+}

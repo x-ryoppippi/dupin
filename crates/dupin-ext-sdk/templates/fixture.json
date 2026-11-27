@@ -1,0 +1,44 @@
+{
+	"fixture": 1,
+	"description": "Greets the name typed after the keyword, and Enter copies the greeting.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "Dupin",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "Hello, Dupin!",
+								"title": "Copy"
+							}
+						],
+						"id": "#0",
+						"subtitle": "Enter copies it",
+						"title": "Hello, Dupin!"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy",
+			"expect": {
+				"effect": {
+					"copy": "Hello, Dupin!"
+				}
+			}
+		}
+	]
+}

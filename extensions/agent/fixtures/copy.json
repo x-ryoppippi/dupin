@@ -1,0 +1,113 @@
+{
+	"fixture": 1,
+	"description": "Copy Path copies the project folder's path.",
+	"environment": {
+		"now": "2026-11-26T12:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"exec": [
+			{
+				"profile": "processes",
+				"args": ["-axww", "-o", "pid=,ppid=,uid=,user=,%cpu=,rss=,etime=,comm="],
+				"status": 0,
+				"stdout": "    1     0     0 root               0.4  29664 11-18:09:40 /sbin/launchd\n  150     1    88 _windowserver      6.2 412000 11-18:09:30 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer\n  321     1   501 alex               1.5 734000    03:12:45 /Applications/Safari.app/Contents/MacOS/Safari\n  500     1   501 alex               0.8  92000    02:05:00 /Applications/Dupin.app/Contents/MacOS/dupin\n  510   500   501 alex               0.0   6200       01:30 /Applications/Dupin.app/Contents/MacOS/dupin\n 4242   900   501 alex              12.3 251000       42:10 /opt/homebrew/bin/node\n 4300  4242   501 alex               0.0   3100       41:50 /bin/zsh\n 5120   900   501 alex               3.1 180000    01:02:03 claude\n 5130  5120   501 alex               0.2  40000    01:01:00 claude\n 5200   900   501 alex               0.7  80000       12:00 /opt/homebrew/bin/node\n 5300   900   501 alex               0.1  60000       05:00 /nix/store/abc-codex-0.167.0/libexec/codex/bin/codex\n 9999   500   501 alex               0.0   1200       00:00 /bin/ps\n",
+				"stderr": ""
+			},
+			{
+				"profile": "commands",
+				"args": ["-ww", "-o", "pid=,args=", "-p", "4242,5200"],
+				"status": 0,
+				"stdout": " 4242 node /Users/alex/Projects/shop/node_modules/.bin/vite --port 5173\n 5200 node /opt/homebrew/bin/gemini\n",
+				"stderr": ""
+			},
+			{
+				"profile": "cwd",
+				"status": 0,
+				"stdout": "p5120\nfcwd\nn/Users/alex/Projects/shop\np5200\nfcwd\nn/Users/alex/Projects/blog\np5300\nfcwd\nn/Users/alex\n",
+				"stderr": ""
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "claude",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"text": "3.1%"
+							},
+							{
+								"text": "176 MB"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"reveal": "/Users/alex/Projects/shop",
+								"title": "Reveal Project in Finder"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"folder": "/Users/alex/Projects/shop"
+									}
+								},
+								"title": "Open Project in Terminal"
+							},
+							{
+								"copy": "/Users/alex/Projects/shop",
+								"title": "Copy Path"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 5120
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "claude",
+										"path": "claude",
+										"pid": 5120
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "5120",
+						"keywords": ["claude", "5120", "shop"],
+						"subtitle": "~/Projects/shop · 5120",
+						"title": "claude · shop"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy Path",
+			"expect": {
+				"effect": {
+					"copy": "/Users/alex/Projects/shop"
+				}
+			}
+		}
+	]
+}

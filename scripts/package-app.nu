@@ -14,7 +14,7 @@ def main [
     --channel: string # "stable" or "nightly"
     --identity: string = "Developer ID Application" # A codesign identity, or "-" for ad-hoc
     --notarize
-    --app: path # A built Dupin.app; built with `nix build .#dupin` when absent
+    --app: path # A built Dupin.app; built with `nix build .#dupin-release` when absent
     --out: path = "dist"
 ]: nothing -> record {
     let root = $env.FILE_PWD | path dirname
@@ -38,7 +38,8 @@ def main [
     }
 
     let built = if $app != null { $app } else {
-        ^nix build .#dupin --no-link --print-out-paths | str trim | path join Applications/Dupin.app
+        # The one build with the telemetry collector's address compiled in (docs/features/telemetry.md).
+        ^nix build .#dupin-release --no-link --print-out-paths | str trim | path join Applications/Dupin.app
     }
     rm --recursive --force $out
     mkdir $out
@@ -48,6 +49,7 @@ def main [
     ^chmod -R u+w $bundle
 
     unlink-store ($bundle | path join Contents/MacOS/dupin)
+    bundle-extensions ($bundle | path join Contents/Resources/extensions)
 
     let plist = $bundle | path join Contents/Info.plist
     ^/usr/bin/plutil -replace CFBundleShortVersionString -string $release.version $plist
@@ -57,7 +59,7 @@ def main [
         ^/usr/bin/plutil -replace CFBundleIconFile -string dupin-nightly $plist
     }
 
-    ^/usr/bin/codesign --force --options runtime --timestamp --sign $identity $bundle
+    ^/usr/bin/codesign --force --options runtime --timestamp --entitlements packaging/Entitlements.plist --sign $identity $bundle
     ^/usr/bin/codesign --verify --strict --verbose=2 $bundle
 
     let zip = $out | path join Dupin.zip
@@ -91,6 +93,13 @@ def main [
     }
     $feed | to json | save ($out | path join update.json)
     $feed
+}
+
+# The bundled extensions stay those of the build, the only ones its binary sealed. Their files
+# are read-only again, so nothing edits them in place; folders stay writable, or the updater
+# couldn't delete the bundle it replaces.
+def bundle-extensions [target: path]: nothing -> nothing {
+    ^find $target -type f -exec chmod a-w '{}' +
 }
 
 # The disk image's window background, at 1x and 2x in one TIFF so Finder picks the sharp one.

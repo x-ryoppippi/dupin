@@ -1,0 +1,81 @@
+{
+	"fixture": 1,
+	"description": "Before Dupin has any rates, a currency conversion says so and copies nothing.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"calculator": {
+			"100 usd to jpy": {
+				"exchange": {
+					"status": "unavailable"
+				},
+				"number": "100",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "100"
+					},
+					{
+						"kind": "ident",
+						"text": " JPY"
+					}
+				],
+				"result": "100 JPY"
+			},
+			"10 GBP": {
+				"exchange": {
+					"status": "unavailable"
+				},
+				"number": "10",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "10"
+					},
+					{
+						"kind": "ident",
+						"text": " GBP"
+					}
+				],
+				"result": "10 GBP"
+			}
+		}
+	},
+	"steps": [
+		{
+			"query": "100 usd to jpy",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "100 usd to jpy",
+						"answer": "Exchange rates unavailable",
+						"actions": []
+					}
+				]
+			}
+		},
+		{
+			"query": "10 GBP",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "10 GBP",
+						"answer": "Exchange rates unavailable",
+						"actions": []
+					}
+				]
+			}
+		}
+	]
+}

@@ -12,6 +12,10 @@
             rust-analyzer
             nushell
             nodejs
+            # `dupin ext build` falls back to the Rolldown on PATH for a package without its own.
+            config.packages.rolldown
+            # Type-checks extensions/ as `checks.extensions-typecheck` does.
+            typescript
             config.packages.pnpm
             config.packages.blacksmith
             just
@@ -23,9 +27,17 @@
             actionlint
             zizmor
             gitleaks
-            nix-update
+            # Compresses the documentation images scripts/docs-images.nu renders.
+            oxipng
+            # Caption and encode the documentation clips scripts/docs-images.nu renders.
+            imagemagick
+            libwebp
+            # Encodes the website's clips as MP4.
+            ffmpeg-headless
           ]
           ++ config.pre-commit.settings.enabledPackages;
+        # The captions' typeface, the same on every Mac.
+        DUPIN_CAPTION_FONT = "${pkgs.inter}/share/fonts/truetype/InterVariable.ttf";
         # Installs the pre-commit and pre-push hooks from nix/git-hooks.nix.
         shellHook = config.pre-commit.shellHook;
       };

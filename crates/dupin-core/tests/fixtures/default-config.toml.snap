@@ -1,0 +1,47 @@
+hotkey = "cmd+space"
+selection_hotkey = ""
+show_recent = true
+file_limit = 200
+file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
+dictionary_keywords = ["define", "d"]
+calculator = true
+calculator_currency = false
+web_fallbacks = []
+snippet_keywords = ["snip"]
+snippet_paste = false
+display = "mouse"
+position = "center"
+input_source = "ascii"
+auto_update = true
+telemetry = true
+system_automation = false
+backdrop = "off"
+extensions = false
+
+[bindings]
+
+[snippets]
+
+[theme]
+panel_width = 680
+row_height = 52
+corner_radius = 14
+font_size = 15
+font_family = "system"
+
+[theme.light]
+
+[theme.dark]
+
+[calendar]
+enabled = false
+
+[clipboard]
+enabled = false
+max_entries = 200
+max_entry_bytes = 65536
+retention = "7d"
+include_images = true
+include_files = true
+max_image_bytes = 4194304
+ignored_apps = ["com.apple.keychainaccess", "com.apple.Passwords", "com.1password.1password", "com.agilebits.onepassword7", "com.bitwarden.desktop"]

@@ -1,0 +1,69 @@
+{
+	"fixture": 1,
+	"description": "Without any snippet, the list holds only the row that adds the first one, which typing finds.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"icon": "sf:plus",
+						"id": "add-snippet",
+						"subtitle": "Store a new snippet in Dupin, encrypted",
+						"title": "Add Snippet"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "sig",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "add",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"icon": "sf:plus",
+						"id": "add-snippet",
+						"subtitle": "Store a new snippet in Dupin, encrypted",
+						"title": "Add Snippet"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

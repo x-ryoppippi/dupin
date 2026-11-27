@@ -1,0 +1,485 @@
+/* Docs pages, which are rendered on the server only, so their components' styles never reach the client bundle. */
+.docs {
+	max-width: 1240px;
+	margin: 0 auto;
+	padding: 32px;
+	display: grid;
+	grid-template-columns: 240px minmax(0, 1fr);
+	gap: 48px;
+}
+
+.docs-sidebar {
+	position: sticky;
+	top: 72px;
+	align-self: start;
+	max-height: calc(100vh - 96px);
+	overflow-y: auto;
+	font-size: 14px;
+}
+
+.docs-toc > summary {
+	display: none;
+}
+
+/* On wide screens the list is always shown, so the closed state must not hide it. */
+.docs-toc::details-content {
+	content-visibility: visible;
+	display: block;
+}
+
+.docs-section {
+	margin: 20px 0 6px;
+	font-size: 12px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--fg-dim);
+}
+
+.docs-section-intro {
+	margin: 0 0 6px;
+	font-size: 12px;
+	color: var(--fg-dim);
+}
+
+.docs-sidebar ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.docs-sidebar a {
+	display: block;
+	padding: 4px 8px;
+	border-radius: var(--radius-sm);
+	color: var(--fg-muted);
+}
+
+.docs-sidebar a:hover,
+.docs-sidebar a[aria-current='page'] {
+	color: var(--fg);
+	background: var(--bg-card);
+}
+
+.docs-main {
+	min-width: 0;
+	max-width: 780px;
+}
+
+.docs-source {
+	margin-top: 48px;
+	font-size: 13px;
+	color: var(--fg-dim);
+}
+
+.docs-content {
+	line-height: 1.65;
+	color: var(--fg-muted);
+}
+
+.docs-content h1,
+.docs-content h2,
+.docs-content h3,
+.docs-content h4 {
+	color: var(--fg);
+	line-height: 1.25;
+	letter-spacing: -0.01em;
+	scroll-margin-top: 80px;
+}
+
+.docs-content h1 {
+	font-size: 36px;
+	margin: 0 0 24px;
+}
+
+.docs-content h2 {
+	font-size: 24px;
+	margin: 48px 0 16px;
+}
+
+.docs-content h3 {
+	font-size: 18px;
+	margin: 32px 0 12px;
+}
+
+.docs-content a {
+	color: var(--accent);
+}
+
+.docs-content img {
+	max-width: 100%;
+	height: auto;
+	border-radius: var(--radius);
+}
+
+.docs-content code {
+	font-family: var(--font-mono);
+	font-size: 0.9em;
+	padding: 0.1em 0.35em;
+	border-radius: 4px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+}
+
+.docs-content kbd {
+	font-family: var(--font-mono);
+	font-size: 0.85em;
+	padding: 0.1em 0.4em;
+	border-radius: 4px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-bottom-width: 2px;
+	white-space: nowrap;
+}
+
+.docs-content pre {
+	overflow-x: auto;
+	padding: 16px;
+	border-radius: var(--radius);
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+}
+
+.docs-content pre code {
+	padding: 0;
+	border: 0;
+	background: none;
+}
+
+.docs-content table {
+	display: block;
+	overflow-x: auto;
+	border-collapse: collapse;
+	font-size: 14px;
+}
+
+.docs-content th,
+.docs-content td {
+	padding: 6px 12px;
+	border: 1px solid var(--border);
+	text-align: left;
+	vertical-align: top;
+}
+
+.docs-content details {
+	margin: 16px 0;
+	padding: 8px 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.docs-content summary {
+	cursor: pointer;
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.docs-content details[open] summary {
+	margin-bottom: 8px;
+}
+
+.docs-content blockquote {
+	margin: 16px 0;
+	padding: 8px 16px;
+	border-left: 3px solid var(--accent);
+	background: var(--bg-card);
+	border-radius: var(--radius-sm);
+}
+
+/* Japanese text, set in the self-hosted Shippori Mincho B1 where the browser has its glyphs. */
+.docs-content :lang(ja) {
+	font-family:
+		'Shippori Mincho B1', 'Hiragino Mincho ProN', 'Yu Mincho', YuMincho, 'Noto Serif CJK JP', serif;
+	font-weight: 700;
+	font-size: 1.35em;
+	letter-spacing: 0.12em;
+	color: var(--fg);
+}
+
+.docs-content .ox-callout-title {
+	margin: 0;
+	color: var(--fg);
+	font-weight: 600;
+}
+
+@media (max-width: 820px) {
+	.docs {
+		grid-template-columns: 1fr;
+		padding: 16px;
+		gap: 16px;
+	}
+
+	.docs-sidebar {
+		position: static;
+		max-height: none;
+	}
+
+	.docs-toc {
+		margin-top: 8px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--bg-card);
+	}
+
+	.docs-toc > summary {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 14px;
+		cursor: pointer;
+		list-style: none;
+		color: var(--fg);
+		font-weight: 600;
+	}
+
+	.docs-toc > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.docs-toc > summary::after {
+		content: '';
+		margin-left: auto;
+		width: 8px;
+		height: 8px;
+		border-right: 2px solid var(--fg-dim);
+		border-bottom: 2px solid var(--fg-dim);
+		transform: rotate(45deg);
+	}
+
+	.docs-toc[open] > summary::after {
+		transform: rotate(-135deg);
+	}
+
+	.docs-toc-label {
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--fg-dim);
+	}
+
+	.docs-toc-current {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.docs-toc:not([open])::details-content {
+		content-visibility: hidden;
+	}
+
+	.docs-toc nav {
+		padding: 0 8px 12px;
+	}
+}
+/* The not-found page, which are rendered on the server only, so their components' styles never reach the client bundle. */
+.not-found {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 120px 32px;
+	text-align: center;
+	color: var(--fg-muted);
+}
+
+.not-found a {
+	color: var(--accent);
+}
+
+/* The components a page in docs/ draws in place of its fallback (src/docs/components.ts). */
+.docs-content .doc-loop,
+.docs-content .doc-handoff,
+.docs-content .doc-ways {
+	margin: 28px 0;
+	padding: 24px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: var(--bg-elev);
+}
+
+.docs-content .doc-loop ol {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 28px;
+}
+
+.docs-content .doc-loop ol {
+	grid-template-columns: repeat(4, 1fr);
+}
+
+.docs-content .doc-loop li,
+.docs-content .doc-handoff .box,
+.docs-content .doc-ways .box {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 14px 16px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	background: var(--bg-card);
+}
+
+.docs-content .doc-loop li.last,
+.docs-content .doc-handoff .panel {
+	border-style: dashed;
+}
+
+.docs-content .doc-loop li:not(.last)::after {
+	content: '';
+	position: absolute;
+	top: 50%;
+	left: 100%;
+	width: 28px;
+	border-top: 1px solid var(--fg-faint);
+}
+
+.docs-content .doc-loop li:not(.last)::before {
+	content: '';
+	position: absolute;
+	top: calc(50% - 3px);
+	left: calc(100% + 22px);
+	width: 6px;
+	height: 6px;
+	border-top: 1px solid var(--fg-faint);
+	border-right: 1px solid var(--fg-faint);
+	transform: rotate(45deg);
+}
+
+.docs-content .doc-loop .label,
+.docs-content .doc-handoff .label,
+.docs-content .doc-ways .label {
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.docs-content .doc-loop .last .label {
+	color: var(--fg-muted);
+}
+
+.docs-content .doc-loop .note,
+.docs-content .doc-handoff .note,
+.docs-content .doc-ways .note {
+	color: var(--fg-dim);
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.docs-content .doc-loop figcaption,
+.docs-content .doc-handoff figcaption,
+.docs-content .doc-ways figcaption {
+	margin-top: 16px;
+	color: var(--fg-dim);
+	font-size: 13px;
+}
+
+.docs-content .doc-choices {
+	margin: 28px 0;
+}
+
+.docs-content .doc-handoff .row {
+	display: grid;
+	grid-template-columns: 1fr 48px 1.2fr;
+	align-items: center;
+}
+
+.docs-content .doc-handoff .windows {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.docs-content .doc-ways .row {
+	display: grid;
+	grid-template-columns: 1fr 40px 1.3fr 40px 1fr;
+	align-items: center;
+}
+
+.docs-content .doc-ways .app {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 12px;
+	border: 1px dashed var(--border-strong);
+	border-radius: var(--radius-lg);
+}
+
+.docs-content .doc-ways .app-label {
+	color: var(--fg-muted);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.docs-content .doc-handoff .arrow,
+.docs-content .doc-ways .arrow {
+	position: relative;
+	height: 1px;
+	background: var(--fg-faint);
+}
+
+.docs-content .doc-ways .arrow.reverse {
+	transform: scaleX(-1);
+}
+
+.docs-content .doc-handoff .arrow::after,
+.docs-content .doc-ways .arrow::after {
+	content: '';
+	position: absolute;
+	right: 0;
+	top: -3px;
+	width: 6px;
+	height: 6px;
+	border-top: 1px solid var(--fg-faint);
+	border-right: 1px solid var(--fg-faint);
+	transform: rotate(45deg);
+}
+
+@media (max-width: 640px) {
+	.docs-content .doc-loop ol {
+		grid-template-columns: 1fr;
+		gap: 24px;
+	}
+
+	.docs-content .doc-loop li:not(.last)::after {
+		top: 100%;
+		left: 50%;
+		width: 0;
+		height: 24px;
+		border-top: 0;
+		border-left: 1px solid var(--fg-faint);
+	}
+
+	.docs-content .doc-loop li:not(.last)::before {
+		top: calc(100% + 18px);
+		left: calc(50% - 3px);
+		transform: rotate(135deg);
+	}
+
+	.docs-content .doc-handoff .row,
+	.docs-content .doc-ways .row {
+		grid-template-columns: 1fr;
+	}
+
+	.docs-content .doc-handoff .arrow,
+	.docs-content .doc-ways .arrow {
+		width: 1px;
+		height: 32px;
+		margin: 0 auto;
+	}
+
+	.docs-content .doc-ways .arrow.reverse {
+		transform: scaleY(-1);
+	}
+
+	.docs-content .doc-handoff .arrow::after,
+	.docs-content .doc-ways .arrow::after {
+		right: auto;
+		top: auto;
+		bottom: 0;
+		left: -3px;
+		transform: rotate(135deg);
+	}
+}

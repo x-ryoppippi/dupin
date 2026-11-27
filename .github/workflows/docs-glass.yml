@@ -1,0 +1,82 @@
+name: Docs glass
+
+# Records the home page's Liquid Glass clips (scripts/docs-glass.nu) on a macOS 26 runner, whose
+# image grants the runner Screen Recording and Accessibility, and uploads them as the
+# `docs-glass` artifact laid out as docs/images: `gh run download <run> --name docs-glass --dir
+# docs/images` puts them in place to commit. A pull request that changes the recorder runs it too,
+# so a change to it is seen working.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Record only the clips whose `<page>/<name>` contains this
+        type: string
+        required: false
+      wallpaper:
+        description: A wallpaper preset (tiles, dusk, lagoon or ember) for every clip, in place of each clip's own
+        type: string
+        required: false
+      no_retina:
+        description: Record on the runner's 1x display, without the 2x virtual one
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/docs-glass.yml
+      - scripts/docs-glass.nu
+      - scripts/docs-glass/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # setup-nix's Hestia cache checks for evicted packs up front.
+  actions: read
+
+jobs:
+  record:
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        with:
+          cache-scope: docs-glass
+          save: 'false'
+
+      - run: nix build .#dupin
+
+      - name: Record
+        env:
+          ONLY: ${{ inputs.only }}
+          WALLPAPER: ${{ inputs.wallpaper }}
+          NO_RETINA: ${{ inputs.no_retina }}
+        run: |
+          set -- --app result/Applications/Dupin.app
+          if [ -n "$ONLY" ]; then set -- "$@" --only "$ONLY"; fi
+          if [ -n "$WALLPAPER" ]; then set -- "$@" --wallpaper "$WALLPAPER"; fi
+          if [ "$NO_RETINA" = true ]; then set -- "$@" --no-retina; fi
+          sw_vers
+          nix develop --command nu scripts/docs-glass.nu "$@"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-glass
+          path: |
+            docs/images/glass.json
+            docs/images/home/
+          if-no-files-found: error
+
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-glass-logs
+          path: |
+            target/docs-glass/*.log
+            target/docs-glass/*-home/Library/Logs/
+          if-no-files-found: ignore

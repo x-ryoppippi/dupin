@@ -37,6 +37,12 @@ pub fn snapshot(event: &str) {
     }
 }
 
+pub fn control(kind: &str, ok: bool) {
+    if on() {
+        eprintln!("dupin-trace: control {kind} ok={ok}");
+    }
+}
+
 pub fn panel(event: &str, visible: bool, shown: bool) {
     if on() {
         eprintln!(
@@ -92,10 +98,41 @@ fn wall_ms() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
 }
 
-/// A key the query field saw, before Dupin's handler decides on it.
+/// A global hotkey reached Dupin.
+pub fn hotkey(shortcut: &str) {
+    if on() {
+        eprintln!("dupin-trace: hotkey fired {shortcut} wall={:.3}", wall_ms());
+    }
+}
+
+/// A key the panel saw, before Dupin's handler decides on it.
 pub fn key(ev: &rune::KeyEvent) {
     if on() {
-        eprintln!("dupin-trace: key {:?} wall={:.3}", ev.key, wall_ms());
+        eprintln!("dupin-trace: key {} wall={:.3}", key_label(ev), wall_ms());
+    }
+}
+
+/// The key's kind and modifiers. Typed text loses its characters: the key can belong to a
+/// script argument or a picker filter, and the trace ends up in uploaded e2e artifacts.
+fn key_label(ev: &rune::KeyEvent) -> String {
+    let key = match &ev.key {
+        rune::Key::Text(_) => "Text".to_owned(),
+        key => format!("{key:?}"),
+    };
+    let m = ev.mods;
+    let mods: Vec<&str> = [
+        (m.cmd, "cmd"),
+        (m.ctrl, "ctrl"),
+        (m.alt, "alt"),
+        (m.shift, "shift"),
+    ]
+    .into_iter()
+    .filter_map(|(held, name)| held.then_some(name))
+    .collect();
+    if mods.is_empty() {
+        key
+    } else {
+        format!("{key} mods={}", mods.join("+"))
     }
 }
 
@@ -103,5 +140,42 @@ pub fn key(ev: &rune::KeyEvent) {
 pub fn edited(text: &str) {
     if on() {
         eprintln!("dupin-trace: edited {text:?} wall={:.3}", wall_ms());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rune::{Key, KeyEvent, Mods};
+
+    use super::key_label;
+
+    #[test]
+    fn typed_text_is_traced_without_its_characters() {
+        let ev = KeyEvent {
+            key: Key::Text("hunter2".into()),
+            mods: Mods {
+                shift: true,
+                ..Mods::default()
+            },
+        };
+        assert_eq!(key_label(&ev), "Text mods=shift");
+    }
+
+    #[test]
+    fn chords_keep_their_key_and_modifiers() {
+        let chord = KeyEvent {
+            key: Key::Command('s'),
+            mods: Mods {
+                cmd: true,
+                shift: true,
+                ..Mods::default()
+            },
+        };
+        assert_eq!(key_label(&chord), "Command('s') mods=cmd+shift");
+        let bare = KeyEvent {
+            key: Key::Left,
+            mods: Mods::default(),
+        };
+        assert_eq!(key_label(&bare), "Left");
     }
 }

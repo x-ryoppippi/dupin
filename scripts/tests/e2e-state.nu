@@ -1,5 +1,5 @@
 use std/assert
-use ../e2e-state.nu is-focused-query
+use ../e2e-state.nu [has-match is-focused-match is-focused-query]
 
 def main [] {
     let focused = {
@@ -11,6 +11,28 @@ def main [] {
             }
         }
     }
+    let unfocused = {
+        ok: true
+        data: {
+            match: {
+                states: []
+            }
+        }
+    }
+    let missing = {
+        ok: true
+        data: {match: null}
+    }
+    let failed = {ok: false, data: $focused.data}
+    assert (has-match $focused)
+    assert (has-match $unfocused)
+    assert not (has-match $missing)
+    assert not (has-match $failed)
+    assert (is-focused-match $focused)
+    assert (is-focused-match {ok: true, data: {match: {states: [focused]}}})
+    assert not (is-focused-match $unfocused)
+    assert not (is-focused-match $missing)
+    assert not (is-focused-match $failed)
     assert (is-focused-query $focused calculator)
     assert not (is-focused-query $focused other)
     assert not (is-focused-query {ok: false, data: $focused.data} calculator)

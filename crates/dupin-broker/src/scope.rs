@@ -1,0 +1,927 @@
+use std::collections::BTreeSet;
+use std::fmt;
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+
+macro_rules! string_type {
+    ($name:ident, $check:expr) => {
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[serde(try_from = "String", into = "String")]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Result<Self, String> {
+                let value = value.into();
+                let check: fn(&str) -> Result<(), String> = $check;
+                check(&value)?;
+                Ok(Self(value))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = String;
+            fn try_from(value: String) -> Result<Self, String> {
+                Self::new(value)
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> String {
+                value.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+    };
+}
+
+string_type!(PackageId, |value| {
+    if value.is_empty() || value.len() > 512 {
+        return Err("a package ID is 1–512 bytes".into());
+    }
+    if value.chars().any(char::is_control) {
+        return Err("a package ID has no control characters".into());
+    }
+    Ok(())
+});
+
+string_type!(Revision, |value| {
+    let valid = (1..=128).contains(&value.len())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b":_+/=-".contains(&b));
+    if valid {
+        Ok(())
+    } else {
+        Err("a revision is 1–128 letters, digits or `:_+/=-`".into())
+    }
+});
+
+string_type!(ScopeName, |value| {
+    let valid = (1..=64).contains(&value.len())
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
+    if valid {
+        Ok(())
+    } else {
+        Err("a name is 1–64 letters, digits, `.`, `_` or `-`, starting with a letter or digit".into())
+    }
+});
+
+string_type!(DeclaredPath, |value| {
+    let relative = if let Some(rest) = value.strip_prefix("~/") {
+        rest
+    } else if let Some(rest) = value.strip_prefix('/') {
+        rest
+    } else {
+        return Err("a path starts with `/` or `~/`".into());
+    };
+    if value.len() > 1024 || !displayable(value) {
+        return Err("a path is at most 1024 bytes with no control or invisible formatting characters".into());
+    }
+    if relative.is_empty() || relative.ends_with('/') {
+        return Err("a path names a file or folder, without a trailing `/`".into());
+    }
+    if relative
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err("a path has no empty, `.` or `..` parts".into());
+    }
+    Ok(())
+});
+
+impl DeclaredPath {
+    /// The absolute path, with a leading `~/` under `home`.
+    pub fn resolve(&self, home: &std::path::Path) -> std::path::PathBuf {
+        match self.0.strip_prefix("~/") {
+            Some(rest) => home.join(rest),
+            None => std::path::PathBuf::from(&self.0),
+        }
+    }
+
+    pub fn under_home(&self) -> bool {
+        self.0.starts_with("~/")
+    }
+}
+
+/// An HTTPS origin: a lowercase DNS host and an optional port other than 443.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Origin {
+    host: String,
+    port: Option<u16>,
+}
+
+impl Origin {
+    /// Parses a manifest origin, which must already be in canonical form.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let origin = Self::of_url(value)?;
+        if origin.to_string() != value {
+            return Err(format!("write the origin as `{origin}`"));
+        }
+        Ok(origin)
+    }
+
+    /// The canonical origin of a request URL: the scheme and host are case-insensitive and
+    /// port 443 is implied.
+    pub fn of_url(url: &str) -> Result<Self, String> {
+        let Some(rest) = url
+            .get(..8)
+            .filter(|scheme| scheme.eq_ignore_ascii_case("https://"))
+            .map(|_| &url[8..])
+        else {
+            return Err("only `https://` URLs are allowed".into());
+        };
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        if authority.contains('@') {
+            return Err("URLs can't carry a user name or password".into());
+        }
+        if authority.starts_with('[') {
+            return Err("IPv6 literal hosts aren't supported".into());
+        }
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) => {
+                let port: u16 = port
+                    .parse()
+                    .ok()
+                    .filter(|&port| port != 0)
+                    .ok_or("the port must be 1–65535")?;
+                (host, (port != 443).then_some(port))
+            }
+            None => (authority, None),
+        };
+        let host = host.to_ascii_lowercase();
+        let valid_label = |label: &str| {
+            (1..=63).contains(&label.len())
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        };
+        if host.is_empty() || host.len() > 253 || !host.split('.').all(valid_label) {
+            return Err("the host must be a DNS name of letters, digits, `-` and `.`".into());
+        }
+        Ok(Self { host, port })
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port.unwrap_or(443)
+    }
+}
+
+impl fmt::Display for Origin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "https://{}", self.host)?;
+        if let Some(port) = self.port {
+            write!(f, ":{port}")?;
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<String> for Origin {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, String> {
+        Self::parse(&value)
+    }
+}
+
+impl From<Origin> for String {
+    fn from(value: Origin) -> String {
+        value.to_string()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Method {
+    Get,
+    Head,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+impl Method {
+    pub const ALL: [Self; 6] = [
+        Self::Get,
+        Self::Head,
+        Self::Post,
+        Self::Put,
+        Self::Patch,
+        Self::Delete,
+    ];
+
+    /// Methods that change something on the server, so they need a user activation.
+    pub fn mutates(self) -> bool {
+        !matches!(self, Self::Get | Self::Head)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Head => "HEAD",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilesKind {
+    File,
+    Directory,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilesAccess {
+    Read,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClipboardAccess {
+    Read,
+    Write,
+    Watch,
+    /// Pasting a row's text into the app in front of Dupin, which Dupin does by posting ⌘V.
+    Paste,
+}
+
+impl ClipboardAccess {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Watch => "watch",
+            Self::Paste => "paste",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowsAccess {
+    /// Listing displays and reading the focused window's frame and app.
+    Read,
+    /// Moving and resizing the focused window.
+    Arrange,
+}
+
+impl WindowsAccess {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Arrange => "arrange",
+        }
+    }
+}
+
+/// What Dupin noted about where the user was when the panel opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextAccess {
+    /// The app that was in front: its name, bundle ID and process.
+    Frontmost,
+    /// The file the front app's focused window shows.
+    Document,
+}
+
+impl ContextAccess {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Frontmost => "frontmost",
+            Self::Document => "document",
+        }
+    }
+}
+
+/// A kind of row Dupin's own sources show, whose fields a package may be let see.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowKind {
+    Text,
+    Url,
+    File,
+    App,
+}
+
+impl RowKind {
+    pub const ALL: [Self; 4] = [Self::Text, Self::Url, Self::File, Self::App];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Url => "url",
+            Self::File => "file",
+            Self::App => "app",
+        }
+    }
+
+    /// The fields a row of this kind has: its title, and the value it stands for.
+    pub fn fields(self) -> &'static [RowField] {
+        match self {
+            Self::Text => &[RowField::Title, RowField::Text],
+            Self::Url => &[RowField::Title, RowField::Url],
+            Self::File | Self::App => &[RowField::Title, RowField::Name, RowField::Path],
+        }
+    }
+
+    fn plural(self) -> &'static str {
+        match self {
+            Self::Text => "text results",
+            Self::Url => "links",
+            Self::File => "files and folders",
+            Self::App => "apps",
+        }
+    }
+}
+
+/// One field of a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowField {
+    Title,
+    Text,
+    Url,
+    /// A file's or app's name in its folder.
+    Name,
+    /// A file's or app's full path.
+    Path,
+}
+
+impl RowField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Text => "text",
+            Self::Url => "url",
+            Self::Name => "name",
+            Self::Path => "path",
+        }
+    }
+
+    fn described(self) -> &'static str {
+        match self {
+            Self::Title => "titles",
+            Self::Text => "text",
+            Self::Url => "addresses",
+            Self::Name => "names",
+            Self::Path => "full paths",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StorageOp {
+    Read,
+    Write,
+    Delete,
+}
+
+/// An OS-level grant a scope also needs, which macOS (or another platform) decides for the
+/// whole app. Settings → Permissions lists the packages that declare it beside the built-in
+/// features that use it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OsPermission {
+    /// Full access to calendar events.
+    Calendars,
+    /// Reading the general pasteboard without the system's paste prompt.
+    Pasteboard,
+    /// Posting key events, such as ⌘V into the front app, and reading and moving other apps'
+    /// windows.
+    Accessibility,
+}
+
+impl OsPermission {
+    pub const ALL: [Self; 3] = [Self::Calendars, Self::Pasteboard, Self::Accessibility];
+
+    /// The name System Settings lists it under.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Calendars => "Calendars",
+            Self::Pasteboard => "Paste from Other Apps",
+            Self::Accessibility => "Accessibility",
+        }
+    }
+}
+
+/// The most output an executable profile hands back per stream unless it declares more: the
+/// exec service's own default.
+pub const EXEC_OUTPUT_BYTES: u32 = 64 * 1024;
+/// The most output a profile may declare, the exec service's own limit.
+pub const MAX_EXEC_OUTPUT_BYTES: u32 = 1024 * 1024;
+
+fn output_limit(declared: Option<u32>) -> u32 {
+    declared.unwrap_or(EXEC_OUTPUT_BYTES)
+}
+
+/// One grantable unit of a declaration. A [`ScopeKey`] names it; the rest bounds it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Scope {
+    Http {
+        origin: Origin,
+        methods: BTreeSet<Method>,
+    },
+    Files {
+        name: ScopeName,
+        kind: FilesKind,
+        access: BTreeSet<FilesAccess>,
+        /// The file or folder the package names, absolute or under `~/`, which Dupin binds the
+        /// scope to when the user allows it instead of asking them to pick one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<DeclaredPath>,
+    },
+    Exec {
+        name: ScopeName,
+        args: Vec<String>,
+        output: bool,
+        /// The absolute path of the program the package names, which Dupin binds the profile
+        /// to when the user allows it instead of asking them to pick one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        program: Option<DeclaredPath>,
+        /// The profile may run without an action the user chose: while they type, in
+        /// `items()` and in event handlers.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        background: bool,
+        /// The program also receives `SSH_AUTH_SOCK`, so it can use the keys the user's SSH agent
+        /// holds.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ssh_agent: bool,
+        /// The most output it hands back per stream, when that is more than the default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_bytes: Option<u32>,
+    },
+    Script {
+        name: ScopeName,
+        output: bool,
+    },
+    Storage {
+        quota_bytes: u64,
+        retention_days: Option<u32>,
+    },
+    /// Copying what the package stores, encrypted, to the sync folder and the user's other
+    /// Macs. Granted on each Mac.
+    StorageSync,
+    Clipboard {
+        access: ClipboardAccess,
+    },
+    Dictionary,
+    Calculator,
+    /// Adding, changing and deleting the snippets the user stores in Dupin.
+    Snippets,
+    Calendar {
+        past_days: u32,
+        future_days: u32,
+    },
+    Windows {
+        access: WindowsAccess,
+    },
+    Context {
+        access: ContextAccess,
+    },
+    /// Fields of the rows of one kind that Dupin's own sources show, which the package's
+    /// filters and kind actions receive. Another package's rows never reach it.
+    Rows {
+        kind: RowKind,
+        fields: BTreeSet<RowField>,
+    },
+    /// What the user types beyond the package's own keyword: in the searches its matchers are
+    /// composed into, and in the main search for the built-in it answers there.
+    Query,
+}
+
+impl Scope {
+    pub fn key(&self) -> ScopeKey {
+        match self {
+            Self::Http { origin, .. } => ScopeKey::Http(origin.clone()),
+            Self::Files { name, .. } => ScopeKey::Files(name.clone()),
+            Self::Exec { name, .. } => ScopeKey::Exec(name.clone()),
+            Self::Script { name, .. } => ScopeKey::Script(name.clone()),
+            Self::Storage { .. } => ScopeKey::Storage,
+            Self::StorageSync => ScopeKey::StorageSync,
+            Self::Clipboard { access } => ScopeKey::Clipboard(*access),
+            Self::Dictionary => ScopeKey::Dictionary,
+            Self::Calculator => ScopeKey::Calculator,
+            Self::Snippets => ScopeKey::Snippets,
+            Self::Calendar { .. } => ScopeKey::Calendar,
+            Self::Windows { access } => ScopeKey::Windows(*access),
+            Self::Context { access } => ScopeKey::Context(*access),
+            Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
+            Self::Query => ScopeKey::Query,
+        }
+    }
+
+    /// Whether an approval of `self` also approves `other`, so a revision that declares
+    /// `other` keeps the grant without asking again.
+    pub fn covers(&self, other: &Scope) -> bool {
+        match (self, other) {
+            (
+                Self::Http { origin, methods },
+                Self::Http {
+                    origin: o,
+                    methods: m,
+                },
+            ) => origin == o && methods.is_superset(m),
+            (
+                Self::Files {
+                    name,
+                    kind,
+                    access,
+                    path,
+                },
+                Self::Files {
+                    name: n,
+                    kind: k,
+                    access: a,
+                    path: p,
+                },
+            ) => name == n && kind == k && access.is_superset(a) && path == p,
+            (
+                Self::Exec {
+                    name,
+                    args,
+                    output,
+                    program,
+                    background,
+                    ssh_agent,
+                    output_bytes,
+                },
+                Self::Exec {
+                    name: n,
+                    args: a,
+                    output: o,
+                    program: p,
+                    background: b,
+                    ssh_agent: s,
+                    output_bytes: m,
+                },
+            ) => {
+                name == n
+                    && args == a
+                    && (*output || !o)
+                    && program == p
+                    && (*background || !b)
+                    && (*ssh_agent || !s)
+                    && output_limit(*output_bytes) >= output_limit(*m)
+            }
+            (Self::Script { name, output }, Self::Script { name: n, output: o }) => {
+                name == n && (*output || !o)
+            }
+            (
+                Self::Storage {
+                    quota_bytes,
+                    retention_days,
+                },
+                Self::Storage {
+                    quota_bytes: q,
+                    retention_days: r,
+                },
+            ) => {
+                quota_bytes >= q
+                    && match (retention_days, r) {
+                        (None, _) => true,
+                        (Some(_), None) => false,
+                        (Some(approved), Some(declared)) => approved >= declared,
+                    }
+            }
+            (Self::Clipboard { access }, Self::Clipboard { access: a }) => access == a,
+            (Self::Dictionary, Self::Dictionary)
+            | (Self::StorageSync, Self::StorageSync)
+            | (Self::Calculator, Self::Calculator)
+            | (Self::Snippets, Self::Snippets) => true,
+            (
+                Self::Calendar {
+                    past_days,
+                    future_days,
+                },
+                Self::Calendar {
+                    past_days: p,
+                    future_days: f,
+                },
+            ) => past_days >= p && future_days >= f,
+            (Self::Windows { access }, Self::Windows { access: a }) => access == a,
+            (Self::Context { access }, Self::Context { access: a }) => access == a,
+            (Self::Rows { kind, fields }, Self::Rows { kind: k, fields: f }) => {
+                kind == k && fields.is_superset(f)
+            }
+            (Self::Query, Self::Query) => true,
+            _ => false,
+        }
+    }
+
+    pub fn os_permission(&self) -> Option<OsPermission> {
+        match self {
+            Self::Calendar { .. } => Some(OsPermission::Calendars),
+            Self::Clipboard {
+                access: ClipboardAccess::Read | ClipboardAccess::Watch,
+            } => Some(OsPermission::Pasteboard),
+            Self::Clipboard {
+                access: ClipboardAccess::Paste,
+            }
+            | Self::Windows { .. } => Some(OsPermission::Accessibility),
+            _ => None,
+        }
+    }
+
+    /// Files and executable profiles are bound, at consent, to a path: the one the package
+    /// declares, or one the user picks.
+    pub fn needs_binding(&self) -> bool {
+        matches!(self, Self::Files { .. } | Self::Exec { .. })
+    }
+
+    /// The path the package declares for a files scope or an executable profile, which the
+    /// scope is bound to without a pick.
+    pub fn declared_path(&self) -> Option<&DeclaredPath> {
+        match self {
+            Self::Files { path, .. } => path.as_ref(),
+            Self::Exec { program, .. } => program.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Whether the user must pick the path the scope is bound to.
+    pub fn needs_pick(&self) -> bool {
+        self.needs_binding() && self.declared_path().is_none()
+    }
+}
+
+impl fmt::Display for Scope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn list<T>(items: impl IntoIterator<Item = T>, name: impl Fn(T) -> &'static str) -> String {
+            let names: Vec<_> = items.into_iter().map(name).collect();
+            match names.as_slice() {
+                [rest @ .., last] if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+                _ => names.concat(),
+            }
+        }
+        fn days(count: u32) -> String {
+            if count == 1 {
+                "1 day".into()
+            } else {
+                format!("{count} days")
+            }
+        }
+        match self {
+            Self::Http { origin, methods } => {
+                write!(f, "{} requests to {origin}", list(methods, |m| m.as_str()))
+            }
+            Self::Files {
+                name,
+                kind,
+                access,
+                path,
+            } => {
+                let kind = match kind {
+                    FilesKind::File => "file",
+                    FilesKind::Directory => "folder",
+                };
+                let access = list(access, |a| match a {
+                    FilesAccess::Read => "read",
+                    FilesAccess::List => "list",
+                });
+                match path {
+                    Some(path) => write!(f, "{access} the {kind} {path}"),
+                    None => write!(f, "{access} the {kind} you pick for “{name}”"),
+                }
+            }
+            Self::Exec {
+                name,
+                args,
+                output,
+                program,
+                background,
+                ssh_agent,
+                output_bytes,
+            } => {
+                match program {
+                    Some(program) => write!(f, "run {program}")?,
+                    None => write!(f, "run the program you pick for “{name}”")?,
+                }
+                for (index, arg) in args.iter().enumerate() {
+                    f.write_str(if index == 0 { " with " } else { " " })?;
+                    write!(f, "{arg:?}")?;
+                }
+                if *ssh_agent {
+                    f.write_str(", using the keys your SSH agent holds,")?;
+                }
+                match (output, output_bytes) {
+                    (false, _) => {}
+                    (true, None) => f.write_str(" and read its output")?,
+                    (true, Some(bytes)) => write!(f, " and read up to {bytes} bytes of its output")?,
+                }
+                if *background {
+                    f.write_str(", even while you type and without an action you chose")?;
+                }
+                Ok(())
+            }
+            Self::Script { name, output } => {
+                write!(f, "run your script command “{name}”")?;
+                if *output {
+                    f.write_str(" and read its output")?;
+                }
+                Ok(())
+            }
+            Self::Storage {
+                quota_bytes,
+                retention_days,
+            } => {
+                write!(f, "keep up to {quota_bytes} bytes of encrypted data")?;
+                if let Some(count) = retention_days {
+                    write!(f, " for {}", days(*count))?;
+                }
+                Ok(())
+            }
+            Self::StorageSync => {
+                f.write_str("copy what it stores, encrypted, to your sync folder and your other Macs")
+            }
+            Self::Clipboard { access } => match access {
+                ClipboardAccess::Read => f.write_str("read the clipboard"),
+                ClipboardAccess::Write => f.write_str("write to the clipboard"),
+                ClipboardAccess::Watch => f.write_str("see each new clipboard entry"),
+                ClipboardAccess::Paste => f.write_str("paste into the app you were using"),
+            },
+            Self::Dictionary => f.write_str("look words up in the system dictionaries"),
+            Self::Calculator => f.write_str("work out calculations and conversions with Dupin's calculator"),
+            Self::Snippets => f.write_str("add, change and delete the snippets you store in Dupin"),
+            Self::Calendar {
+                past_days,
+                future_days,
+            } => write!(
+                f,
+                "read calendar events from {} back to {} ahead",
+                days(*past_days),
+                days(*future_days)
+            ),
+            Self::Windows { access } => match access {
+                WindowsAccess::Read => f.write_str("see your displays and the focused window"),
+                WindowsAccess::Arrange => f.write_str("move and resize the focused window"),
+            },
+            Self::Context { access } => match access {
+                ContextAccess::Frontmost => f.write_str("see which app you were using when Dupin opened"),
+                ContextAccess::Document => f.write_str("see which file you were viewing when Dupin opened"),
+            },
+            Self::Rows { kind, fields } => write!(
+                f,
+                "see the {} of {} Dupin finds, where you compose its filters or actions",
+                list(fields, |field| field.described()),
+                kind.plural()
+            ),
+            Self::Query => f.write_str("see what you type beyond its own keyword"),
+        }
+    }
+}
+
+/// The name of one grant: an HTTP origin, a named files or exec scope, a script target, or a
+/// single-valued capability. Written as `http:https://example.com`, `files:notes`,
+/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`,
+/// `calendar` or `windows:arrange` in grant files.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum ScopeKey {
+    Http(Origin),
+    Files(ScopeName),
+    Exec(ScopeName),
+    Script(ScopeName),
+    Storage,
+    StorageSync,
+    Clipboard(ClipboardAccess),
+    Dictionary,
+    Calculator,
+    /// Adding, changing and deleting the snippets the user stores in Dupin.
+    Snippets,
+    Calendar,
+    Windows(WindowsAccess),
+    Context(ContextAccess),
+    Rows(RowKind),
+    Query,
+}
+
+impl fmt::Display for ScopeKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http(origin) => write!(f, "http:{origin}"),
+            Self::Files(name) => write!(f, "files:{name}"),
+            Self::Exec(name) => write!(f, "exec:{name}"),
+            Self::Script(name) => write!(f, "script:{name}"),
+            Self::Storage => f.write_str("storage"),
+            Self::StorageSync => f.write_str("storage:sync"),
+            Self::Clipboard(access) => write!(f, "clipboard:{}", access.as_str()),
+            Self::Dictionary => f.write_str("dictionary"),
+            Self::Calculator => f.write_str("calculator"),
+            Self::Snippets => f.write_str("snippets"),
+            Self::Calendar => f.write_str("calendar"),
+            Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
+            Self::Context(access) => write!(f, "context:{}", access.as_str()),
+            Self::Rows(kind) => write!(f, "rows:{}", kind.as_str()),
+            Self::Query => f.write_str("query"),
+        }
+    }
+}
+
+impl FromStr for ScopeKey {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, String> {
+        let unknown = || format!("`{value}` isn't a scope");
+        Ok(match value.split_once(':') {
+            None => match value {
+                "storage" => Self::Storage,
+                "dictionary" => Self::Dictionary,
+                "calculator" => Self::Calculator,
+                "snippets" => Self::Snippets,
+                "calendar" => Self::Calendar,
+                "query" => Self::Query,
+                _ => return Err(unknown()),
+            },
+            Some(("http", origin)) => Self::Http(Origin::parse(origin)?),
+            Some(("files", name)) => Self::Files(ScopeName::new(name)?),
+            Some(("exec", name)) => Self::Exec(ScopeName::new(name)?),
+            Some(("script", name)) => Self::Script(ScopeName::new(name)?),
+            Some(("storage", "sync")) => Self::StorageSync,
+            Some(("clipboard", "read")) => Self::Clipboard(ClipboardAccess::Read),
+            Some(("clipboard", "write")) => Self::Clipboard(ClipboardAccess::Write),
+            Some(("clipboard", "watch")) => Self::Clipboard(ClipboardAccess::Watch),
+            Some(("clipboard", "paste")) => Self::Clipboard(ClipboardAccess::Paste),
+            Some(("windows", "read")) => Self::Windows(WindowsAccess::Read),
+            Some(("windows", "arrange")) => Self::Windows(WindowsAccess::Arrange),
+            Some(("context", "frontmost")) => Self::Context(ContextAccess::Frontmost),
+            Some(("context", "document")) => Self::Context(ContextAccess::Document),
+            Some(("rows", kind)) => Self::Rows(
+                RowKind::ALL
+                    .into_iter()
+                    .find(|known| known.as_str() == kind)
+                    .ok_or_else(unknown)?,
+            ),
+            Some(_) => return Err(unknown()),
+        })
+    }
+}
+
+impl TryFrom<String> for ScopeKey {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, String> {
+        value.parse()
+    }
+}
+
+impl From<ScopeKey> for String {
+    fn from(value: ScopeKey) -> String {
+        value.to_string()
+    }
+}
+
+/// Whether `text` shows as itself in the consent text: control, line-separator and invisible
+/// formatting characters such as bidi overrides could forge or reorder the lines a user approves.
+pub fn displayable(text: &str) -> bool {
+    !text.chars().any(|ch| {
+        ch.is_control()
+            || matches!(
+                ch,
+                '\u{ad}'
+                    | '\u{600}'..='\u{605}'
+                    | '\u{61c}'
+                    | '\u{6dd}'
+                    | '\u{70f}'
+                    | '\u{890}'..='\u{891}'
+                    | '\u{8e2}'
+                    | '\u{180e}'
+                    | '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2060}'..='\u{206f}'
+                    | '\u{feff}'
+                    | '\u{fff9}'..='\u{fffb}'
+                    | '\u{110bd}'
+                    | '\u{110cd}'
+                    | '\u{13430}'..='\u{1343f}'
+                    | '\u{1bca0}'..='\u{1bca3}'
+                    | '\u{1d173}'..='\u{1d17a}'
+                    | '\u{e0001}'
+                    | '\u{e0020}'..='\u{e007f}'
+            )
+    })
+}

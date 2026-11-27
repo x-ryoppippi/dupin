@@ -1,0 +1,28 @@
+[package]
+name = "dupin-telemetry"
+description = "The anonymous daily usage ping: the one payload Dupin sends and its collector validates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[features]
+default = ["schema"]
+# The JSON Schema the collector validates against. The launcher leaves it out, so schemars
+# never links into the app.
+schema = ["dep:schemars"]
+
+[[bin]]
+name = "generate-telemetry-schema"
+path = "src/bin/generate_telemetry_schema.rs"
+required-features = ["schema"]
+
+[dependencies]
+schemars = { version = "0.8", optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

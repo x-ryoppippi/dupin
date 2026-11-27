@@ -1,0 +1,1401 @@
+{
+	"metadata": {
+		"baseline_commit": "e58a51417f0062c48a125fdb71797b2ee6e54470",
+		"system": "aarch64-darwin",
+		"runtime": "rquickjs 0.14.0 (QuickJS-ng 0.16.2); std only, without rust-alloc or allocator",
+		"limits": "16 MiB heap, 512 KiB stack, 100 ms interrupt deadline, 10,000 promise jobs",
+		"release_profile": "fat LTO; one codegen unit; package.nix stripping; Rust opt-level z",
+		"signing": "ad-hoc; hardened runtime; no additional entitlements; no notary submission",
+		"archive": "ditto ZIP, as used by the updater; no DMG measurement",
+		"patch_sha256": "2c355c60f210da43d0af236596a15f2a9a10bce66d8ef905b8b6044ac2f8a573",
+		"script_sha256": "f7bef049294634b7f0b804af34e4e665b2547f0f4d4ca396576341e65d72dba3",
+		"bench_lock_sha256": "28f7a4d17d5c9e7ef9a5fdd5864f5caa2d43ee72e7fad9d147bfdc848fdfed00",
+		"unlink_store_sha256": "7be4242a9d568a2881f99917cd91a8c7dc29be7f25572b2a2890756e76d0f23d",
+		"macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2.1\nBuildVersion:\t\t26B131",
+		"hardware": "Apple M5 Max"
+	},
+	"size": {
+		"nixpkgs": {
+			"lastModified": 1795217999,
+			"narHash": "sha256-Z5mAFcY8XTAaWe+RwTchz4Fx1gwaeQ2WD8A8bKX7njY=",
+			"owner": "NixOS",
+			"repo": "nixpkgs",
+			"rev": "680275f0bb6afce84fbac3e75fc47c5f2272400b",
+			"type": "github"
+		},
+		"toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
+		"nix_outputs": {
+			"baseline": "/nix/store/gra3rmjsf5v8p893ry12f5mzqyvbwq42-dupin-0.1.0",
+			"js-oz": "/nix/store/y8xjn2lh8j9byrisrbj2lfkvlv1m90ss-dupin-0.1.0",
+			"js-o3": "/nix/store/7kl1yvsvhb3qrplh1jsq6xrxvwvcr68d-dupin-0.1.0"
+		},
+		"measurements": [
+			{
+				"label": "baseline",
+				"raw_executable_bytes": 15474464,
+				"signed_executable_bytes": 15384656,
+				"signed_app_file_bytes": 15479843,
+				"zip_bytes": 9138733,
+				"app": "artifacts/baseline.app",
+				"signed_app_increase_bytes": 0,
+				"zip_increase_bytes": 0
+			},
+			{
+				"label": "js-oz",
+				"raw_executable_bytes": 16061728,
+				"signed_executable_bytes": 15968496,
+				"signed_app_file_bytes": 16063683,
+				"zip_bytes": 9491297,
+				"app": "artifacts/js-oz.app",
+				"signed_app_increase_bytes": 583840,
+				"zip_increase_bytes": 352564
+			},
+			{
+				"label": "js-o3",
+				"raw_executable_bytes": 16538000,
+				"signed_executable_bytes": 16441984,
+				"signed_app_file_bytes": 16537171,
+				"zip_bytes": 9646049,
+				"app": "artifacts/js-o3.app",
+				"signed_app_increase_bytes": 1057328,
+				"zip_increase_bytes": 507316
+			}
+		],
+		"probes": [
+			{
+				"label": "js-oz",
+				"output": "js_runtime=ok title=\"2 words\" text=\"2\" bytecode_bytes=479 interrupted_after_ms=99 heap_limit=16777216 stack_limit=524288"
+			},
+			{
+				"label": "js-o3",
+				"output": "js_runtime=ok title=\"2 words\" text=\"2\" bytecode_bytes=479 interrupted_after_ms=99 heap_limit=16777216 stack_limit=524288"
+			}
+		]
+	},
+	"bench": {
+		"host_rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
+		"host_cc": "clang version 21.1.8\nTarget: arm64-apple-darwin\nThread model: posix\nInstalledDir: /nix/store/y5zh9q993q99swc083qs3cvxmww1qnp8-clang-21.1.8/bin",
+		"levels": [
+			{
+				"cold": {
+					"bytecode": {
+						"first_invocation": {
+							"count": 200,
+							"max_ms": 8.645999999999999,
+							"mean_ms": 3.7508933099999986,
+							"min_ms": 2.758375,
+							"p50_ms": 3.408416,
+							"p95_ms": 6.430708999999999,
+							"p99_ms": 7.908375
+						},
+						"first_result_in_process": {
+							"count": 200,
+							"max_ms": 9.015333,
+							"mean_ms": 4.003931239999999,
+							"min_ms": 2.94675,
+							"p50_ms": 3.664584,
+							"p95_ms": 7.076083000000001,
+							"p99_ms": 8.293791
+						},
+						"mode": "bytecode",
+						"process_spawn_to_exit": {
+							"count": 200,
+							"max_ms": 19.338291,
+							"mean_ms": 10.878620404999994,
+							"min_ms": 7.780667,
+							"p50_ms": 10.339416,
+							"p95_ms": 16.165208,
+							"p99_ms": 18.7955
+						}
+					},
+					"source": {
+						"first_invocation": {
+							"count": 200,
+							"max_ms": 7.187625,
+							"mean_ms": 5.6362737050000025,
+							"min_ms": 4.578292,
+							"p50_ms": 5.596458,
+							"p95_ms": 6.455083,
+							"p99_ms": 7.081167
+						},
+						"first_result_in_process": {
+							"count": 200,
+							"max_ms": 7.439292,
+							"mean_ms": 5.8045104149999975,
+							"min_ms": 4.69575,
+							"p50_ms": 5.7622919999999995,
+							"p95_ms": 6.6335,
+							"p99_ms": 7.269
+						},
+						"mode": "source",
+						"process_spawn_to_exit": {
+							"count": 200,
+							"max_ms": 14.650167,
+							"mean_ms": 11.359249790000003,
+							"min_ms": 9.155583,
+							"p50_ms": 11.554041,
+							"p95_ms": 13.288042,
+							"p99_ms": 13.872542
+						}
+					}
+				},
+				"containment": [
+					{
+						"case": "busy-loop",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 115.774583,
+						"result": {
+							"detail": "Error: interrupted\n    at search (main.js:1:1)\n",
+							"elapsed_ms": 102.047791,
+							"final_footprint_bytes": 1261904,
+							"idle_footprint_bytes": 1229136,
+							"interrupted": true,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102728,
+							"memory_used_bytes_at_end": 97543,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.203709
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "busy-module-body",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 109.369958,
+						"result": {
+							"detail": "Error: interrupted\n    at <anonymous> (main.js:1:1)\n",
+							"elapsed_ms": 101.136166,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": true,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102792,
+							"memory_used_bytes_at_end": 97633,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.292417
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "busy-async-job",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 125.913875,
+						"result": {
+							"detail": "pending after the 100 ms budget",
+							"elapsed_ms": 106.730875,
+							"final_footprint_bytes": 1294672,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": true,
+							"jobs": 1,
+							"malloc_bytes_at_end": 102728,
+							"memory_used_bytes_at_end": 97543,
+							"outcome": "deadline",
+							"peak_over_idle_bytes": 212992,
+							"rows": 0,
+							"teardown_ms": 7.91875
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-object-spike",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 90.18320800000001,
+						"result": {
+							"detail": "Exception generated by quickjs: Null\"null\"\n",
+							"elapsed_ms": 71.483834,
+							"final_footprint_bytes": 1409384,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103336,
+							"memory_used_bytes_at_end": 98101,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 19185688,
+							"rows": 0,
+							"teardown_ms": 0.07645800000000001
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-string-repeat",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 7.483625,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:2:23)\n",
+							"elapsed_ms": 0.430167,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103024,
+							"memory_used_bytes_at_end": 97791,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.06962499999999999
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-string-doubling",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 6.927583,
+						"result": {
+							"detail": "Error: string too long\n    at search (main.js:3:19)\n",
+							"elapsed_ms": 0.378083,
+							"final_footprint_bytes": 1294672,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102936,
+							"memory_used_bytes_at_end": 97703,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 212992,
+							"rows": 0,
+							"teardown_ms": 0.076584
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-array-fill",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 26.403834,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:2:32)\n",
+							"elapsed_ms": 17.77625,
+							"final_footprint_bytes": 1327440,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102880,
+							"memory_used_bytes_at_end": 97702,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 11452416,
+							"rows": 0,
+							"teardown_ms": 0.077125
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-typed-array",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 8.302999999999999,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:2:30)\n",
+							"elapsed_ms": 0.317791,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102864,
+							"memory_used_bytes_at_end": 97669,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.077875
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "stack-recursion",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 10.874666,
+						"result": {
+							"detail": "Error: Maximum call stack size exceeded\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)",
+							"elapsed_ms": 1.204583,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103600,
+							"memory_used_bytes_at_end": 98032,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 720896,
+							"rows": 0,
+							"teardown_ms": 0.079125
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "stack-json-parse",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 17.807125,
+						"result": {
+							"detail": "Error: Maximum call stack size exceeded\n    at parse (native)\n    at search (main.js:2:24)\n",
+							"elapsed_ms": 8.335084,
+							"final_footprint_bytes": 1311056,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103512,
+							"memory_used_bytes_at_end": 98238,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 2179072,
+							"rows": 0,
+							"teardown_ms": 0.079208
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "stack-json-stringify",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 22.895125,
+						"result": {
+							"detail": "Error: Maximum call stack size exceeded\n    at stringify (native)\n    at search (main.js:4:24)\n",
+							"elapsed_ms": 18.517834,
+							"final_footprint_bytes": 1343824,
+							"idle_footprint_bytes": 1229136,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103512,
+							"memory_used_bytes_at_end": 98285,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 13533184,
+							"rows": 0,
+							"teardown_ms": 0.047083
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true,
+						"rerun": {
+							"date": "2026-11-23",
+							"fixture_change": "nesting depth lowered from 200,000 to 100,000 so the object builds within the heap limit and JSON.stringify runs",
+							"bench_executable_bytes": 1372080,
+							"load_average_before": "{ 8.18 17.44 21.15 }",
+							"load_average_after": "{ 8.18 17.44 21.15 }"
+						}
+					},
+					{
+						"case": "promise-chain-storm",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 35.591708,
+						"result": {
+							"detail": "more than 10000 promise jobs",
+							"elapsed_ms": 16.840417,
+							"final_footprint_bytes": 1311056,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 10000,
+							"malloc_bytes_at_end": 5063664,
+							"memory_used_bytes_at_end": 3218267,
+							"outcome": "job-limit",
+							"peak_over_idle_bytes": 6111232,
+							"rows": 0,
+							"teardown_ms": 3.04725
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "promise-fanout-storm",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 55.226583000000005,
+						"result": {
+							"detail": "more than 10000 promise jobs",
+							"elapsed_ms": 44.560500000000005,
+							"final_footprint_bytes": 1311056,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 10000,
+							"malloc_bytes_at_end": 5624744,
+							"memory_used_bytes_at_end": 3219049,
+							"outcome": "job-limit",
+							"peak_over_idle_bytes": 6602752,
+							"rows": 0,
+							"teardown_ms": 4.1635
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "regexp-backtracking",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 109.226292,
+						"result": {
+							"detail": "Error: interrupted\n    at exec (native)\n    at test (native)\n    at search (main.js:2:58)\n",
+							"elapsed_ms": 100.116583,
+							"final_footprint_bytes": 1294672,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": true,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103640,
+							"memory_used_bytes_at_end": 98262,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 212992,
+							"rows": 0,
+							"teardown_ms": 0.096834
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "native-string-search",
+						"heap_held": false,
+						"killed_after_ms": 1e4,
+						"pass": false,
+						"process_wall_ms": 10002.117708,
+						"result": null,
+						"stopped_within_budget": false,
+						"terminated_within_outer_limit": false
+					},
+					{
+						"case": "native-array-sort",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 50.97425,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:3:9)\n",
+							"elapsed_ms": 45.436167,
+							"final_footprint_bytes": 1327440,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103504,
+							"memory_used_bytes_at_end": 98305,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 14401536,
+							"rows": 0,
+							"teardown_ms": 0.078958
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					}
+				],
+				"footprint": {
+					"after_first_drop_footprint_bytes": 1409360,
+					"checkpoints": [
+						{
+							"cycles": 1,
+							"footprint_bytes": 1409360
+						},
+						{
+							"cycles": 10,
+							"footprint_bytes": 1409360
+						},
+						{
+							"cycles": 100,
+							"footprint_bytes": 1409360
+						},
+						{
+							"cycles": 200,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 300,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 400,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 500,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 600,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 700,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 800,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 900,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 1000,
+							"footprint_bytes": 1425744
+						}
+					],
+					"create_drop_cycles": 1000,
+					"final_footprint_bytes": 1425744,
+					"idle_footprint_bytes": 1327440,
+					"lifetime_peak_footprint_bytes": 2031952,
+					"live": {
+						"empty_context_footprint_bytes": 1507664,
+						"empty_context_malloc_bytes": 100744,
+						"loaded_context_footprint_bytes": 1966416,
+						"loaded_context_malloc_bytes": 426728,
+						"loaded_context_memory_used_bytes": 405751
+					},
+					"peak_over_idle_bytes": 704512
+				},
+				"gates": {
+					"cold_bytecode_p95": {
+						"limit_ms": 20.0,
+						"measured_ms": 7.076083000000001,
+						"pass": true
+					},
+					"cold_source_p95": {
+						"limit_ms": 20.0,
+						"measured_ms": 6.6335,
+						"pass": true
+					},
+					"containment": {
+						"failed_cases": ["native-string-search"],
+						"pass": false
+					},
+					"warm_p95": {
+						"limit_ms": 5.0,
+						"measured_ms": 4.7103340000000005,
+						"pass": true
+					},
+					"warm_p99": {
+						"limit_ms": 10.0,
+						"measured_ms": 8.466916,
+						"pass": true
+					}
+				},
+				"label": "c-oz",
+				"limits": {
+					"deadline_tolerance_ms": 10,
+					"execution_budget_ms": 100,
+					"heap_bytes": 16777216,
+					"heap_slack_bytes": 8388608,
+					"job_limit": 10000,
+					"kill_after_ms": 10000,
+					"outer_limit_ms": 2000,
+					"stack_bytes": 524288,
+					"worker_stack_bytes": 2097152
+				},
+				"warm": {
+					"search_400": {
+						"bytecode_bytes": 57502,
+						"query": "pr",
+						"rows": 50,
+						"stages": {
+							"call": {
+								"count": 2000,
+								"max_ms": 6.517709,
+								"mean_ms": 1.589665044000001,
+								"min_ms": 1.177,
+								"p50_ms": 1.493584,
+								"p95_ms": 2.1874580000000003,
+								"p99_ms": 4.062041
+							},
+							"load": {
+								"count": 2000,
+								"max_ms": 5.997125,
+								"mean_ms": 1.256535954999998,
+								"min_ms": 0.913875,
+								"p50_ms": 1.169708,
+								"p95_ms": 1.701375,
+								"p99_ms": 3.248125
+							},
+							"setup": {
+								"count": 2000,
+								"max_ms": 2.3845419999999997,
+								"mean_ms": 0.24148958749999958,
+								"min_ms": 0.14433400000000002,
+								"p50_ms": 0.215209,
+								"p95_ms": 0.36604200000000003,
+								"p99_ms": 0.719541
+							},
+							"teardown": {
+								"count": 2000,
+								"max_ms": 1.9072920000000002,
+								"mean_ms": 0.32929467900000026,
+								"min_ms": 0.200875,
+								"p50_ms": 0.298167,
+								"p95_ms": 0.50525,
+								"p99_ms": 0.825041
+							},
+							"total": {
+								"count": 2000,
+								"max_ms": 13.833666,
+								"mean_ms": 3.5198364130000015,
+								"min_ms": 2.528,
+								"p50_ms": 3.337416,
+								"p95_ms": 4.7103340000000005,
+								"p99_ms": 8.466916
+							},
+							"validate": {
+								"count": 2000,
+								"max_ms": 0.560625,
+								"mean_ms": 0.056354138999999914,
+								"min_ms": 0.032041,
+								"p50_ms": 0.048584,
+								"p95_ms": 0.096958,
+								"p99_ms": 0.18070799999999998
+							}
+						},
+						"warmup_calls": 50
+					},
+					"word_count": {
+						"bytecode_bytes": 522,
+						"query": "two words",
+						"rows": 1,
+						"stages": {
+							"call": {
+								"count": 2000,
+								"max_ms": 0.238292,
+								"mean_ms": 0.022978143999999992,
+								"min_ms": 0.007708,
+								"p50_ms": 0.012667,
+								"p95_ms": 0.092125,
+								"p99_ms": 0.148459
+							},
+							"load": {
+								"count": 2000,
+								"max_ms": 0.243959,
+								"mean_ms": 0.013896984499999956,
+								"min_ms": 0.004875,
+								"p50_ms": 0.008208,
+								"p95_ms": 0.052375,
+								"p99_ms": 0.10625
+							},
+							"setup": {
+								"count": 2000,
+								"max_ms": 1.710458,
+								"mean_ms": 0.24066282150000046,
+								"min_ms": 0.112417,
+								"p50_ms": 0.165916,
+								"p95_ms": 0.548042,
+								"p99_ms": 0.7165
+							},
+							"teardown": {
+								"count": 2000,
+								"max_ms": 0.6620830000000001,
+								"mean_ms": 0.1190314625,
+								"min_ms": 0.052500000000000005,
+								"p50_ms": 0.072709,
+								"p95_ms": 0.307917,
+								"p99_ms": 0.468833
+							},
+							"total": {
+								"count": 2000,
+								"max_ms": 2.078167,
+								"mean_ms": 0.4106360239999994,
+								"min_ms": 0.183375,
+								"p50_ms": 0.323583,
+								"p95_ms": 0.8983749999999999,
+								"p99_ms": 1.190458
+							},
+							"validate": {
+								"count": 2000,
+								"max_ms": 0.139917,
+								"mean_ms": 0.002473917999999998,
+								"min_ms": 0.0006659999999999999,
+								"p50_ms": 0.001375,
+								"p95_ms": 0.003542,
+								"p99_ms": 0.034834
+							}
+						},
+						"warmup_calls": 50
+					}
+				},
+				"executable_bytes": 1371824,
+				"load_average_before": "{ 20.98 34.09 33.73 }",
+				"load_average_after": "{ 22.83 33.42 33.50 }"
+			},
+			{
+				"cold": {
+					"bytecode": {
+						"first_invocation": {
+							"count": 200,
+							"max_ms": 2.101583,
+							"mean_ms": 1.6242147900000012,
+							"min_ms": 1.422792,
+							"p50_ms": 1.599625,
+							"p95_ms": 1.936125,
+							"p99_ms": 2.008416
+						},
+						"first_result_in_process": {
+							"count": 200,
+							"max_ms": 2.414209,
+							"mean_ms": 1.7471454549999985,
+							"min_ms": 1.556291,
+							"p50_ms": 1.724541,
+							"p95_ms": 2.060959,
+							"p99_ms": 2.2365000000000004
+						},
+						"mode": "bytecode",
+						"process_spawn_to_exit": {
+							"count": 200,
+							"max_ms": 13.289499999999999,
+							"mean_ms": 6.3683992049999985,
+							"min_ms": 5.068958,
+							"p50_ms": 6.579292,
+							"p95_ms": 7.384375,
+							"p99_ms": 10.430458
+						}
+					},
+					"source": {
+						"first_invocation": {
+							"count": 200,
+							"max_ms": 3.5553749999999997,
+							"mean_ms": 2.7740264699999995,
+							"min_ms": 2.387167,
+							"p50_ms": 2.7395829999999997,
+							"p95_ms": 3.200375,
+							"p99_ms": 3.346458
+						},
+						"first_result_in_process": {
+							"count": 200,
+							"max_ms": 3.686958,
+							"mean_ms": 2.9036912499999996,
+							"min_ms": 2.5169580000000003,
+							"p50_ms": 2.87475,
+							"p95_ms": 3.358166,
+							"p99_ms": 3.516041
+						},
+						"mode": "source",
+						"process_spawn_to_exit": {
+							"count": 200,
+							"max_ms": 13.169958000000001,
+							"mean_ms": 7.602405205,
+							"min_ms": 6.300667000000001,
+							"p50_ms": 7.845375,
+							"p95_ms": 8.377291,
+							"p99_ms": 9.320500000000001
+						}
+					}
+				},
+				"containment": [
+					{
+						"case": "busy-loop",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 107.604375,
+						"result": {
+							"detail": "Error: interrupted\n    at search (main.js:1:1)\n",
+							"elapsed_ms": 100.066875,
+							"final_footprint_bytes": 1294672,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": true,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102728,
+							"memory_used_bytes_at_end": 97543,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 212992,
+							"rows": 0,
+							"teardown_ms": 0.0785
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "busy-module-body",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 106.979167,
+						"result": {
+							"detail": "Error: interrupted\n    at <anonymous> (main.js:1:1)\n",
+							"elapsed_ms": 100.085292,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": true,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102792,
+							"memory_used_bytes_at_end": 97633,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.078833
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "busy-async-job",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 106.294042,
+						"result": {
+							"detail": "pending after the 100 ms budget",
+							"elapsed_ms": 100.056083,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": true,
+							"jobs": 1,
+							"malloc_bytes_at_end": 102728,
+							"memory_used_bytes_at_end": 97543,
+							"outcome": "deadline",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.078375
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-object-spike",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 40.591834,
+						"result": {
+							"detail": "Exception generated by quickjs: Null\"null\"\n",
+							"elapsed_ms": 31.910124999999997,
+							"final_footprint_bytes": 1409384,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103336,
+							"memory_used_bytes_at_end": 98101,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 19316760,
+							"rows": 0,
+							"teardown_ms": 0.08125
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-string-repeat",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 5.403416,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:2:23)\n",
+							"elapsed_ms": 0.32908299999999996,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103024,
+							"memory_used_bytes_at_end": 97791,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.066375
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-string-doubling",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 5.406541,
+						"result": {
+							"detail": "Error: string too long\n    at search (main.js:3:19)\n",
+							"elapsed_ms": 0.308126,
+							"final_footprint_bytes": 1294672,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102936,
+							"memory_used_bytes_at_end": 97703,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 212992,
+							"rows": 0,
+							"teardown_ms": 0.07083300000000001
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-array-fill",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 16.63275,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:2:32)\n",
+							"elapsed_ms": 10.769376,
+							"final_footprint_bytes": 1327440,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102880,
+							"memory_used_bytes_at_end": 97702,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 11452416,
+							"rows": 0,
+							"teardown_ms": 0.093208
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "heap-typed-array",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 5.956958,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:2:30)\n",
+							"elapsed_ms": 0.339124,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 102864,
+							"memory_used_bytes_at_end": 97669,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 196608,
+							"rows": 0,
+							"teardown_ms": 0.067792
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "stack-recursion",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 7.942708999999999,
+						"result": {
+							"detail": "Error: Maximum call stack size exceeded\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)\n    at deeper (main.js:2:24)",
+							"elapsed_ms": 0.4181240000000001,
+							"final_footprint_bytes": 1278288,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103600,
+							"memory_used_bytes_at_end": 98032,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 720896,
+							"rows": 0,
+							"teardown_ms": 0.074459
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "stack-json-parse",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 10.560625,
+						"result": {
+							"detail": "Error: Maximum call stack size exceeded\n    at parse (native)\n    at search (main.js:2:24)\n",
+							"elapsed_ms": 4.391916,
+							"final_footprint_bytes": 1311056,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103512,
+							"memory_used_bytes_at_end": 98238,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 2179072,
+							"rows": 0,
+							"teardown_ms": 0.064667
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "stack-json-stringify",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 17.055459,
+						"result": {
+							"detail": "Error: Maximum call stack size exceeded\n    at stringify (native)\n    at search (main.js:4:24)\n",
+							"elapsed_ms": 11.752458,
+							"final_footprint_bytes": 1360232,
+							"idle_footprint_bytes": 1229136,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103512,
+							"memory_used_bytes_at_end": 98285,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 13533208,
+							"rows": 0,
+							"teardown_ms": 0.040292
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true,
+						"rerun": {
+							"date": "2026-11-23",
+							"fixture_change": "nesting depth lowered from 200,000 to 100,000 so the object builds within the heap limit and JSON.stringify runs",
+							"bench_executable_bytes": 1793664,
+							"load_average_before": "{ 8.18 17.44 21.15 }",
+							"load_average_after": "{ 8.18 17.44 21.15 }"
+						}
+					},
+					{
+						"case": "promise-chain-storm",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 18.095666,
+						"result": {
+							"detail": "more than 10000 promise jobs",
+							"elapsed_ms": 9.770834,
+							"final_footprint_bytes": 1311056,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 10000,
+							"malloc_bytes_at_end": 5063664,
+							"memory_used_bytes_at_end": 3218267,
+							"outcome": "job-limit",
+							"peak_over_idle_bytes": 6127616,
+							"rows": 0,
+							"teardown_ms": 2.106333
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "promise-fanout-storm",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 26.927957999999997,
+						"result": {
+							"detail": "more than 10000 promise jobs",
+							"elapsed_ms": 18.621001000000003,
+							"final_footprint_bytes": 1311056,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 10000,
+							"malloc_bytes_at_end": 5624744,
+							"memory_used_bytes_at_end": 3219049,
+							"outcome": "job-limit",
+							"peak_over_idle_bytes": 6701056,
+							"rows": 0,
+							"teardown_ms": 2.450291
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "regexp-backtracking",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 108.677333,
+						"result": {
+							"detail": "Error: interrupted\n    at exec (native)\n    at test (native)\n    at search (main.js:2:58)\n",
+							"elapsed_ms": 100.092834,
+							"final_footprint_bytes": 1311056,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": true,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103640,
+							"memory_used_bytes_at_end": 98262,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 229376,
+							"rows": 0,
+							"teardown_ms": 0.07150000000000001
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					},
+					{
+						"case": "native-string-search",
+						"heap_held": false,
+						"killed_after_ms": 1e4,
+						"pass": false,
+						"process_wall_ms": 10001.141416999999,
+						"result": null,
+						"stopped_within_budget": false,
+						"terminated_within_outer_limit": false
+					},
+					{
+						"case": "native-array-sort",
+						"heap_held": true,
+						"killed_after_ms": null,
+						"pass": true,
+						"process_wall_ms": 22.794708,
+						"result": {
+							"detail": "Error: out of memory\n    at search (main.js:3:9)\n",
+							"elapsed_ms": 18.537249,
+							"final_footprint_bytes": 1327440,
+							"idle_footprint_bytes": 1245520,
+							"interrupted": false,
+							"jobs": 0,
+							"malloc_bytes_at_end": 103504,
+							"memory_used_bytes_at_end": 98305,
+							"outcome": "thrown",
+							"peak_over_idle_bytes": 14401536,
+							"rows": 0,
+							"teardown_ms": 0.054292
+						},
+						"stopped_within_budget": true,
+						"terminated_within_outer_limit": true
+					}
+				],
+				"footprint": {
+					"after_first_drop_footprint_bytes": 1409360,
+					"checkpoints": [
+						{
+							"cycles": 1,
+							"footprint_bytes": 1409360
+						},
+						{
+							"cycles": 10,
+							"footprint_bytes": 1409360
+						},
+						{
+							"cycles": 100,
+							"footprint_bytes": 1409360
+						},
+						{
+							"cycles": 200,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 300,
+							"footprint_bytes": 1425744
+						},
+						{
+							"cycles": 400,
+							"footprint_bytes": 1458512
+						},
+						{
+							"cycles": 500,
+							"footprint_bytes": 1458512
+						},
+						{
+							"cycles": 600,
+							"footprint_bytes": 1458512
+						},
+						{
+							"cycles": 700,
+							"footprint_bytes": 1458512
+						},
+						{
+							"cycles": 800,
+							"footprint_bytes": 1458512
+						},
+						{
+							"cycles": 900,
+							"footprint_bytes": 1458512
+						},
+						{
+							"cycles": 1000,
+							"footprint_bytes": 1474896
+						}
+					],
+					"create_drop_cycles": 1000,
+					"final_footprint_bytes": 1474896,
+					"idle_footprint_bytes": 1327440,
+					"lifetime_peak_footprint_bytes": 2031952,
+					"live": {
+						"empty_context_footprint_bytes": 1524048,
+						"empty_context_malloc_bytes": 100744,
+						"loaded_context_footprint_bytes": 1966416,
+						"loaded_context_malloc_bytes": 426728,
+						"loaded_context_memory_used_bytes": 405751
+					},
+					"peak_over_idle_bytes": 704512
+				},
+				"gates": {
+					"cold_bytecode_p95": {
+						"limit_ms": 20.0,
+						"measured_ms": 2.060959,
+						"pass": true
+					},
+					"cold_source_p95": {
+						"limit_ms": 20.0,
+						"measured_ms": 3.358166,
+						"pass": true
+					},
+					"containment": {
+						"failed_cases": ["native-string-search"],
+						"pass": false
+					},
+					"warm_p95": {
+						"limit_ms": 5.0,
+						"measured_ms": 2.4965,
+						"pass": true
+					},
+					"warm_p99": {
+						"limit_ms": 10.0,
+						"measured_ms": 3.4382089999999996,
+						"pass": true
+					}
+				},
+				"label": "c-o3",
+				"limits": {
+					"deadline_tolerance_ms": 10,
+					"execution_budget_ms": 100,
+					"heap_bytes": 16777216,
+					"heap_slack_bytes": 8388608,
+					"job_limit": 10000,
+					"kill_after_ms": 10000,
+					"outer_limit_ms": 2000,
+					"stack_bytes": 524288,
+					"worker_stack_bytes": 2097152
+				},
+				"warm": {
+					"search_400": {
+						"bytecode_bytes": 57502,
+						"query": "pr",
+						"rows": 50,
+						"stages": {
+							"call": {
+								"count": 2000,
+								"max_ms": 5.835500000000001,
+								"mean_ms": 0.6517886779999986,
+								"min_ms": 0.482459,
+								"p50_ms": 0.6319589999999999,
+								"p95_ms": 0.842333,
+								"p99_ms": 1.057916
+							},
+							"load": {
+								"count": 2000,
+								"max_ms": 10.628084,
+								"mean_ms": 0.6937416624999984,
+								"min_ms": 0.44916599999999995,
+								"p50_ms": 0.656625,
+								"p95_ms": 0.9233340000000001,
+								"p99_ms": 1.345125
+							},
+							"setup": {
+								"count": 2000,
+								"max_ms": 3.309875,
+								"mean_ms": 0.17146479500000011,
+								"min_ms": 0.078375,
+								"p50_ms": 0.156709,
+								"p95_ms": 0.263583,
+								"p99_ms": 0.421667
+							},
+							"teardown": {
+								"count": 2000,
+								"max_ms": 2.383333,
+								"mean_ms": 0.25678978999999996,
+								"min_ms": 0.121625,
+								"p50_ms": 0.235792,
+								"p95_ms": 0.427792,
+								"p99_ms": 0.679708
+							},
+							"total": {
+								"count": 2000,
+								"max_ms": 12.187875,
+								"mean_ms": 1.8487302025000016,
+								"min_ms": 1.1915,
+								"p50_ms": 1.770584,
+								"p95_ms": 2.4965,
+								"p99_ms": 3.4382089999999996
+							},
+							"validate": {
+								"count": 2000,
+								"max_ms": 1.297334,
+								"mean_ms": 0.04937098599999998,
+								"min_ms": 0.021416,
+								"p50_ms": 0.043542,
+								"p95_ms": 0.09125,
+								"p99_ms": 0.149167
+							}
+						},
+						"warmup_calls": 50
+					},
+					"word_count": {
+						"bytecode_bytes": 522,
+						"query": "two words",
+						"rows": 1,
+						"stages": {
+							"call": {
+								"count": 2000,
+								"max_ms": 0.34870799999999996,
+								"mean_ms": 0.005931709999999961,
+								"min_ms": 0.0037500000000000003,
+								"p50_ms": 0.0043749999999999995,
+								"p95_ms": 0.010917000000000001,
+								"p99_ms": 0.024208
+							},
+							"load": {
+								"count": 2000,
+								"max_ms": 0.149333,
+								"mean_ms": 0.004675973999999979,
+								"min_ms": 0.003042,
+								"p50_ms": 0.003625,
+								"p95_ms": 0.008124999999999999,
+								"p99_ms": 0.014083
+							},
+							"setup": {
+								"count": 2000,
+								"max_ms": 1.874166,
+								"mean_ms": 0.08335896499999985,
+								"min_ms": 0.059959,
+								"p50_ms": 0.06933299999999999,
+								"p95_ms": 0.1415,
+								"p99_ms": 0.286167
+							},
+							"teardown": {
+								"count": 2000,
+								"max_ms": 1.5709579999999999,
+								"mean_ms": 0.04032252899999996,
+								"min_ms": 0.027458,
+								"p50_ms": 0.031833,
+								"p95_ms": 0.06883299999999999,
+								"p99_ms": 0.176542
+							},
+							"total": {
+								"count": 2000,
+								"max_ms": 1.97125,
+								"mean_ms": 0.13872623750000018,
+								"min_ms": 0.098291,
+								"p50_ms": 0.113208,
+								"p95_ms": 0.24820899999999999,
+								"p99_ms": 0.462917
+							},
+							"validate": {
+								"count": 2000,
+								"max_ms": 0.08287499999999999,
+								"mean_ms": 0.0006584229999999977,
+								"min_ms": 0.00033299999999999996,
+								"p50_ms": 0.000458,
+								"p95_ms": 0.0014169999999999999,
+								"p99_ms": 0.002291
+							}
+						},
+						"warmup_calls": 50
+					}
+				},
+				"executable_bytes": 1793232,
+				"load_average_before": "{ 22.22 32.94 33.33 }",
+				"load_average_after": "{ 23.35 32.49 33.16 }"
+			}
+		]
+	}
+}

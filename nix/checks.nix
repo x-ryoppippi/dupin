@@ -1,4 +1,9 @@
-{ lib, ... }:
+{
+  lib,
+  self,
+  inputs,
+  ...
+}:
 let
   root = ./..;
 in
@@ -24,33 +29,104 @@ in
             ''
               nu scripts/tests/e2e-assets.nu
               nu scripts/tests/e2e-comment.nu
+              nu scripts/tests/e2e-keys.nu
               nu scripts/tests/e2e-recording.nu
               nu scripts/tests/e2e-state.nu
               nu scripts/tests/e2e-file-fixtures.nu
+              nu scripts/tests/e2e-script-fixtures.nu
+              nu scripts/tests/latency.nu
+              nu scripts/tests/search-quality.nu
+              nu scripts/tests/size.nu
+              nu scripts/tests/update-rune.nu
             '';
-        hawk = pkgs.rustPlatform.buildRustPackage (
-          dupin.passthru.commonArgs
-          // {
-            pname = "dupin-hawk";
-            nativeBuildInputs = [
-              pkgs.nushell
-              config.packages.cargo-hawk
-            ];
-            postPatch = ''
-              cp ${../hawk.toml} hawk.toml
-            '';
-            buildPhase = ''
-              runHook preBuild
-              nu ${../scripts/hawk.nu}
-              runHook postBuild
-            '';
-            doCheck = false;
-            installPhase = "touch $out";
-          }
-        );
+        inherit (dupin) hawk;
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
         lint-and-test = dupin.lintAndTest;
+        dependency-cache-keys = import ./tests/dependency-cache-keys.nix {
+          inherit pkgs;
+          inherit (inputs) crane;
+          native = dupin.baseline;
+          inherit (config.packages) cargo-hawk rolldown;
+        };
+        home-manager-module = import ./tests/home-manager-module.nix {
+          inherit lib pkgs;
+          module = self.homeManagerModules.default;
+          inherit (dupin) bundledExtensions;
+        };
+        # The scope keys the Home Manager module checks denials against, read by Nix from each
+        # bundled package.json, against what Dupin itself reads from the packages it ships.
+        bundled-extension-scopes =
+          pkgs.runCommand "dupin-bundled-extension-scopes"
+            {
+              nativeBuildInputs = [ pkgs.jq ];
+              expected = builtins.toJSON dupin.bundledExtensions;
+              passAsFile = [ "expected" ];
+            }
+            ''
+              export HOME=$TMPDIR
+              for package in ${dupin}/Applications/Dupin.app/Contents/Resources/extensions/*/; do
+                ${lib.getExe' dupin "dupin"} ext revision "$package" --json \
+                  | jq -c '{(.package): .scopes}'
+              done | jq -s --sort-keys 'add | map_values(sort)' > actual.json
+              jq --sort-keys 'map_values(sort)' "$expectedPath" > expected.json
+              diff expected.json actual.json
+              touch $out
+            '';
+        treefmt-typos-report-only =
+          pkgs.runCommand "dupin-treefmt-typos-report-only"
+            { nativeBuildInputs = [ config.treefmt.build.wrapper ]; }
+            ''
+              export HOME=$TMPDIR
+              mkdir repo
+              cd repo
+              touch flake.nix
+              cp ${root + "/typos.toml"} typos.toml
+              text='teh behaviour' # spellchecker:disable-line
+              printf '%s\n' "$text" > notes.txt
+              if treefmt --no-cache notes.txt; then
+                echo "treefmt accepted a typo instead of reporting it" >&2
+                exit 1
+              fi
+              if [ "$(cat notes.txt)" != "$text" ]; then
+                echo "typos rewrote notes.txt: $(cat notes.txt)" >&2
+                exit 1
+              fi
+              touch $out
+            '';
+        renovate = repoCheck "dupin-renovate" [ ] "nu scripts/tests/renovate.nu";
+        docs-images = repoCheck "dupin-docs-images" [ ] ''
+          nu scripts/tests/docs-images.nu
+          nu scripts/docs-images.nu check
+        '';
+        # Every crate the app links under a licence on deny.toml's allow-list, and
+        # packaging/third-party.toml listing every other third-party file it ships. The notices
+        # themselves are built from both, so they can't fall behind either.
+        licences =
+          pkgs.runCommand "dupin-licences"
+            {
+              nativeBuildInputs = [
+                pkgs.rustPlatform.rust.cargo
+                pkgs.cargo-deny
+                pkgs.nushell
+                pkgs.ripgrep
+              ];
+            }
+            ''
+              export HOME=$TMPDIR CARGO_HOME=$TMPDIR/cargo
+              mkdir -p $CARGO_HOME
+              cp ${dupin.baseline.passthru.cargoVendorDir}/config.toml $CARGO_HOME/config.toml
+              cd ${root}
+              cargo-deny --manifest-path Cargo.toml --offline --locked check licenses
+              nu --no-config-file packaging/notices.nu check
+              touch $out
+            '';
+        third-party-notices = dupin.thirdPartyNotices;
+        # The bundled extensions and the notes example against sdk/dupin.d.ts, as their authors'
+        # editors see them.
+        extensions-typecheck = repoCheck "dupin-extensions-typecheck" [ pkgs.typescript ] ''
+          ^tsc --project extensions/tsconfig.json
+        '';
         gitleaks = repoCheck "dupin-gitleaks" [ pkgs.gitleaks ] ''
           ^gitleaks detect --source . --config .gitleaks.toml --no-git --redact
         '';

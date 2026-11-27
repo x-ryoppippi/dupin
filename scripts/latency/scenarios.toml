@@ -1,0 +1,257 @@
+# Keypress-to-results scenarios for scripts/latency.nu.
+#
+# A scenario's id names what a person types, not the code that answers it, so a bundled
+# extension that replaces a feature is measured under the same ids: add an implementation
+# beside `native` under `[features.<feature>]` and every scenario of that feature runs with
+# it too. A feature with more than one implementation is held to parity: `nu
+# scripts/latency.nu parity` fails when another implementation's p95 exceeds native's beyond
+# the tolerance.
+#
+# Each implementation names the config Dupin starts with, the provider that answers it (every
+# measured keypress must search it and the whole of `typed` must show its rows, so a scenario
+# that never reaches its feature fails rather than timing another one), the extension
+# `package` behind that provider when an extension answers it (`bundled:<name>` for one that
+# ships with Dupin; without it, Dupin itself must answer) and, optionally, an `extensions`
+# directory copied beside the config and `settings` merged over the config. An implementation
+# that `extends` another of its feature starts from that one, so the port of a built-in
+# declares only its extensions and the settings that hand the feature to them:
+#
+#   [features.notes.extension]
+#   extends = "native"
+#   settings = { extensions = true, notes = { enabled = false } }
+#   provider = "extension.notes"
+#   package = "notes"
+#   extensions = "scripts/latency/notes.extensions"
+#
+# A feature that only an extension has ever answered has nothing native to keep parity with, so
+# its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it. Once a
+# port's native implementation is deleted, its scenarios are held to the native baseline recorded
+# in scripts/latency/native-baseline.json, scaled by the native `search` scenarios: every run
+# measures them, and the baseline records what its own runs measured of them. An implementation
+# with none of these fails `parity`.
+#
+# `prefix` is typed in one go and not measured; each character of `typed` is one measured
+# keypress.
+
+[features.search.native]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "apps.search"
+
+# The bundled extension `calculator` answers calculations in the main search as the user types,
+# held to the native calculator it replaced (scripts/latency/native-baseline.json).
+[features.calculator.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "calculator.evaluate"
+package = "bundled:calculator"
+
+# Calendar search is the bundled extension `calendar`, held to the native search it replaced
+# until the native one was removed.
+[features.calendar.extension]
+config = "scripts/headless/calendar.toml"
+provider = "calendar.events"
+package = "bundled:calendar"
+
+# The bundled Dictionary extension answers Dictionary's own command, held to the native feature
+# it replaced as scripts/latency/native-baseline.json recorded it.
+[features.dictionary.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "dictionary.lookup"
+package = "bundled:dictionary"
+
+# Clipboard history is the bundled extension `clipboard-history`, held to the native history it
+# replaced (scripts/latency/native-baseline.json).
+[features.clipboard.extension]
+config = "scripts/headless/clipboard.toml"
+provider = "clipboard.history"
+package = "bundled:clipboard-history"
+
+# The bundled web-search package lists the searches; Dupin matches the alias and fills the URL,
+# held to the native web search it replaced (scripts/latency/native-baseline.json).
+[features.web.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "web.keywords"
+package = "bundled:web-search"
+
+# Snippets are the bundled extension `snippets`, held to the native search it replaced until the
+# native one was removed; scripts/latency/native-baseline.json keeps what CI measured of it.
+[features.snippets.extension]
+config = "scripts/headless/snippets.toml"
+provider = "snippets.search"
+package = "bundled:snippets"
+
+# A 5,000-row items() catalogue under its keyword. Loading it is the warm-up's work; a measured
+# keypress only matches the rows Dupin holds and calls into no extension.
+[features.catalogue.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension.catalogue"
+package = "catalogue"
+extensions = "scripts/latency/catalogue.extensions"
+budget_ms = 5.0
+
+# The main search with that catalogue in it, as its `defaultSearch` asks. It adds to apps rather
+# than replacing a built-in, so it has no native implementation to hold to parity. Both
+# catalogue features are held to the keystroke budget instead.
+[features.search-catalogue.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension-search.catalogue"
+package = "catalogue"
+extensions = "scripts/latency/catalogue.extensions"
+budget_ms = 5.0
+
+# The bundled Emoji & Symbols catalogue under its keyword, held to the keystroke budget, since
+# nothing native ever answered it.
+[features.emoji.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.emoji"
+package = "bundled:emoji"
+budget_ms = 5.0
+
+# The bundled Processes, Ports and Coding Agents catalogues under their keywords, which ship off.
+# Each `extensions` folder holds only `.headless-fixture.json`, the fixture whose `exec` replies
+# stand in for ps and lsof and whose consent turns the package on. Loading the catalogue is the
+# warm-up's work and its 2-second refresh runs in a helper of its own, so a measured keypress
+# only matches the rows Dupin holds. Nothing native ever answered them.
+[features.proc.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.proc"
+package = "bundled:proc"
+extensions = "scripts/latency/proc.extensions"
+budget_ms = 5.0
+
+[features.port.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.port"
+package = "bundled:port"
+extensions = "scripts/latency/port.extensions"
+budget_ms = 5.0
+
+[features.agent.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.agent"
+package = "bundled:agent"
+extensions = "scripts/latency/agent.extensions"
+budget_ms = 5.0
+
+# The bundled Repositories catalogue under its keyword, held to the keystroke budget, since
+# nothing native ever answered it. A latency run allows no ghq, Git or folders, so a copy in the
+# extensions folder, which replaces the bundled package by its name, hands Dupin 600 rows shaped
+# as the bundled one lists them; a measured keypress only matches the rows Dupin holds and runs
+# neither the package nor Git.
+[features.repo.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension.repo"
+package = "repo"
+extensions = "scripts/latency/repo.extensions"
+budget_ms = 5.0
+
+[[scenarios]]
+id = "search.saf"
+feature = "search"
+prefix = ""
+typed = "saf"
+
+[[scenarios]]
+id = "search.term"
+feature = "search"
+prefix = ""
+typed = "term"
+
+[[scenarios]]
+id = "calculator.arithmetic"
+feature = "calculator"
+prefix = ""
+typed = "12*3"
+
+[[scenarios]]
+id = "calculator.units"
+feature = "calculator"
+prefix = "5 km to "
+typed = "mi"
+
+[[scenarios]]
+id = "calendar.rev"
+feature = "calendar"
+prefix = "cal "
+typed = "rev"
+
+[[scenarios]]
+id = "dictionary.run"
+feature = "dictionary"
+prefix = "define "
+typed = "run"
+
+[[scenarios]]
+id = "clipboard.bak"
+feature = "clipboard"
+prefix = "clip "
+typed = "bak"
+
+[[scenarios]]
+id = "web.rust"
+feature = "web"
+prefix = "g "
+typed = "rust"
+
+[[scenarios]]
+id = "snippets.sig"
+feature = "snippets"
+prefix = "snip "
+typed = "sig"
+
+[[scenarios]]
+id = "catalogue.term"
+feature = "catalogue"
+prefix = "cat "
+typed = "term"
+
+[[scenarios]]
+id = "catalogue.rel"
+feature = "catalogue"
+prefix = "cat "
+typed = "rel"
+
+[[scenarios]]
+id = "search-catalogue.term"
+feature = "search-catalogue"
+prefix = ""
+typed = "term"
+
+[[scenarios]]
+id = "emoji.thumb"
+feature = "emoji"
+prefix = "emoji "
+typed = "thumb"
+
+# A Japanese keyword, as an input method commits it.
+[[scenarios]]
+id = "emoji.ja"
+feature = "emoji"
+prefix = "emoji "
+typed = "にっこり"
+
+[[scenarios]]
+id = "proc.node"
+feature = "proc"
+prefix = "proc "
+typed = "node"
+
+[[scenarios]]
+id = "port.5173"
+feature = "port"
+prefix = "port "
+typed = "5173"
+
+[[scenarios]]
+id = "agent.claude"
+feature = "agent"
+prefix = "agent "
+typed = "claude"
+
+[[scenarios]]
+id = "repo.ccu"
+feature = "repo"
+prefix = "repo "
+typed = "ccu"

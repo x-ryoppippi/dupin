@@ -3,8 +3,8 @@
 //! The release packaging writes the channel's feed URL into Info.plist (`DupinUpdateFeed`);
 //! a build without one (Nix, `cargo run`) never updates, since Nix owns its store paths. The
 //! feed is a small JSON file beside the release's zip. A newer build is unpacked beside the
-//! installed bundle, in `.Dupin-update-<build>`, and kept only when it satisfies the running
-//! bundle's own designated requirement (same bundle identifier, same Developer ID team) and
+//! installed bundle, in a `.Dupin-update-` folder of its own, and kept only when it satisfies
+//! the running bundle's own designated requirement (same bundle identifier, same Developer ID team) and
 //! Gatekeeper accepts it. The installed bundle stays untouched until Dupin restarts into the
 //! update or quits: then one `renamex_np(RENAME_SWAP)` exchanges the two, so the install path
 //! is never empty, and the replaced bundle waits in the staging folder for the next launch to
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use rune::AppHandle;
 use serde::Deserialize;
@@ -101,11 +101,7 @@ impl Installed {
         let build = dupin_mac::bundle::info_string("CFBundleVersion")
             .and_then(|v| v.parse().ok())
             .ok_or("CFBundleVersion is not a build number")?;
-        let requirement = designated_requirement(&bundle)?;
-        // An ad-hoc signature's requirement is its own hash, which no other build satisfies.
-        if !requirement.contains("anchor apple generic") {
-            return Err(format!("{} is not signed with a Developer ID", bundle.display()));
-        }
+        let requirement = developer_id_requirement(&bundle)?;
         Ok(Some(Installed {
             method: Method::of(&bundle, writable),
             bundle,
@@ -165,6 +161,22 @@ impl Status {
         }
     }
 
+    /// What "Update Dupin" tells the user this status means, `version` being the running build's.
+    pub fn outcome(&self, version: &str) -> String {
+        match self {
+            Status::Off => "Updates are off for this copy of Dupin.".into(),
+            Status::Idle => "Dupin hasn't checked for updates yet.".into(),
+            Status::Checking => "Dupin is already checking for updates.".into(),
+            Status::Downloading => "Dupin is downloading an update.".into(),
+            Status::Current => format!("Dupin {version} is up to date."),
+            Status::Failed(e) => format!("Couldn't update Dupin. {}", e.lines().next().unwrap_or_default()),
+            Status::Ready(new) => format!("Dupin {new} is ready. It installs when the launcher closes."),
+            Status::Download { url } => {
+                format!("Dupin can't replace itself here. Download the update from {url}")
+            }
+        }
+    }
+
     /// Whether "Check for Updates" can start a check now.
     pub fn can_check(&self) -> bool {
         matches!(
@@ -200,6 +212,9 @@ struct Inner {
     /// The bundles were swapped. A second swap would exchange them back, so nothing stages or
     /// swaps again in this process.
     applied: bool,
+    /// Checks that have ended, whatever they found. A caller that asked for one waits for this
+    /// to move rather than for a status it might never see.
+    finished: u64,
 }
 
 impl Updater {
@@ -228,6 +243,7 @@ impl Updater {
                     },
                     staged: None,
                     applied: false,
+                    finished: 0,
                 }),
                 wake: Mutex::new(false),
                 signal: Condvar::new(),
@@ -275,6 +291,24 @@ impl Updater {
         if enabled && !was {
             self.check_now();
         }
+    }
+
+    /// Ask for a check and wait for it to end; its outcome is then `status()`. `None` when none
+    /// was started, or it didn't end within `limit`.
+    pub fn check_and_wait(&self, limit: Duration) -> Option<Status> {
+        if !self.status().can_check() {
+            return None;
+        }
+        let before = self.shared.lock().finished;
+        self.check_now();
+        let deadline = std::time::Instant::now() + limit;
+        while std::time::Instant::now() < deadline {
+            if self.shared.lock().finished > before {
+                return Some(self.status());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        None
     }
 
     pub fn check_now(&self) {
@@ -332,6 +366,11 @@ impl Updater {
     }
 }
 
+/// Whether this build updates itself, so "Update Dupin" has something to do.
+pub fn offered() -> bool {
+    has_feed() && !off_by_env()
+}
+
 /// Whether this build has a channel to update from at all.
 pub fn has_feed() -> bool {
     dupin_mac::bundle::info_string("DupinUpdateFeed").is_some()
@@ -349,16 +388,16 @@ impl Shared {
 
     /// Wait `delay` or until "Check for Updates"; true when asked.
     fn wait(&self, delay: Duration) -> bool {
-        let deadline = Instant::now() + delay;
+        let deadline = SystemTime::now() + delay;
         let mut asked = self.wake.lock().unwrap_or_else(|e| e.into_inner());
         while !*asked {
-            let now = Instant::now();
-            if now >= deadline {
+            let wait = crate::wall_clock::wait_slice(deadline, SystemTime::now());
+            if wait.is_zero() {
                 break;
             }
             asked = self
                 .signal
-                .wait_timeout(asked, deadline - now)
+                .wait_timeout(asked, wait)
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
         }
@@ -394,6 +433,7 @@ fn run(shared: &Shared, installed: &Installed, panel: &AppHandle<Ui>) {
                     shared.set_status(Status::Failed(e));
                 }
             }
+            shared.lock().finished += 1;
         }
         asked = shared.wait(INTERVAL);
     }
@@ -444,9 +484,7 @@ fn stage(installed: &Installed, feed: &Feed) -> Result<Staged, String> {
         .bundle
         .parent()
         .ok_or("the app bundle has no parent folder")?;
-    let folder = parent.join(format!("{PREFIX}{}", feed.build));
-    let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir(&folder).map_err(|e| format!("couldn't create {}: {e}", folder.display()))?;
+    let folder = staging_folder(parent)?;
     match unpack_and_verify(installed, feed, &folder) {
         Ok(update) => Ok(Staged {
             update,
@@ -458,6 +496,16 @@ fn stage(installed: &Installed, feed: &Feed) -> Result<Staged, String> {
             Err(e)
         }
     }
+}
+
+/// A new folder under a name nobody can claim first: the parent may be a shared folder
+/// another user can create entries in.
+fn staging_folder(parent: &Path) -> Result<PathBuf, String> {
+    tempfile::Builder::new()
+        .prefix(PREFIX)
+        .tempdir_in(parent)
+        .map(tempfile::TempDir::keep)
+        .map_err(|e| format!("couldn't create a staging folder in {}: {e}", parent.display()))
 }
 
 fn unpack_and_verify(installed: &Installed, feed: &Feed, folder: &Path) -> Result<PathBuf, String> {
@@ -550,12 +598,7 @@ fn remove_beside(bundle: &Path) {
 
 /// curl that fails on HTTP errors and gives up on a stalled server.
 fn curl(max: Duration) -> Command {
-    let mut command = Command::new("/usr/bin/curl");
-    command
-        .args(["--fail", "--silent", "--show-error", "--location"])
-        .args(["--connect-timeout", "30", "--max-time"])
-        .arg(max.as_secs().to_string());
-    command
+    crate::http::curl(max, &["--location"])
 }
 
 fn info_value(bundle: &Path, key: &str) -> Result<String, String> {
@@ -565,6 +608,17 @@ fn info_value(bundle: &Path, key: &str) -> Result<String, String> {
             .arg(bundle.join("Contents/Info.plist")),
     )?;
     Ok(value.trim().to_owned())
+}
+
+/// `bundle`'s designated requirement, when it is signed with a Developer ID: what marks an
+/// official release, which alone updates itself and sends the telemetry ping.
+pub(crate) fn developer_id_requirement(bundle: &Path) -> Result<String, String> {
+    let requirement = designated_requirement(bundle)?;
+    // An ad-hoc signature's requirement is its own hash, which no other build satisfies.
+    if !requirement.contains("anchor apple generic") {
+        return Err(format!("{} is not signed with a Developer ID", bundle.display()));
+    }
+    Ok(requirement)
 }
 
 fn designated_requirement(bundle: &Path) -> Result<String, String> {
@@ -598,6 +652,25 @@ fn output(command: &mut Command) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_status_says_what_update_dupin_found() {
+        let said = |status: Status| status.outcome("1.0");
+        assert_eq!(said(Status::Current), "Dupin 1.0 is up to date.");
+        assert_eq!(
+            said(Status::Failed("offline\nmore".into())),
+            "Couldn't update Dupin. offline"
+        );
+        assert!(said(Status::Ready("1.1".into())).starts_with("Dupin 1.1 is ready"));
+        assert!(
+            said(Status::Download {
+                url: "https://example.com/d".into()
+            })
+            .ends_with("https://example.com/d")
+        );
+        assert!(said(Status::Downloading).contains("downloading"));
+        assert!(said(Status::Off).contains("off"));
+    }
 
     #[test]
     fn reads_the_feed() {
@@ -711,6 +784,7 @@ mod tests {
                     status: Status::Ready(staged.version.clone()),
                     staged: Some(staged),
                     applied: false,
+                    finished: 0,
                 }),
                 wake: Mutex::new(false),
                 signal: Condvar::new(),
@@ -775,6 +849,25 @@ mod tests {
         remove_beside(&installed);
         assert!(!folder.exists());
         assert_eq!(marker(&installed), "new");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn staging_ignores_folders_planted_under_predictable_names() {
+        let root = temporary("planted");
+        for build in 0..64 {
+            std::fs::create_dir(root.join(format!("{PREFIX}{build}"))).unwrap();
+        }
+
+        let first = staging_folder(&root).unwrap();
+        let second = staging_folder(&root).unwrap();
+        assert_ne!(first, second);
+        for folder in [&first, &second] {
+            assert_eq!(folder.parent(), Some(root.as_path()));
+            let name = folder.file_name().unwrap().to_str().unwrap();
+            assert!(name.starts_with(PREFIX), "{name}");
+            assert!(std::fs::read_dir(folder).unwrap().next().is_none());
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -1,0 +1,6 @@
+{
+	"fixture": 1,
+	"description": "web_searches = {} in config.toml turns every web search off.",
+	"preferences": { "webSearches": {} },
+	"steps": [{ "query": "rust", "expect": { "rows": [] } }]
+}

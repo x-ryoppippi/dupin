@@ -7,21 +7,25 @@ install:
     pnpm install --frozen-lockfile
 
 # Start the dev server
-dev:
+dev: install
     pnpm run dev
 
-# Build the Worker and its static assets
-build:
+# Build the static site
+build: install
     pnpm run build
 
 # Serve the built site locally
-preview:
+preview: install
     pnpm run preview
 
 # Lint with oxlint, type-aware and type-checked through tsrs
-lint:
+lint: install
     pnpm run lint
 
-# Build and deploy the Worker and its static assets
-deploy:
+# Build and deploy the static site
+deploy: install
     pnpm run deploy
+
+# Regenerate the Japanese display-font subset from the characters in docs/
+font:
+    nu scripts/subset-ja-font.nu

@@ -30,10 +30,84 @@ pub enum Command {
         values: Vec<Value>,
     },
     ConfigGet {},
+    SnapshotsList {},
+    SnapshotsOpen {
+        id: Option<String>,
+    },
+    /// The saved content of one snapshot, as the Snapshots window shows it.
+    SnapshotsRead {
+        id: String,
+    },
+    SnapshotsClose {},
     ConfigSet {
         base: Box<dupin_core::Config>,
         desired: Box<dupin_core::Config>,
     },
+    /// Deletes the stored data of a package `dupin ext remove` removed, which the running
+    /// launcher may hold open.
+    ExtensionDataDelete {
+        package: String,
+    },
+    /// Turns sync on or off, joins a vault, or reports its status.
+    Sync {
+        action: SyncAction,
+    },
+    /// What Settings saved over a read-only config.toml, as TOML, which the running launcher
+    /// holds open.
+    ConfigOverlay {},
+    /// The installed extensions list, which the running launcher holds open.
+    ExtensionLockGet {},
+    /// Replaces the installed extensions list the running launcher holds open.
+    ExtensionLockSet {
+        lock: Box<dupin_extension_install::Lock>,
+    },
+    /// Forgets the grants of a package `dupin ext` removed or installed afresh, which the
+    /// running launcher holds open.
+    ExtensionGrantsForget {
+        package: String,
+    },
+    /// The scopes the running launcher grants each package, for `dupin ext list`.
+    ExtensionGrantsList {
+        packages: Vec<String>,
+    },
+    /// Whether the running launcher sends the usage ping, and if not, why.
+    TelemetryStatus {},
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SyncAction {
+    Status {},
+    /// Runs a full pass now.
+    Now {},
+    /// Creates a vault in the folder. Without a passphrase one is generated and returned once.
+    On {
+        folder: Option<String>,
+        passphrase: Option<String>,
+    },
+    Join {
+        folder: Option<String>,
+        passphrase: Option<String>,
+    },
+    Off {},
+    RemoveDevice {
+        device: String,
+    },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotSummary {
+    pub id: String,
+    pub saved_at: u64,
+    pub mode: String,
+    pub title: String,
+    pub query: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotList {
+    pub entries: Vec<SnapshotSummary>,
+    pub truncated: bool,
+    pub problem: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +122,25 @@ pub struct Call {
 }
 impl Call {
     pub fn finish(self, result: Result<Value, String>) {
+        let kind = match &self.request.command {
+            Command::Open { .. } => "open",
+            Command::Pick { .. } => "pick",
+            Command::ConfigGet {} => "config get",
+            Command::ConfigSet { .. } => "config set",
+            Command::SnapshotsList {} => "snapshots list",
+            Command::SnapshotsOpen { .. } => "snapshots open",
+            Command::SnapshotsRead { .. } => "snapshots read",
+            Command::SnapshotsClose {} => "snapshots close",
+            Command::ExtensionDataDelete { .. } => "extension data delete",
+            Command::Sync { .. } => "sync",
+            Command::ConfigOverlay {} => "config overlay",
+            Command::ExtensionLockGet {} => "extension lock get",
+            Command::ExtensionLockSet { .. } => "extension lock set",
+            Command::ExtensionGrantsForget { .. } => "extension grants forget",
+            Command::ExtensionGrantsList { .. } => "extension grants list",
+            Command::TelemetryStatus {} => "telemetry status",
+        };
+        crate::trace::control(kind, result.is_ok());
         let _ = self.reply.try_send(Reply {
             id: self.request.id,
             result,
@@ -87,12 +180,48 @@ pub fn write_frame(output: &mut impl Write, value: &impl Serialize) -> io::Resul
 }
 pub fn validate(request: &Request) -> io::Result<()> {
     match &request.command {
+        Command::SnapshotsOpen { id: Some(id) } | Command::SnapshotsRead { id }
+            if id.is_empty() || id.len() > 128 =>
+        {
+            Err(io::Error::other("invalid snapshot id"))
+        }
         Command::Open { query: Some(query) } if query.len() > 4096 => {
             Err(io::Error::other("query too large"))
         }
         Command::Pick { values } if values.is_empty() || values.len() > 1000 => {
             Err(io::Error::other("pick requires 1..1000 values"))
         }
+        Command::ExtensionDataDelete { package } | Command::ExtensionGrantsForget { package }
+            if dupin_broker::PackageId::new(package.as_str()).is_err() =>
+        {
+            Err(io::Error::other("invalid package ID"))
+        }
+        Command::ExtensionGrantsList { packages }
+            if packages.len() > dupin_extension_install::MAX_PACKAGES
+                || packages
+                    .iter()
+                    .any(|package| dupin_broker::PackageId::new(package.as_str()).is_err()) =>
+        {
+            Err(io::Error::other(format!(
+                "grants list requires at most {} valid package IDs",
+                dupin_extension_install::MAX_PACKAGES
+            )))
+        }
+        Command::ExtensionLockSet { lock } => lock
+            .validate()
+            .map_err(|error| io::Error::other(error.to_string())),
+        Command::Sync {
+            action: SyncAction::On { folder, passphrase } | SyncAction::Join { folder, passphrase },
+        } if folder
+            .as_ref()
+            .is_some_and(|folder| folder.is_empty() || folder.len() > 4096)
+            || passphrase.as_ref().is_some_and(|text| text.len() > 1024) =>
+        {
+            Err(io::Error::other("invalid sync folder or passphrase"))
+        }
+        Command::Sync {
+            action: SyncAction::RemoveDevice { device },
+        } if device.len() != 32 => Err(io::Error::other("invalid device ID")),
         _ => Ok(()),
     }
 }
@@ -153,7 +282,7 @@ pub fn socket_path(create: bool) -> io::Result<PathBuf> {
     owned(&dir, true)?;
     Ok(dir.join("control.sock"))
 }
-pub fn connect() -> io::Result<UnixStream> {
+fn connect() -> io::Result<UnixStream> {
     let path = socket_path(false)?;
     owned(&path, false)?;
     let stream = UnixStream::connect(path)?;
@@ -161,11 +290,50 @@ pub fn connect() -> io::Result<UnixStream> {
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     Ok(stream)
 }
+/// A command sent to the running launcher whose reply has not been read yet.
+pub struct Pending {
+    stream: UnixStream,
+    id: u64,
+}
+pub fn send(command: Command) -> Result<Pending, String> {
+    let request = Request { id: 1, command };
+    validate(&request).map_err(|e| e.to_string())?;
+    let mut stream = connect().map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => "Dupin is not running".to_owned(),
+        _ => e.to_string(),
+    })?;
+    write_frame(&mut stream, &request).map_err(|e| e.to_string())?;
+    Ok(Pending {
+        stream,
+        id: request.id,
+    })
+}
+impl Pending {
+    /// Closing the connection is how the host learns a caller gave up: it cancels the command,
+    /// so a picker left on screen goes away with its caller.
+    pub fn abort_handle(&self) -> Result<impl FnOnce() + Send + 'static, String> {
+        let stream = self.stream.try_clone().map_err(|e| e.to_string())?;
+        Ok(move || {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        })
+    }
+    pub fn wait(mut self) -> Result<Value, String> {
+        let reply: Reply = read_frame(&mut self.stream).map_err(|e| e.to_string())?;
+        if reply.id != self.id {
+            return Err("control correlation mismatch".into());
+        }
+        reply.result
+    }
+}
+pub fn exchange(command: Command) -> Result<Value, String> {
+    send(command)?.wait()
+}
 pub struct Server {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     path: PathBuf,
     inode: u64,
+    _directory_lock: std::fs::File,
 }
 impl Server {
     pub fn start(dispatch: impl Fn(Call) + Send + Sync + 'static) -> io::Result<Self> {
@@ -178,10 +346,19 @@ impl Server {
             .ok_or_else(|| io::Error::other("missing control directory"))?;
         owned(parent, true)?;
         let directory = std::fs::File::open(parent)?;
-        // Serialize recovery and bind so another starter cannot unlink a fresh listener.
+        // A full accept queue can also return ECONNREFUSED. Hold the lock until
+        // shutdown and unlink finish so another starter cannot mistake us for a stale socket.
         // SAFETY: directory owns a valid descriptor for the duration of the lock.
-        if unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(io::Error::last_os_error());
+        if unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            let error = io::Error::last_os_error();
+            return Err(if error.kind() == io::ErrorKind::WouldBlock {
+                io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    "control server already owns the directory",
+                )
+            } else {
+                error
+            });
         }
         let listener = match UnixListener::bind(&path) {
             Ok(listener) => listener,
@@ -200,7 +377,6 @@ impl Server {
         };
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         let inode = std::fs::symlink_metadata(&path)?.ino();
-        drop(directory);
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
         let thread = std::thread::spawn(move || {
@@ -243,6 +419,7 @@ impl Server {
             thread: Some(thread),
             path,
             inode,
+            _directory_lock: directory,
         })
     }
 }
@@ -314,7 +491,107 @@ fn serve(stream: &mut UnixStream, dispatch: impl Fn(Call)) -> io::Result<()> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn snapshot_messages_are_bounded_and_strict() {
+        use super::*;
+        for command in [
+            Command::SnapshotsList {},
+            Command::SnapshotsOpen {
+                id: Some("日本語".into()),
+            },
+            Command::SnapshotsRead {
+                id: "日本語".into()
+            },
+            Command::SnapshotsClose {},
+        ] {
+            let request = Request { id: 42, command };
+            let mut bytes = Vec::new();
+            write_frame(&mut bytes, &request).unwrap();
+            let decoded: Request = read_frame(&mut bytes.as_slice()).unwrap();
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap(),
+                serde_json::to_value(request).unwrap()
+            );
+        }
+        assert!(
+            serde_json::from_value::<Command>(
+                serde_json::json!({"kind":"snapshots_open", "id":null, "save":true})
+            )
+            .is_err()
+        );
+        for id in [String::new(), "x".repeat(129)] {
+            assert!(
+                validate(&Request {
+                    id: 1,
+                    command: Command::SnapshotsOpen { id: Some(id.clone()) }
+                })
+                .is_err()
+            );
+            assert!(
+                validate(&Request {
+                    id: 1,
+                    command: Command::SnapshotsRead { id }
+                })
+                .is_err()
+            );
+        }
+    }
     use super::*;
+    #[test]
+    fn extension_messages_name_valid_packages_and_stay_bounded() {
+        let check = |command| validate(&Request { id: 1, command });
+        assert!(
+            check(Command::ExtensionGrantsForget {
+                package: "notes".into()
+            })
+            .is_ok()
+        );
+        assert!(
+            check(Command::ExtensionGrantsForget {
+                package: String::new()
+            })
+            .is_err()
+        );
+        assert!(
+            check(Command::ExtensionGrantsList {
+                packages: vec!["notes".into(), "bundled:clipboard".into()]
+            })
+            .is_ok()
+        );
+        assert!(
+            check(Command::ExtensionGrantsList {
+                packages: vec!["x".into(); dupin_extension_install::MAX_PACKAGES + 1]
+            })
+            .is_err()
+        );
+        assert!(
+            check(Command::ExtensionGrantsList {
+                packages: vec!["a\nb".into()]
+            })
+            .is_err()
+        );
+        let mut lock = dupin_extension_install::Lock::new();
+        assert!(
+            check(Command::ExtensionLockSet {
+                lock: Box::new(lock.clone())
+            })
+            .is_ok()
+        );
+        let entry = serde_json::from_value(serde_json::json!({
+            "source": "/x", "content_hash": "blake3:00", "installed_at": "2026-01-01T00:00:00Z",
+            "version": "1", "keyword": "x"
+        }))
+        .unwrap();
+        lock.packages.insert("../escape".into(), entry);
+        assert!(check(Command::ExtensionLockSet { lock: Box::new(lock) }).is_err());
+        let newer = serde_json::from_value(serde_json::json!({ "version": 2 })).unwrap();
+        assert!(
+            check(Command::ExtensionLockSet {
+                lock: Box::new(newer)
+            })
+            .is_err()
+        );
+    }
     fn subprocess(mode: &str, dir: &std::path::Path, tmp: &str) {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "control::tests::disposable_process", "--nocapture"])
@@ -415,9 +692,10 @@ mod tests {
     fn simultaneous_stale_restarts_leave_one_live_listener() {
         let dir = std::env::temp_dir().join(format!("dupin-control-race-{}", std::process::id()));
         std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        // Left by a server that exited, as a stale socket is: one this process bound would stay
+        // listening in any child another test forks until that child execs.
+        subprocess("exit", &dir, "/unused-race");
         let path = dir.join("control.sock");
-        drop(UnixListener::bind(&path).unwrap());
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let barrier = Arc::new(std::sync::Barrier::new(4));
         let workers: Vec<_> = (0..4)
             .map(|_| {
@@ -428,12 +706,23 @@ mod tests {
                 })
             })
             .collect();
-        let servers: Vec<_> = workers
-            .into_iter()
-            .filter_map(|worker| worker.join().unwrap().ok())
-            .collect();
+        let mut servers = Vec::new();
+        for worker in workers {
+            match worker.join().unwrap() {
+                Ok(server) => servers.push(server),
+                Err(error) => assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}"),
+            }
+        }
         assert_eq!(servers.len(), 1);
+        let directory = std::fs::File::open(&dir).unwrap();
+        use std::os::fd::AsRawFd;
+        // SAFETY: directory owns a valid descriptor.
+        let lock = unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        assert_eq!(lock, -1, "the running server must keep the directory locked");
+        assert_eq!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock);
+
         let mut client = UnixStream::connect(&path).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         write_frame(
             &mut client,
             &Request {
@@ -442,7 +731,9 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(read_frame::<Reply>(&mut client).unwrap().id, 17);
+        let reply: Reply = read_frame(&mut client).unwrap();
+        assert_eq!(reply.id, 17);
+        assert_eq!(reply.result.unwrap(), Value::Null);
         drop(client);
         drop(servers);
         std::fs::remove_dir(dir).unwrap();

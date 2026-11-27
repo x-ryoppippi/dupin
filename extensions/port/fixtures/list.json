@@ -1,0 +1,428 @@
+{
+	"fixture": 1,
+	"description": "Every port the user's processes listen on, over TCP or UDP, with the process and its addresses; typing a port number, a program or a PID finds it, and connected or unbound sockets are left out.",
+	"environment": {
+		"now": "2026-11-26T12:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"exec": [
+			{
+				"profile": "sockets",
+				"args": ["-nP", "+c", "0", "-iTCP", "-sTCP:LISTEN", "-iUDP", "-F", "cnPpu"],
+				"status": 0,
+				"stdout": "p4242\ncnode\nu501\nf23\nPTCP\nn127.0.0.1:5173\nf24\nPTCP\nn[::1]:5173\np321\ncSafari\nu501\nf40\nPUDP\nn*:*\nf41\nPUDP\nn[2a01::1]:62063->[2a01::2]:443\np1127\ncrapportd\nu501\nf13\nPTCP\nn*:49205\nf19\nPUDP\nn*:3722\np600\ncpostgres\nu501\nf7\nPTCP\nn127.0.0.1:5432\nf8\nPTCP\nn127.0.0.1:5432\n",
+				"stderr": ""
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "UDP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"copy": "localhost:3722",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "3722",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 1127
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "rapportd",
+										"pid": 1127
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "UDP-3722-1127",
+						"keywords": ["rapportd", "1127"],
+						"subtitle": "rapportd · 1127 · *",
+						"title": "3722"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "TCP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "http://localhost:5173"
+							},
+							{
+								"copy": "localhost:5173",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "5173",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 4242
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "node",
+										"pid": 4242
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "TCP-5173-4242",
+						"keywords": ["node", "4242"],
+						"subtitle": "node · 4242 · 127.0.0.1, [::1]",
+						"title": "5173"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "TCP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "http://localhost:5432"
+							},
+							{
+								"copy": "localhost:5432",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "5432",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 600
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "postgres",
+										"pid": 600
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "TCP-5432-600",
+						"keywords": ["postgres", "600"],
+						"subtitle": "postgres · 600 · 127.0.0.1",
+						"title": "5432"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "TCP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "http://localhost:49205"
+							},
+							{
+								"copy": "localhost:49205",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "49205",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 1127
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "rapportd",
+										"pid": 1127
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "TCP-49205-1127",
+						"keywords": ["rapportd", "1127"],
+						"subtitle": "rapportd · 1127 · *",
+						"title": "49205"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "5173",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "TCP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "http://localhost:5173"
+							},
+							{
+								"copy": "localhost:5173",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "5173",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 4242
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "node",
+										"pid": 4242
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "TCP-5173-4242",
+						"keywords": ["node", "4242"],
+						"subtitle": "node · 4242 · 127.0.0.1, [::1]",
+						"title": "5173"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "postgres",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "TCP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "http://localhost:5432"
+							},
+							{
+								"copy": "localhost:5432",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "5432",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 600
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "postgres",
+										"pid": 600
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "TCP-5432-600",
+						"keywords": ["postgres", "600"],
+						"subtitle": "postgres · 600 · 127.0.0.1",
+						"title": "5432"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "1127",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "UDP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"copy": "localhost:3722",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "3722",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 1127
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "rapportd",
+										"pid": 1127
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "UDP-3722-1127",
+						"keywords": ["rapportd", "1127"],
+						"subtitle": "rapportd · 1127 · *",
+						"title": "3722"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "TCP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "http://localhost:49205"
+							},
+							{
+								"copy": "localhost:49205",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "49205",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 1127
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "rapportd",
+										"pid": 1127
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "TCP-49205-1127",
+						"keywords": ["rapportd", "1127"],
+						"subtitle": "rapportd · 1127 · *",
+						"title": "49205"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

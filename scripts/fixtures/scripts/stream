@@ -1,0 +1,17 @@
+#!/usr/bin/perl
+# @dupin.title E2E script stream
+# @dupin.output full
+use strict;
+use warnings;
+use JSON::PP qw(encode_json);
+$| = 1;
+my $child = fork();
+die $! unless defined $child;
+if ($child == 0) { sleep 60; exit 0; }
+open my $out, '>', "$ENV{DUPIN_E2E_SCRIPT_OUT}/processes.json" or die $!;
+print {$out} encode_json({parent => $$, child => $child});
+close $out or die $!;
+for (1..20) {
+    print "Stream line $_\n";
+    select undef, undef, undef, 0.5;
+}

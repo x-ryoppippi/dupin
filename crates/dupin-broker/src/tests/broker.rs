@@ -1,0 +1,1681 @@
+use std::path::PathBuf;
+
+use super::*;
+
+const R1: &str = "sha256:1111";
+const R2: &str = "sha256:2222";
+
+fn installed(capabilities: Capabilities) -> (Broker, PackageId) {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("bookmarks");
+    let _ = broker.install(package.clone(), rev(R1), capabilities);
+    (broker, package)
+}
+
+fn enabled(capabilities: Capabilities) -> (Broker, PackageId) {
+    let (mut broker, package) = installed(capabilities);
+    broker.set_enabled(&package, true).unwrap();
+    (broker, package)
+}
+
+fn get(url: &str) -> Request {
+    Request::Http {
+        url: url.into(),
+        method: Method::Get,
+    }
+}
+
+fn post(url: &str) -> Request {
+    Request::Http {
+        url: url.into(),
+        method: Method::Post,
+    }
+}
+
+const API: &str = "https://api.github.com/repos/x-ryoppippi/dupin";
+
+fn check(broker: &Broker, package: &PackageId, request: &Request, trigger: Trigger) -> Decision {
+    broker.check(package, &rev(R1), request, trigger)
+}
+
+#[track_caller]
+fn permit(decision: Decision) -> Permit {
+    match decision {
+        Decision::Allow(permit) => permit,
+        other => panic!("expected a permit, got {other:?}"),
+    }
+}
+
+#[track_caller]
+fn denial(decision: Decision) -> Denial {
+    match decision {
+        Decision::Deny(denial) => denial,
+        other => panic!("expected a denial, got {other:?}"),
+    }
+}
+
+#[track_caller]
+fn consent_needed(decision: Decision) -> ConsentNeeded {
+    match decision {
+        Decision::NeedsConsent(needed) => needed,
+        other => panic!("expected a consent request, got {other:?}"),
+    }
+}
+
+fn github() -> Capabilities {
+    caps(json!({ "http": [{ "origin": "https://api.github.com", "methods": ["GET", "POST"] }] }))
+}
+
+#[test]
+fn a_new_installation_starts_off_and_ungranted() {
+    let (mut broker, package) = installed(github());
+    assert!(!broker.is_enabled(&package));
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Activation)),
+        Denial::Disabled
+    );
+    broker.set_enabled(&package, true).unwrap();
+    assert_eq!(
+        consent_needed(check(&broker, &package, &get(API), Trigger::Query)),
+        ConsentNeeded {
+            revision: rev(R1),
+            scope: http("https://api.github.com", &[Method::Get, Method::Post]),
+            reason: ConsentReason::NotGranted,
+            may_prompt: false,
+        }
+    );
+    assert!(consent_needed(check(&broker, &package, &get(API), Trigger::Activation)).may_prompt);
+    assert!(!consent_needed(check(&broker, &package, &get(API), Trigger::Background)).may_prompt);
+    assert_eq!(
+        broker.consents(&package),
+        [(
+            http("https://api.github.com", &[Method::Get, Method::Post]),
+            ConsentState::Undecided
+        )]
+    );
+}
+
+#[test]
+fn a_granted_scope_allows_only_what_it_declares() {
+    let (mut broker, package) = enabled(github());
+    broker
+        .approve(&package, &key("http:https://api.github.com"), None)
+        .unwrap();
+    let granted = permit(check(&broker, &package, &get(API), Trigger::Query));
+    assert!(broker.validate(&granted));
+    assert_eq!(granted.package(), &package);
+    assert!(matches!(granted.scope(), Scope::Http { .. }));
+    let upper = get("HTTPS://API.GITHUB.COM:443/x");
+    assert!(matches!(
+        check(&broker, &package, &upper, Trigger::Query),
+        Decision::Allow(_)
+    ));
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &get("https://github.com/"),
+            Trigger::Query
+        )),
+        Denial::Undeclared(key("http:https://github.com"))
+    );
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &get("https://api.github.com:8443/"),
+            Trigger::Query
+        )),
+        Denial::Undeclared(key("http:https://api.github.com:8443"))
+    );
+    assert!(matches!(
+        denial(check(
+            &broker,
+            &package,
+            &get("http://api.github.com/"),
+            Trigger::Query
+        )),
+        Denial::Invalid(_)
+    ));
+    let delete = Request::Http {
+        url: API.into(),
+        method: Method::Delete,
+    };
+    assert!(matches!(
+        denial(check(&broker, &package, &delete, Trigger::Activation)),
+        Denial::OutOfScope { .. }
+    ));
+}
+
+#[test]
+fn mutations_and_programs_need_a_user_activation() {
+    let (mut broker, package) = enabled(everything());
+    for scope in [
+        "http:https://api.github.com",
+        "clipboard:read",
+        "clipboard:write",
+        "clipboard:watch",
+        "script:open-in-zed",
+    ] {
+        broker.approve(&package, &key(scope), None).unwrap();
+    }
+    broker
+        .approve(
+            &package,
+            &key("exec:git-status"),
+            Some(PathBuf::from("/usr/bin/git")),
+        )
+        .unwrap();
+    broker.set_os_access(OsPermission::Pasteboard, OsAccess::Allowed);
+    for request in [
+        post(API),
+        Request::Exec {
+            profile: name("git-status"),
+        },
+        Request::Script {
+            name: name("open-in-zed"),
+            output: false,
+        },
+        Request::Clipboard(ClipboardAccess::Write),
+        Request::Clipboard(ClipboardAccess::Read),
+    ] {
+        for trigger in [Trigger::Query, Trigger::Background] {
+            assert_eq!(
+                denial(check(&broker, &package, &request, trigger)),
+                Denial::NeedsActivation,
+                "{request:?}"
+            );
+        }
+        assert!(
+            matches!(
+                check(&broker, &package, &request, Trigger::Activation),
+                Decision::Allow(_)
+            ),
+            "{request:?}"
+        );
+    }
+    let watch = Request::Clipboard(ClipboardAccess::Watch);
+    assert!(matches!(
+        check(&broker, &package, &watch, Trigger::Background),
+        Decision::Allow(_)
+    ));
+    assert!(matches!(
+        check(&broker, &package, &get(API), Trigger::Background),
+        Decision::Allow(_)
+    ));
+    let output = Request::Script {
+        name: name("open-in-zed"),
+        output: true,
+    };
+    assert!(matches!(
+        denial(check(&broker, &package, &output, Trigger::Activation)),
+        Denial::OutOfScope { .. }
+    ));
+}
+
+#[test]
+fn files_scopes_are_bound_to_the_picked_root_and_stay_inside_it() {
+    let (mut broker, package) = enabled(caps(json!({
+        "files": { "notes": { "kind": "directory", "access": ["read"] } }
+    })));
+    let scope = key("files:notes");
+    assert_eq!(
+        broker.approve(&package, &scope, None),
+        Err(BrokerError::BindingRequired(scope.clone()))
+    );
+    assert_eq!(
+        broker.approve(&package, &scope, Some("Notes".into())),
+        Err(BrokerError::RelativeBinding(scope.clone()))
+    );
+    broker
+        .approve(&package, &scope, Some("/Users/me/Notes".into()))
+        .unwrap();
+    let read = |path: &str, access| Request::Files {
+        scope: name("notes"),
+        access,
+        path: path.into(),
+    };
+    let granted = permit(check(
+        &broker,
+        &package,
+        &read("a/b.md", FilesAccess::Read),
+        Trigger::Query,
+    ));
+    assert_eq!(granted.binding(), Some(std::path::Path::new("/Users/me/Notes")));
+    assert!(matches!(
+        check(&broker, &package, &read("", FilesAccess::Read), Trigger::Query),
+        Decision::Allow(_)
+    ));
+    for escape in ["../secret", "/etc/passwd", "a/../../b"] {
+        assert!(
+            matches!(
+                denial(check(
+                    &broker,
+                    &package,
+                    &read(escape, FilesAccess::Read),
+                    Trigger::Query
+                )),
+                Denial::Invalid(_)
+            ),
+            "{escape}"
+        );
+    }
+    assert!(matches!(
+        denial(check(
+            &broker,
+            &package,
+            &read("", FilesAccess::List),
+            Trigger::Query
+        )),
+        Denial::OutOfScope { .. }
+    ));
+    assert_eq!(
+        broker.approve(&package, &scope, Some("/Users/me/Other".into())),
+        Ok(())
+    );
+    assert!(
+        !broker.validate(&granted),
+        "rebinding drops work bound to the old root"
+    );
+    let other = Scope::Files {
+        name: name("other"),
+        kind: FilesKind::Directory,
+        access: [FilesAccess::Read].into(),
+        path: None,
+    };
+    assert_eq!(
+        broker.consent(&package, &rev(R1), &other, Some("/x".into())),
+        Err(BrokerError::Undeclared(key("files:other")))
+    );
+    assert_eq!(
+        broker.consent(
+            &package,
+            &rev(R1),
+            &http("https://a.example", &[Method::Get]),
+            None
+        ),
+        Err(BrokerError::Undeclared(key("http:https://a.example")))
+    );
+}
+
+#[test]
+fn storage_needs_its_grant_and_no_activation() {
+    let (mut broker, package) = enabled(caps(json!({ "storage": { "quotaBytes": 100 } })));
+    let storage = |op| Request::Storage { op };
+    assert!(matches!(
+        check(&broker, &package, &storage(StorageOp::Write), Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
+    assert_eq!(
+        broker.approve(&package, &ScopeKey::Storage, Some("/x".into())),
+        Err(BrokerError::UnexpectedBinding(ScopeKey::Storage))
+    );
+    broker.approve(&package, &ScopeKey::Storage, None).unwrap();
+    for (op, trigger) in [
+        (StorageOp::Write, Trigger::Query),
+        (StorageOp::Read, Trigger::Background),
+        (StorageOp::Delete, Trigger::Query),
+    ] {
+        let Decision::Allow(permit) = check(&broker, &package, &storage(op), trigger) else {
+            panic!("{op:?} under {trigger:?}");
+        };
+        assert_eq!(
+            permit.scope(),
+            &Scope::Storage {
+                quota_bytes: 100,
+                retention_days: None
+            },
+            "the service applies the quota the permit names"
+        );
+    }
+}
+
+#[test]
+fn calendar_reads_stay_within_their_window_and_need_os_access() {
+    let (mut broker, package) = enabled(caps(json!({
+        "calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }
+    })));
+    let read = |past_days, future_days| Request::CalendarRead {
+        past_days,
+        future_days,
+    };
+    assert!(matches!(
+        denial(check(&broker, &package, &read(2, 30), Trigger::Query)),
+        Denial::OutOfScope { .. }
+    ));
+    assert!(matches!(
+        denial(check(&broker, &package, &read(0, 31), Trigger::Query)),
+        Denial::OutOfScope { .. }
+    ));
+    assert_eq!(
+        consent_needed(check(&broker, &package, &read(0, 7), Trigger::Query)).reason,
+        ConsentReason::NotGranted
+    );
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    assert_eq!(
+        consent_needed(check(&broker, &package, &read(0, 7), Trigger::Query)).reason,
+        ConsentReason::NotGranted,
+        "macOS access alone grants no extension authority"
+    );
+    broker.set_os_access(OsPermission::Calendars, OsAccess::NotDetermined);
+    broker.approve(&package, &ScopeKey::Calendar, None).unwrap();
+    let needed = consent_needed(check(&broker, &package, &read(1, 30), Trigger::Activation));
+    assert_eq!(needed.reason, ConsentReason::OsAccess(OsPermission::Calendars));
+    assert!(needed.may_prompt);
+    assert!(!consent_needed(check(&broker, &package, &read(1, 30), Trigger::Query)).may_prompt);
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let granted = permit(check(&broker, &package, &read(1, 30), Trigger::Query));
+    assert!(broker.validate(&granted));
+    let before = broker.generation(&package).unwrap();
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Denied);
+    assert!(!broker.validate(&granted));
+    assert!(broker.generation(&package).unwrap() > before);
+    assert_eq!(
+        denial(check(&broker, &package, &read(0, 1), Trigger::Activation)),
+        Denial::OsDenied(OsPermission::Calendars)
+    );
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Restricted);
+    assert_eq!(
+        denial(check(&broker, &package, &read(0, 1), Trigger::Activation)),
+        Denial::OsRestricted(OsPermission::Calendars)
+    );
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    assert!(
+        !broker.validate(&granted),
+        "access granted again doesn't revive old permits"
+    );
+}
+
+#[test]
+fn shared_os_access_never_grants_another_package() {
+    let calendar = caps(json!({ "calendar": { "access": ["read"], "pastDays": 0, "futureDays": 1 } }));
+    let (mut broker, first) = enabled(calendar.clone());
+    let second = id("agenda");
+    let _ = broker.install(second.clone(), rev(R1), calendar);
+    broker.set_enabled(&second, true).unwrap();
+    broker.approve(&first, &ScopeKey::Calendar, None).unwrap();
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let read = Request::CalendarRead {
+        past_days: 0,
+        future_days: 1,
+    };
+    assert!(matches!(
+        check(&broker, &first, &read, Trigger::Query),
+        Decision::Allow(_)
+    ));
+    assert_eq!(
+        consent_needed(check(&broker, &second, &read, Trigger::Query)).reason,
+        ConsentReason::NotGranted
+    );
+}
+
+#[test]
+fn revoking_moves_the_package_to_a_new_generation_that_regranting_cannot_undo() {
+    let (mut broker, package) = enabled(everything());
+    let other = id("other");
+    let _ = broker.install(other.clone(), rev(R1), github());
+    let other_generation = broker.generation(&other).unwrap();
+    let scope = key("http:https://api.github.com");
+    broker.approve(&package, &scope, None).unwrap();
+    broker.approve(&package, &ScopeKey::Dictionary, None).unwrap();
+    let in_flight = permit(check(&broker, &package, &get(API), Trigger::Query));
+    let dictionary = permit(check(
+        &broker,
+        &package,
+        &Request::DictionaryLookup,
+        Trigger::Query,
+    ));
+    let before = broker.generation(&package).unwrap();
+    assert_eq!(in_flight.generation(), before);
+
+    broker.revoke(&package, &scope).unwrap();
+    let after = broker.generation(&package).unwrap();
+    assert!(after > before);
+    assert!(!broker.validate(&in_flight));
+    assert!(
+        !broker.validate(&dictionary),
+        "cached results may mix scopes, so all are dropped"
+    );
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Activation)),
+        Denial::Revoked(scope.clone())
+    );
+    assert_eq!(broker.generation(&other), Some(other_generation));
+
+    broker.approve(&package, &scope, None).unwrap();
+    assert!(!broker.validate(&in_flight));
+    let fresh = permit(check(&broker, &package, &get(API), Trigger::Query));
+    assert!(broker.validate(&fresh));
+    assert!(fresh.generation() >= after);
+}
+
+#[test]
+fn disabling_drops_work_and_reenabling_does_not_revive_it() {
+    let (mut broker, package) = enabled(github());
+    broker
+        .approve(&package, &key("http:https://api.github.com"), None)
+        .unwrap();
+    let in_flight = permit(check(&broker, &package, &get(API), Trigger::Query));
+    broker.set_enabled(&package, false).unwrap();
+    assert!(!broker.validate(&in_flight));
+    broker.set_enabled(&package, true).unwrap();
+    assert!(!broker.validate(&in_flight));
+    assert!(matches!(
+        check(&broker, &package, &get(API), Trigger::Query),
+        Decision::Allow(_)
+    ));
+}
+
+#[test]
+fn a_new_revision_keeps_covered_grants_asks_again_for_wider_ones_and_drops_removed_ones() {
+    let (mut broker, package) = enabled(caps(json!({
+        "http": [
+            { "origin": "https://api.github.com", "methods": ["GET"] },
+            { "origin": "https://example.com", "methods": ["GET", "POST"] }
+        ],
+        "clipboard": ["write"],
+        "dictionary": ["lookup"]
+    })));
+    for scope in [
+        "http:https://api.github.com",
+        "http:https://example.com",
+        "dictionary",
+    ] {
+        broker.approve(&package, &key(scope), None).unwrap();
+    }
+    broker.revoke(&package, &key("clipboard:write")).unwrap();
+    let old = permit(check(&broker, &package, &get(API), Trigger::Query));
+
+    let report = broker.install(
+        package.clone(),
+        rev(R2),
+        caps(json!({
+            "http": [
+                { "origin": "https://api.github.com", "methods": ["GET", "POST"] },
+                { "origin": "https://example.com", "methods": ["GET"] }
+            ],
+            "calendar": { "access": ["read"], "pastDays": 0, "futureDays": 1 }
+        })),
+    );
+    assert_eq!(report.kept, [key("http:https://example.com")]);
+    assert_eq!(report.changed, [key("http:https://api.github.com")]);
+    assert_eq!(report.dropped, [key("dictionary")]);
+
+    assert!(!broker.validate(&old));
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Query)),
+        Denial::StaleRevision
+    );
+    let new = |request: &Request| broker.check(&package, &rev(R2), request, Trigger::Activation);
+    assert_eq!(consent_needed(new(&get(API))).reason, ConsentReason::Changed);
+    assert!(matches!(new(&get("https://example.com/")), Decision::Allow(_)));
+    assert!(matches!(
+        denial(new(&post("https://example.com/"))),
+        Denial::OutOfScope { .. }
+    ));
+    assert_eq!(
+        consent_needed(new(&Request::CalendarRead {
+            past_days: 0,
+            future_days: 1
+        }))
+        .reason,
+        ConsentReason::NotGranted
+    );
+    assert_eq!(
+        denial(new(&Request::DictionaryLookup)),
+        Denial::Undeclared(ScopeKey::Dictionary)
+    );
+    assert_eq!(
+        broker
+            .consents(&package)
+            .into_iter()
+            .map(|(scope, state)| (scope.key(), state))
+            .collect::<Vec<_>>(),
+        [
+            (key("http:https://api.github.com"), ConsentState::Changed),
+            (
+                key("http:https://example.com"),
+                ConsentState::Granted(GrantSource::Local)
+            ),
+            (ScopeKey::Calendar, ConsentState::Undecided),
+        ]
+    );
+
+    let report = broker.install(
+        package.clone(),
+        rev(R2),
+        caps(json!({
+            "http": [{ "origin": "https://example.com", "methods": ["GET", "POST"] }],
+            "clipboard": ["write"]
+        })),
+    );
+    assert_eq!(
+        report.changed,
+        [key("http:https://example.com")],
+        "a narrowed approval doesn't stretch back"
+    );
+    let new = |request: &Request| broker.check(&package, &rev(R2), request, Trigger::Activation);
+    assert_eq!(
+        denial(new(&Request::Clipboard(ClipboardAccess::Write))),
+        Denial::Revoked(key("clipboard:write")),
+        "a revocation outlives the declaration it revoked"
+    );
+}
+
+#[test]
+fn a_bundled_package_that_drops_and_redeclares_a_scope_stays_revoked() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("calendar-tools");
+    let clipboard = || caps(json!({ "clipboard": ["write"] }));
+    broker.set_bundled(package.clone(), rev(R1), true);
+    let _ = broker.install(package.clone(), rev(R1), clipboard());
+    broker.revoke(&package, &key("clipboard:write")).unwrap();
+
+    let edited = broker.install(
+        package.clone(),
+        rev(R2),
+        caps(json!({ "dictionary": ["lookup"] })),
+    );
+    assert!(edited.dropped.is_empty());
+    let _ = broker.install(package.clone(), rev(R1), clipboard());
+    assert_eq!(
+        broker.consents(&package),
+        [(
+            Scope::Clipboard {
+                access: ClipboardAccess::Write
+            },
+            ConsentState::Revoked
+        )]
+    );
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &Request::Clipboard(ClipboardAccess::Write),
+            Trigger::Activation
+        )),
+        Denial::Revoked(key("clipboard:write"))
+    );
+}
+
+#[test]
+fn consent_approves_only_the_declaration_the_user_was_shown() {
+    let (mut broker, package) = enabled(caps(json!({
+        "http": [{ "origin": "https://api.github.com", "methods": ["GET"] }]
+    })));
+    let shown = consent_needed(check(&broker, &package, &get(API), Trigger::Activation));
+    let _ = broker.install(
+        package.clone(),
+        rev(R2),
+        caps(json!({
+            "http": [{ "origin": "https://api.github.com", "methods": ["GET", "POST", "DELETE"] }]
+        })),
+    );
+    assert_eq!(
+        broker.consent(&package, &shown.revision, &shown.scope, None),
+        Err(BrokerError::StaleRevision)
+    );
+    let _ = broker.install(
+        package.clone(),
+        rev(R1),
+        caps(json!({
+            "http": [{ "origin": "https://api.github.com", "methods": ["GET", "POST"] }]
+        })),
+    );
+    assert_eq!(
+        broker.consent(&package, &shown.revision, &shown.scope, None),
+        Err(BrokerError::DeclarationChanged(key(
+            "http:https://api.github.com"
+        )))
+    );
+    assert_eq!(
+        broker.consents(&package)[0].1,
+        ConsentState::Undecided,
+        "nothing wider was granted"
+    );
+}
+
+#[test]
+fn reloading_the_same_manifest_never_grants_and_keeps_the_generation() {
+    let (mut broker, package) = enabled(github());
+    let generation = broker.generation(&package);
+    let report = broker.install(package.clone(), rev(R1), github());
+    assert_eq!(report, Reconciliation::default());
+    assert_eq!(broker.generation(&package), generation);
+    assert_eq!(
+        consent_needed(check(&broker, &package, &get(API), Trigger::Activation)).reason,
+        ConsentReason::NotGranted
+    );
+}
+
+#[test]
+fn uninstalling_forgets_every_decision() {
+    let (mut broker, package) = enabled(github());
+    let scope = key("http:https://api.github.com");
+    broker.approve(&package, &scope, None).unwrap();
+    let old = permit(check(&broker, &package, &get(API), Trigger::Query));
+    assert!(broker.uninstall(&package));
+    assert!(!broker.validate(&old));
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Query)),
+        Denial::NotInstalled
+    );
+    assert_eq!(broker.generation(&package), None);
+    assert_eq!(broker.revoke(&package, &scope), Err(BrokerError::NotInstalled));
+    let _ = broker.install(package.clone(), rev(R1), github());
+    assert!(!broker.is_enabled(&package));
+    assert_eq!(broker.consents(&package)[0].1, ConsentState::Undecided);
+    assert!(!broker.uninstall(&id("missing")));
+}
+
+#[test]
+fn bundled_packages_start_on_with_extension_scopes_granted_but_os_access_still_asked() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("calendar-tools");
+    broker.set_bundled(package.clone(), rev(R1), true);
+    let _ = broker.install(package.clone(), rev(R1), everything());
+    assert!(broker.is_enabled(&package));
+    let states: Vec<_> = broker
+        .consents(&package)
+        .into_iter()
+        .map(|(scope, state)| (scope.key().to_string(), state))
+        .collect();
+    let bundled = ConsentState::Granted(GrantSource::Bundled);
+    assert_eq!(
+        states,
+        [
+            ("http:https://api.github.com".into(), bundled.clone()),
+            ("files:notes".into(), ConsentState::Undecided),
+            ("exec:git-status".into(), ConsentState::Undecided),
+            ("script:open-in-zed".into(), bundled.clone()),
+            ("storage".into(), bundled.clone()),
+            ("clipboard:read".into(), bundled.clone()),
+            ("clipboard:write".into(), bundled.clone()),
+            ("clipboard:watch".into(), bundled.clone()),
+            ("dictionary".into(), bundled.clone()),
+            ("calendar".into(), bundled.clone()),
+        ]
+    );
+    assert!(matches!(
+        check(&broker, &package, &get(API), Trigger::Query),
+        Decision::Allow(_)
+    ));
+    let read = Request::CalendarRead {
+        past_days: 0,
+        future_days: 1,
+    };
+    assert_eq!(
+        consent_needed(check(&broker, &package, &read, Trigger::Activation)).reason,
+        ConsentReason::OsAccess(OsPermission::Calendars)
+    );
+    assert!(matches!(
+        denial(check(&broker, &package, &post(API), Trigger::Query)),
+        Denial::NeedsActivation
+    ));
+
+    broker
+        .revoke(&package, &key("http:https://api.github.com"))
+        .unwrap();
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Query)),
+        Denial::Revoked(key("http:https://api.github.com"))
+    );
+    broker.set_enabled(&package, false).unwrap();
+    assert!(!broker.is_enabled(&package));
+}
+
+#[test]
+fn a_modified_copy_of_a_bundled_package_is_third_party() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("calendar-tools");
+    broker.set_bundled(package.clone(), rev(R1), true);
+    let _ = broker.install(package.clone(), rev(R2), everything());
+    assert!(!broker.is_enabled(&package));
+    assert!(
+        broker
+            .consents(&package)
+            .iter()
+            .all(|(_, state)| *state == ConsentState::Undecided)
+    );
+    broker.set_enabled(&package, true).unwrap();
+    assert_eq!(
+        consent_needed(broker.check(&package, &rev(R2), &get(API), Trigger::Activation)).reason,
+        ConsentReason::NotGranted
+    );
+
+    let restored = broker.install(package.clone(), rev(R1), everything());
+    assert_eq!(restored, Reconciliation::default());
+    assert!(matches!(
+        check(&broker, &package, &get(API), Trigger::Query),
+        Decision::Allow(_)
+    ));
+}
+
+fn base(source: &str) -> Base {
+    Base::parse(source).unwrap_or_else(|e| panic!("{e}"))
+}
+
+const DECLARED: &str = r#"
+version = 1
+
+[packages.bookmarks]
+revision = "sha256:1111"
+enabled = true
+grant = ["http:https://api.github.com", "files:notes"]
+deny = ["clipboard:read"]
+bindings = { "files:notes" = "/Users/me/Notes" }
+"#;
+
+#[test]
+fn the_declarative_base_grants_its_pinned_revision_and_local_choices_can_only_take_away() {
+    let mut broker = Broker::new(base(DECLARED), Local::default());
+    let package = id("bookmarks");
+    let _ = broker.install(package.clone(), rev(R1), everything());
+    assert!(broker.is_enabled(&package));
+    let state = |broker: &Broker, scope: &str| {
+        broker
+            .consents(&package)
+            .into_iter()
+            .find(|(declared, _)| declared.key() == key(scope))
+            .unwrap()
+            .1
+    };
+    assert_eq!(
+        state(&broker, "http:https://api.github.com"),
+        ConsentState::Granted(GrantSource::Base)
+    );
+    assert_eq!(
+        state(&broker, "files:notes"),
+        ConsentState::Granted(GrantSource::Base)
+    );
+    assert_eq!(state(&broker, "clipboard:read"), ConsentState::DeniedByBase);
+    assert_eq!(state(&broker, "dictionary"), ConsentState::Undecided);
+    let files = Request::Files {
+        scope: name("notes"),
+        access: FilesAccess::List,
+        path: String::new(),
+    };
+    assert_eq!(
+        permit(check(&broker, &package, &files, Trigger::Query)).binding(),
+        Some(std::path::Path::new("/Users/me/Notes"))
+    );
+
+    assert_eq!(
+        broker.approve(&package, &key("clipboard:read"), None),
+        Err(BrokerError::DeniedByBase(key("clipboard:read")))
+    );
+    broker.set_os_access(OsPermission::Pasteboard, OsAccess::Allowed);
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &Request::Clipboard(ClipboardAccess::Read),
+            Trigger::Activation
+        )),
+        Denial::DeniedByBase(key("clipboard:read"))
+    );
+    broker.approve(&package, &ScopeKey::Dictionary, None).unwrap();
+    assert_eq!(
+        state(&broker, "dictionary"),
+        ConsentState::Granted(GrantSource::Local)
+    );
+
+    broker
+        .revoke(&package, &key("http:https://api.github.com"))
+        .unwrap();
+    assert_eq!(
+        state(&broker, "http:https://api.github.com"),
+        ConsentState::Revoked
+    );
+    broker.set_enabled(&package, false).unwrap();
+    assert!(!broker.is_enabled(&package));
+
+    let _ = broker.install(package.clone(), rev(R2), everything());
+    broker.set_enabled(&package, true).unwrap();
+    assert_eq!(
+        state(&broker, "files:notes"),
+        ConsentState::Undecided,
+        "base grants apply only to the revision they pin"
+    );
+    assert_eq!(
+        state(&broker, "clipboard:read"),
+        ConsentState::DeniedByBase,
+        "denials apply to every revision"
+    );
+}
+
+#[test]
+fn a_base_that_disables_a_package_locks_it_off() {
+    let mut broker = Broker::new(
+        base("version = 1\n[packages.bookmarks]\nenabled = false\n"),
+        Local::default(),
+    );
+    let package = id("bookmarks");
+    broker.set_bundled(package.clone(), rev(R1), true);
+    let _ = broker.install(package.clone(), rev(R1), github());
+    assert!(!broker.is_enabled(&package));
+    assert_eq!(
+        broker.set_enabled(&package, true),
+        Err(BrokerError::DisabledByBase)
+    );
+    assert_eq!(broker.set_enabled(&package, false), Ok(()));
+}
+
+#[test]
+fn a_base_disable_pinned_to_one_revision_still_holds_for_the_next() {
+    let mut broker = Broker::new(
+        base("version = 1\n[packages.bookmarks]\nrevision = \"sha256:1111\"\nenabled = false\n"),
+        Local::default(),
+    );
+    let package = id("bookmarks");
+    broker.set_bundled(package.clone(), rev(R2), true);
+    let _ = broker.install(package.clone(), rev(R2), github());
+    assert!(!broker.is_enabled(&package));
+    assert_eq!(
+        broker.set_enabled(&package, true),
+        Err(BrokerError::DisabledByBase)
+    );
+}
+
+#[test]
+fn rebinding_a_scope_the_base_bound_moves_to_a_new_generation() {
+    let mut broker = Broker::new(base(DECLARED), Local::default());
+    let package = id("bookmarks");
+    let _ = broker.install(package.clone(), rev(R1), everything());
+    let list = Request::Files {
+        scope: name("notes"),
+        access: FilesAccess::List,
+        path: String::new(),
+    };
+    let listing = permit(check(&broker, &package, &list, Trigger::Query));
+    let generation = broker.generation(&package);
+
+    broker
+        .approve(&package, &key("files:notes"), Some("/Users/me/Notes".into()))
+        .unwrap();
+    assert_eq!(
+        broker.generation(&package),
+        generation,
+        "approving the same root takes nothing away"
+    );
+    broker
+        .approve(&package, &key("files:notes"), Some("/Users/me/Other".into()))
+        .unwrap();
+    assert_ne!(broker.generation(&package), generation);
+    assert!(!broker.validate(&listing));
+}
+
+#[test]
+fn a_replaced_base_takes_authority_away_at_once_but_grants_nothing_until_relaunch() {
+    let mut broker = Broker::new(base(DECLARED), Local::default());
+    let package = id("bookmarks");
+    let _ = broker.install(package.clone(), rev(R1), everything());
+    let in_flight = permit(check(&broker, &package, &get(API), Trigger::Query));
+
+    broker.replace_base(base(
+        r#"
+version = 1
+[packages.bookmarks]
+revision = "sha256:1111"
+enabled = true
+grant = ["dictionary"]
+"#,
+    ));
+    assert!(!broker.validate(&in_flight));
+    assert_eq!(
+        consent_needed(check(&broker, &package, &get(API), Trigger::Activation)).reason,
+        ConsentReason::NotGranted
+    );
+    assert_eq!(
+        consent_needed(check(
+            &broker,
+            &package,
+            &Request::DictionaryLookup,
+            Trigger::Query
+        ))
+        .reason,
+        ConsentReason::NotGranted,
+        "a reload grants nothing new"
+    );
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &Request::Clipboard(ClipboardAccess::Read),
+            Trigger::Activation
+        )),
+        Denial::DeniedByBase(key("clipboard:read")),
+        "a denial from the launch-time base still holds"
+    );
+
+    let generation = broker.generation(&package);
+    broker.replace_base(base(
+        r#"
+version = 1
+[packages.bookmarks]
+revision = "sha256:1111"
+enabled = true
+grant = ["dictionary"]
+"#,
+    ));
+    assert_eq!(
+        broker.generation(&package),
+        generation,
+        "an unchanged base drops nothing"
+    );
+}
+
+#[test]
+fn local_decisions_read_again_replace_those_in_memory() {
+    let (mut broker, package) = enabled(github());
+    broker
+        .approve(&package, &key("http:https://api.github.com"), None)
+        .unwrap();
+    let in_flight = permit(check(&broker, &package, &get(API), Trigger::Query));
+    let saved = broker.decisions();
+    assert!(
+        broker.replace_local(saved).is_empty(),
+        "reading back its own save changes nothing"
+    );
+    assert!(broker.validate(&in_flight));
+
+    assert_eq!(
+        broker.replace_local(Local::default()),
+        std::slice::from_ref(&package)
+    );
+    assert!(!broker.validate(&in_flight));
+    assert!(!broker.is_enabled(&package));
+    assert!(
+        broker.decisions().records().unwrap().is_empty(),
+        "the next save keeps the removal"
+    );
+
+    assert_eq!(
+        broker.replace_local(Local::unreadable()),
+        std::slice::from_ref(&package)
+    );
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Activation)),
+        Denial::GrantsUnreadable
+    );
+}
+
+#[test]
+fn unreadable_local_grants_fail_closed() {
+    let mut broker = Broker::new(base(DECLARED), Local::unreadable());
+    let package = id("bookmarks");
+    broker.set_bundled(package.clone(), rev(R1), true);
+    let _ = broker.install(package.clone(), rev(R1), everything());
+    assert!(!broker.is_enabled(&package));
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Activation)),
+        Denial::GrantsUnreadable
+    );
+    assert_eq!(
+        broker.set_enabled(&package, true),
+        Err(BrokerError::GrantsUnreadable)
+    );
+    assert_eq!(
+        broker.approve(&package, &ScopeKey::Dictionary, None),
+        Err(BrokerError::GrantsUnreadable)
+    );
+    assert_eq!(
+        broker.revoke(&package, &ScopeKey::Dictionary),
+        Err(BrokerError::GrantsUnreadable)
+    );
+    let mut store = MemoryLocal::default();
+    store.insert(
+        package.clone(),
+        json!({ "package": "bookmarks", "enabled": false }),
+    );
+    assert!(matches!(
+        broker.save(&mut store, &Local::default()),
+        Err(StoreError::Unreadable)
+    ));
+    assert!(matches!(
+        broker.change_saved(&mut store, |broker| broker.forget(&package)),
+        Err(SaveError::Refused(BrokerError::GrantsUnreadable))
+    ));
+    assert_eq!(
+        store.records()[&package],
+        json!({ "package": "bookmarks", "enabled": false }),
+        "what is stored is never overwritten"
+    );
+}
+
+#[test]
+fn os_consumers_list_each_package_scope_that_needs_os_access() {
+    let (mut broker, package) = enabled(everything());
+    broker.approve(&package, &ScopeKey::Calendar, None).unwrap();
+    let _ = broker.install(id("idle"), rev(R1), github());
+    assert_eq!(
+        broker.os_consumers(),
+        [
+            OsConsumer {
+                permission: OsPermission::Pasteboard,
+                package: package.clone(),
+                scope: key("clipboard:read"),
+                enabled: true,
+                granted: false,
+            },
+            OsConsumer {
+                permission: OsPermission::Pasteboard,
+                package: package.clone(),
+                scope: key("clipboard:watch"),
+                enabled: true,
+                granted: false,
+            },
+            OsConsumer {
+                permission: OsPermission::Calendars,
+                package: package.clone(),
+                scope: ScopeKey::Calendar,
+                enabled: true,
+                granted: true,
+            },
+        ]
+    );
+}
+
+#[test]
+fn denials_explain_themselves() {
+    assert_eq!(
+        Denial::OsDenied(OsPermission::Calendars).to_string(),
+        "macOS denied Calendars access for Dupin."
+    );
+    assert_eq!(
+        Denial::Revoked(ScopeKey::Dictionary).to_string(),
+        "You turned off `dictionary` for this extension."
+    );
+    assert_eq!(
+        BrokerError::BindingRequired(key("files:notes")).to_string(),
+        "`files:notes` needs a file, folder or program you pick"
+    );
+}
+
+#[test]
+fn only_a_choice_to_turn_a_package_off_counts_as_turned_off() {
+    let (mut broker, package) = installed(github());
+    assert!(!broker.is_enabled(&package));
+    assert!(!broker.is_turned_off(&package));
+    broker.set_enabled(&package, false).unwrap();
+    assert!(broker.is_turned_off(&package));
+    broker.set_enabled(&package, true).unwrap();
+    assert!(!broker.is_turned_off(&package));
+    assert!(broker.is_turned_off(&id("missing")));
+
+    let base = Base::parse("version = 1\n[packages.bookmarks]\nenabled = false\n").unwrap();
+    let mut locked = Broker::new(base, Local::default());
+    let _ = locked.install(package.clone(), rev(R1), github());
+    assert!(locked.is_turned_off(&package));
+
+    let mut unreadable = Broker::new(Base::default(), Local::unreadable());
+    let _ = unreadable.install(package.clone(), rev(R1), github());
+    assert!(unreadable.is_turned_off(&package));
+}
+
+#[test]
+fn a_change_that_cannot_be_saved_is_undone() {
+    let (mut broker, package) = enabled(github());
+    let mut store = MemoryLocal::default();
+    store.set_unwritable(Some("the disk is full"));
+
+    let failed = broker.change_saved(&mut store, |broker| broker.set_enabled(&package, false));
+    assert!(
+        matches!(failed, Err(SaveError::Store(StoreError::Write(_)))),
+        "{failed:?}"
+    );
+    assert!(broker.is_enabled(&package));
+    assert!(!broker.is_turned_off(&package));
+
+    store.set_unwritable(None);
+    let refused = broker.change_saved(&mut store, |broker| broker.set_enabled(&id("missing"), false));
+    assert!(matches!(
+        refused,
+        Err(SaveError::Refused(BrokerError::NotInstalled))
+    ));
+    assert!(store.records().is_empty());
+
+    broker
+        .change_saved(&mut store, |broker| broker.set_enabled(&package, false))
+        .unwrap();
+    assert!(broker.is_turned_off(&package));
+    let mut relaunched = Broker::new(Base::default(), Local::load(&mut store).unwrap());
+    let _ = relaunched.install(package.clone(), rev(R1), github());
+    assert!(relaunched.is_turned_off(&package));
+}
+
+#[test]
+fn pasting_is_a_scope_that_needs_a_grant_an_activation_and_accessibility() {
+    let paste = Request::Clipboard(ClipboardAccess::Paste);
+    let (broker, package) = enabled(github());
+    assert_eq!(
+        denial(check(&broker, &package, &paste, Trigger::Activation)),
+        Denial::Undeclared(key("clipboard:paste"))
+    );
+
+    let (mut broker, package) = enabled(caps(json!({ "clipboard": ["paste"] })));
+    assert_eq!(
+        consent_needed(check(&broker, &package, &paste, Trigger::Activation)).reason,
+        ConsentReason::NotGranted
+    );
+    broker.approve(&package, &key("clipboard:paste"), None).unwrap();
+    assert_eq!(
+        denial(check(&broker, &package, &paste, Trigger::Query)),
+        Denial::NeedsActivation
+    );
+    assert_eq!(
+        consent_needed(check(&broker, &package, &paste, Trigger::Activation)).reason,
+        ConsentReason::OsAccess(OsPermission::Accessibility)
+    );
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let allowed = permit(check(&broker, &package, &paste, Trigger::Activation));
+    assert!(broker.validate(&allowed));
+    assert_eq!(
+        broker.os_consumers(),
+        [OsConsumer {
+            permission: OsPermission::Accessibility,
+            package: package.clone(),
+            scope: key("clipboard:paste"),
+            enabled: true,
+            granted: true,
+        }]
+    );
+    broker.revoke(&package, &key("clipboard:paste")).unwrap();
+    assert!(!broker.validate(&allowed));
+    assert_eq!(
+        Scope::Clipboard {
+            access: ClipboardAccess::Paste
+        }
+        .to_string(),
+        "paste into the app you were using"
+    );
+}
+
+#[test]
+fn only_the_pristine_bundled_revision_is_pre_granted_pasting() {
+    let paste = Request::Clipboard(ClipboardAccess::Paste);
+    let declares = || caps(json!({ "clipboard": ["paste"] }));
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("emoji");
+    broker.set_bundled(package.clone(), rev(R1), true);
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let _ = broker.install(package.clone(), rev(R1), declares());
+    assert!(matches!(
+        check(&broker, &package, &paste, Trigger::Activation),
+        Decision::Allow(_)
+    ));
+
+    let _ = broker.install(package.clone(), rev(R2), declares());
+    broker.set_enabled(&package, true).unwrap();
+    assert_eq!(
+        consent_needed(broker.check(&package, &rev(R2), &paste, Trigger::Activation)).reason,
+        ConsentReason::NotGranted
+    );
+}
+
+#[test]
+fn a_bundled_package_that_ships_off_waits_to_be_turned_on_with_its_grants() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("window-management");
+    let windows = || caps(json!({ "windows": ["read", "arrange"] }));
+    broker.set_bundled(package.clone(), rev(R1), false);
+    let _ = broker.install(package.clone(), rev(R1), windows());
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let arrange = Request::Windows(WindowsAccess::Arrange);
+
+    assert!(!broker.is_enabled(&package));
+    assert!(
+        broker.is_turned_off(&package),
+        "it doesn't answer until turned on"
+    );
+    assert!(broker.ships_off(&package));
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Activation)),
+        Denial::Disabled
+    );
+
+    broker.set_enabled(&package, true).unwrap();
+    assert!(!broker.is_turned_off(&package));
+    assert!(
+        broker
+            .consents(&package)
+            .iter()
+            .all(|(_, state)| *state == ConsentState::Granted(GrantSource::Bundled))
+    );
+    permit(check(&broker, &package, &arrange, Trigger::Activation));
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Query)),
+        Denial::NeedsActivation,
+        "moving a window needs an action the user chose"
+    );
+
+    broker.set_enabled(&package, false).unwrap();
+    assert!(broker.is_turned_off(&package));
+
+    let _ = broker.install(package.clone(), rev(R2), windows());
+    assert!(
+        !broker.ships_off(&package),
+        "a changed copy is an extension like any other"
+    );
+    broker.set_enabled(&package, true).unwrap();
+    assert_eq!(
+        consent_needed(broker.check(&package, &rev(R2), &arrange, Trigger::Activation)).reason,
+        ConsentReason::NotGranted,
+        "a changed copy gets none of the bundled grants"
+    );
+}
+
+#[test]
+fn a_base_without_a_revision_switches_bundled_packages_and_denies_their_scopes() {
+    let base = base(
+        r#"
+version = 1
+
+[packages."bundled:window-management"]
+enabled = true
+
+[packages."bundled:calendar"]
+deny = ["calendar"]
+
+[packages."bundled:emoji"]
+enabled = false
+"#,
+    );
+    let mut broker = Broker::new(base, Local::default());
+    let windows = id("bundled:window-management");
+    let calendar = id("bundled:calendar");
+    let emoji = id("bundled:emoji");
+    broker.set_bundled(windows.clone(), rev(R1), false);
+    broker.set_bundled(calendar.clone(), rev(R1), true);
+    broker.set_bundled(emoji.clone(), rev(R1), true);
+    let _ = broker.install(
+        windows.clone(),
+        rev(R1),
+        caps(json!({ "windows": ["read", "arrange"] })),
+    );
+    let _ = broker.install(
+        calendar.clone(),
+        rev(R1),
+        caps(json!({ "calendar": { "access": ["read"], "pastDays": 30, "futureDays": 90 } })),
+    );
+    let _ = broker.install(emoji.clone(), rev(R1), caps(json!({ "clipboard": ["paste"] })));
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+
+    assert!(
+        broker.is_enabled(&windows) && !broker.is_turned_off(&windows),
+        "the base turns on a package that ships off"
+    );
+    permit(broker.check(
+        &windows,
+        &rev(R1),
+        &Request::Windows(WindowsAccess::Arrange),
+        Trigger::Activation,
+    ));
+    broker.set_enabled(&windows, false).unwrap();
+    assert!(
+        broker.is_turned_off(&windows),
+        "a choice in Dupin can still turn it off"
+    );
+
+    let read = Request::CalendarRead {
+        past_days: 0,
+        future_days: 7,
+    };
+    assert!(broker.is_enabled(&calendar));
+    assert_eq!(
+        denial(broker.check(&calendar, &rev(R1), &read, Trigger::Query)),
+        Denial::DeniedByBase(ScopeKey::Calendar),
+        "a base denial outranks the bundled pre-grant"
+    );
+    assert_eq!(
+        broker.consent(&calendar, &rev(R1), &broker.consents(&calendar)[0].0, None),
+        Err(BrokerError::DeniedByBase(ScopeKey::Calendar))
+    );
+
+    assert!(broker.is_turned_off(&emoji));
+    assert_eq!(broker.set_enabled(&emoji, true), Err(BrokerError::DisabledByBase));
+}
+
+#[test]
+fn an_invalid_base_entry_keeps_only_its_own_package_off() {
+    let base = base(
+        r#"
+version = 1
+
+[packages."bundled:calendar"]
+deny = ["calender"]
+
+[packages."bundled:emoji"]
+deny = ["clipboard:paste"]
+"#,
+    );
+    assert_eq!(base.problems().len(), 1);
+    let mut broker = Broker::new(base, Local::default());
+    let calendar = id("bundled:calendar");
+    let emoji = id("bundled:emoji");
+    let dictionary = id("bundled:dictionary");
+    for (package, capabilities) in [
+        (
+            &calendar,
+            json!({ "calendar": { "access": ["read"], "pastDays": 30, "futureDays": 90 } }),
+        ),
+        (&emoji, json!({ "clipboard": ["paste"] })),
+        (&dictionary, json!({ "dictionary": ["lookup"] })),
+    ] {
+        broker.set_bundled(package.clone(), rev(R1), true);
+        let _ = broker.install(package.clone(), rev(R1), caps(capabilities));
+    }
+
+    assert!(
+        broker.is_turned_off(&calendar),
+        "what the entry meant to deny is unknown"
+    );
+    assert_eq!(
+        broker.set_enabled(&calendar, true),
+        Err(BrokerError::DisabledByBase)
+    );
+    assert!(
+        broker
+            .consents(&calendar)
+            .iter()
+            .all(|(_, state)| *state == ConsentState::DeniedByBase)
+    );
+
+    assert!(broker.is_enabled(&emoji));
+    assert_eq!(
+        broker.consents(&emoji),
+        vec![(
+            caps(json!({ "clipboard": ["paste"] }))
+                .scopes()
+                .next()
+                .unwrap()
+                .clone(),
+            ConsentState::DeniedByBase
+        )],
+        "the valid entry beside it still applies"
+    );
+    assert!(broker.is_enabled(&dictionary));
+    permit(broker.check(&dictionary, &rev(R1), &Request::DictionaryLookup, Trigger::Query));
+}
+
+#[test]
+fn an_unusable_base_withholds_bundled_pre_grants_until_it_is_fixed() {
+    let mut broker = Broker::new(Base::unusable("expected `=`"), Local::default());
+    let calendar = id("bundled:calendar");
+    let dictionary = id("bundled:dictionary");
+    broker.set_bundled(calendar.clone(), rev(R1), true);
+    broker.set_bundled(dictionary.clone(), rev(R1), true);
+    let _ = broker.install(
+        calendar.clone(),
+        rev(R1),
+        caps(json!({ "calendar": { "access": ["read"], "pastDays": 30, "futureDays": 90 } })),
+    );
+    let _ = broker.install(
+        dictionary.clone(),
+        rev(R1),
+        caps(json!({ "dictionary": ["lookup"] })),
+    );
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let read = Request::CalendarRead {
+        past_days: 0,
+        future_days: 7,
+    };
+
+    assert!(
+        broker.is_enabled(&calendar),
+        "it still loads and answers what needs no capability"
+    );
+    assert_eq!(
+        consent_needed(broker.check(&calendar, &rev(R1), &read, Trigger::Query)).reason,
+        ConsentReason::NotGranted,
+        "what the unusable file denied is unknown"
+    );
+    broker.approve(&dictionary, &ScopeKey::Dictionary, None).unwrap();
+    permit(broker.check(&dictionary, &rev(R1), &Request::DictionaryLookup, Trigger::Query));
+
+    broker.replace_base(Base::default());
+    permit(broker.check(&calendar, &rev(R1), &read, Trigger::Query));
+}
+
+#[test]
+fn a_changed_copy_of_a_package_that_ships_off_waits_like_any_new_extension() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("window-management");
+    broker.set_bundled(package.clone(), rev(R1), false);
+    let _ = broker.install(package.clone(), rev(R2), caps(json!({ "windows": ["arrange"] })));
+    assert!(!broker.is_enabled(&package));
+    assert!(
+        !broker.is_turned_off(&package),
+        "a copy that isn't the shipped one is undecided, as a new extension is"
+    );
+}
+
+#[test]
+fn moving_a_window_needs_accessibility_and_an_activation() {
+    let (mut broker, package) = enabled(caps(json!({ "windows": ["read", "arrange"] })));
+    for scope in broker.consents(&package).into_iter().map(|(scope, _)| scope) {
+        broker.consent(&package, &rev(R1), &scope, None).unwrap();
+    }
+    let read = Request::Windows(WindowsAccess::Read);
+    let arrange = Request::Windows(WindowsAccess::Arrange);
+    assert_eq!(
+        consent_needed(check(&broker, &package, &read, Trigger::Query)).reason,
+        ConsentReason::OsAccess(OsPermission::Accessibility)
+    );
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    permit(check(&broker, &package, &read, Trigger::Query));
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Background)),
+        Denial::NeedsActivation
+    );
+    permit(check(&broker, &package, &arrange, Trigger::Activation));
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Denied);
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Activation)),
+        Denial::OsDenied(OsPermission::Accessibility)
+    );
+}
+
+#[test]
+fn rows_and_the_query_need_their_own_grants_and_only_the_declared_fields_pass() {
+    let (mut broker, package) = enabled(caps(json!({
+        "rows": { "app": ["title"], "file": ["title", "path"] },
+        "query": ["read"]
+    })));
+    let rows = |kind, field| Request::Rows { kind, field };
+    let app_titles = rows(RowKind::App, RowField::Title);
+    for request in [&app_titles, &Request::Query] {
+        assert!(matches!(
+            check(&broker, &package, request, Trigger::Query),
+            Decision::NeedsConsent(_)
+        ));
+    }
+    broker.approve(&package, &key("rows:app"), None).unwrap();
+    permit(check(&broker, &package, &app_titles, Trigger::Query));
+    assert!(matches!(
+        check(&broker, &package, &Request::Query, Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
+    assert!(matches!(
+        denial(check(
+            &broker,
+            &package,
+            &rows(RowKind::App, RowField::Path),
+            Trigger::Activation
+        )),
+        Denial::OutOfScope { .. }
+    ));
+    assert!(matches!(
+        check(
+            &broker,
+            &package,
+            &rows(RowKind::File, RowField::Path),
+            Trigger::Activation
+        ),
+        Decision::NeedsConsent(_)
+    ));
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &rows(RowKind::Url, RowField::Url),
+            Trigger::Activation
+        )),
+        Denial::Undeclared(key("rows:url"))
+    );
+    broker.approve(&package, &ScopeKey::Query, None).unwrap();
+    let held = permit(check(&broker, &package, &Request::Query, Trigger::Query));
+    broker.revoke(&package, &key("rows:app")).unwrap();
+    assert!(!broker.validate(&held), "revoking any grant moves the package on");
+    assert!(matches!(
+        denial(check(&broker, &package, &app_titles, Trigger::Query)),
+        Denial::Revoked(_)
+    ));
+}
+
+#[test]
+fn calculations_need_their_own_grant_and_stop_when_it_is_revoked() {
+    let (mut broker, package) = enabled(caps(json!({ "calculator": ["evaluate"] })));
+    assert!(matches!(
+        check(&broker, &package, &Request::CalculatorEvaluate, Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
+    assert_eq!(
+        denial(check(&broker, &package, &Request::Query, Trigger::Query)),
+        Denial::Undeclared(ScopeKey::Query),
+        "evaluating what it is given never lets it see what is typed"
+    );
+    broker.approve(&package, &ScopeKey::Calculator, None).unwrap();
+    let held = permit(check(
+        &broker,
+        &package,
+        &Request::CalculatorEvaluate,
+        Trigger::Query,
+    ));
+    broker.revoke(&package, &ScopeKey::Calculator).unwrap();
+    assert!(!broker.validate(&held));
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &Request::CalculatorEvaluate,
+            Trigger::Query
+        )),
+        Denial::Revoked(ScopeKey::Calculator)
+    );
+}
+
+#[test]
+fn writing_snippets_needs_its_own_grant_and_an_action_the_user_chose() {
+    let write = Request::SnippetsWrite;
+    let (broker, package) = enabled(github());
+    assert_eq!(
+        denial(check(&broker, &package, &write, Trigger::Activation)),
+        Denial::Undeclared(ScopeKey::Snippets),
+        "no package reaches the user's snippets without declaring it"
+    );
+    let (mut broker, package) = enabled(caps(json!({ "snippets": ["write"] })));
+    assert!(matches!(
+        check(&broker, &package, &write, Trigger::Activation),
+        Decision::NeedsConsent(_)
+    ));
+    broker.approve(&package, &ScopeKey::Snippets, None).unwrap();
+    for trigger in [Trigger::Query, Trigger::Background] {
+        assert_eq!(
+            denial(check(&broker, &package, &write, trigger)),
+            Denial::NeedsActivation,
+            "a search, view or event handler never changes a snippet"
+        );
+    }
+    let held = permit(check(&broker, &package, &write, Trigger::Activation));
+    broker.revoke(&package, &ScopeKey::Snippets).unwrap();
+    assert!(!broker.validate(&held));
+    assert_eq!(
+        denial(check(&broker, &package, &write, Trigger::Activation)),
+        Denial::Revoked(ScopeKey::Snippets)
+    );
+}
+
+#[test]
+fn only_a_profile_declared_for_the_background_runs_without_an_activation() {
+    let (mut broker, package) = enabled(caps(json!({
+        "exec": {
+            "status": { "program": "/usr/bin/git", "args": ["status"], "background": true },
+            "push": { "program": "/usr/bin/git", "args": ["push"] }
+        }
+    })));
+    for profile in ["status", "push"] {
+        broker
+            .approve(
+                &package,
+                &key(&format!("exec:{profile}")),
+                Some(PathBuf::from("/usr/bin/git")),
+            )
+            .unwrap();
+    }
+    let run = |profile: &str| Request::Exec {
+        profile: name(profile),
+    };
+    for trigger in [Trigger::Query, Trigger::Background, Trigger::Activation] {
+        let permit = permit(check(&broker, &package, &run("status"), trigger));
+        assert_eq!(permit.binding(), Some(std::path::Path::new("/usr/bin/git")));
+    }
+    for trigger in [Trigger::Query, Trigger::Background] {
+        assert_eq!(
+            denial(check(&broker, &package, &run("push"), trigger)),
+            Denial::NeedsActivation
+        );
+    }
+}
+
+#[test]
+fn running_in_the_background_widens_a_profile_and_asks_again() {
+    let profile = |background: bool| {
+        caps(json!({
+            "exec": { "status": { "program": "/usr/bin/git", "args": ["status"], "background": background } }
+        }))
+    };
+    let (mut broker, package) = enabled(profile(false));
+    broker
+        .approve(&package, &key("exec:status"), Some(PathBuf::from("/usr/bin/git")))
+        .unwrap();
+    let _ = broker.install(package.clone(), rev(R2), profile(true));
+    let run = Request::Exec {
+        profile: name("status"),
+    };
+    assert!(matches!(
+        broker.check(&package, &rev(R2), &run, Trigger::Activation),
+        Decision::NeedsConsent(_)
+    ));
+}
+
+#[test]
+fn a_declared_path_is_bound_like_a_picked_one_and_not_granted_by_bundling() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("bundled:repo");
+    let capabilities = caps(json!({
+        "files": { "src": { "kind": "directory", "access": ["list"], "path": "~/src" } },
+        "exec": { "git": { "program": "/usr/bin/git", "args": ["status"], "background": true } }
+    }));
+    let _ = broker.install(package.clone(), rev(R1), capabilities);
+    broker.set_bundled(package.clone(), rev(R1), true);
+    let list = Request::Files {
+        scope: name("src"),
+        access: FilesAccess::List,
+        path: String::new(),
+    };
+    assert!(matches!(
+        check(&broker, &package, &list, Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
+    assert_eq!(
+        broker.approve(&package, &key("files:src"), None),
+        Err(BrokerError::BindingRequired(key("files:src")))
+    );
+    broker
+        .approve(&package, &key("files:src"), Some(PathBuf::from("/Users/me/src")))
+        .unwrap();
+    let permit = permit(check(&broker, &package, &list, Trigger::Query));
+    assert_eq!(permit.binding(), Some(std::path::Path::new("/Users/me/src")));
+}

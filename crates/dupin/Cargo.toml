@@ -9,12 +9,30 @@ homepage.workspace = true
 license.workspace = true
 
 [features]
-extension-tools = ["dep:dupin-plugin-runtime"]
+# Rune's headless runs outside a debug build: `dupin ext render` from the shipped app, and the
+# latency benchmark (scripts/latency.nu). It adds about 33 KB to the release binary.
+default = ["tooling"]
+tooling = ["rune/tooling"]
 
 [dependencies]
+blake3 = "1.8.7"
+fend-core = "1.5.9"
 pico-args = "0.5"
+roxmltree = "0.21.2"
 dupin-plugin-protocol = { workspace = true }
-dupin-plugin-runtime = { path = "../dupin-plugin-runtime", optional = true }
+dupin-js-runtime = { path = "../dupin-js-runtime" }
+dupin-broker = { path = "../dupin-broker" }
+dupin-extension-bridge = { path = "../dupin-extension-bridge" }
+dupin-extension-host = { path = "../dupin-extension-host" }
+dupin-extension-http = { path = "../dupin-extension-http" }
+dupin-extension-install = { path = "../dupin-extension-install" }
+dupin-ext-sdk = { path = "../dupin-ext-sdk" }
+dupin-host-services = { path = "../dupin-host-services" }
+dupin-storage = { workspace = true }
+dupin-sync = { workspace = true }
+# The ping's wire format, without the schema the collector builds from it.
+dupin-telemetry = { path = "../dupin-telemetry", default-features = false }
+zeroize = "1.8"
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 libc = { workspace = true }
@@ -24,19 +42,15 @@ rune-kit = { workspace = true }
 rune-theme-opencode = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = "3"
 toml = { workspace = true, features = ["display"] }
+toml_edit = { workspace = true }
 wgpu = { workspace = true }
 naga = { workspace = true }
 # Metal's own compiler and pipeline builder, which Rune links, to check a backdrop shader as
 # Rune's backend will draw it.
 objc2 = { workspace = true }
-objc2-foundation = { workspace = true, features = [
-	"std",
-	"NSError",
-	"NSProcessInfo",
-	"NSString",
-	"NSURL",
-] }
+objc2-foundation = { workspace = true, features = ["std", "NSError", "NSProcessInfo", "NSString"] }
 objc2-metal = { workspace = true, features = [
 	"std",
 	"MTLDevice",
@@ -44,6 +58,12 @@ objc2-metal = { workspace = true, features = [
 	"MTLPixelFormat",
 	"MTLRenderPipeline",
 ] }
+
+[build-dependencies]
+dupin-extension-install = { path = "../dupin-extension-install" }
+
+[dev-dependencies]
+dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }
 
 [lints]
 workspace = true

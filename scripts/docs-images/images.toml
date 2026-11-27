@@ -1,0 +1,544 @@
+# The images in docs/images, which `nu scripts/docs-images.nu` (`just docs-images`) renders,
+# each in light and dark, to docs/images/<page>/<name>-<theme>.png.
+#
+# An image is either an `extension`'s fixture (`fixture`, in its fixtures folder, rendered after
+# `step` or its last step by `dupin ext render`), or a headless launcher `scenario` with the
+# sidecar fixtures scripts/render.nu reads beside it, an optional `config` in place of its own, the
+# documents below in ~/Documents and the `recent` history below. A scenario with a `window` draws
+# that window, `width` points wide, instead of the panel.
+#
+# Spotlight indexes nothing in the scratch home, and on some Macs not even a fresh disk image, so
+# no image shows a Spotlight search; the files scenarios start from Recent items instead.
+
+# What the scratch home opened before, the first most often and most recently.
+recent = [
+	"~/Documents/Reports",
+	"/System/Applications/Notes.app",
+	"~/Documents/Budget 2026.numbers",
+	"/System/Applications/Calendar.app",
+	"~/Documents/Meeting notes.md",
+	"/System/Applications/Maps.app",
+]
+
+# What the `glass = true` clips are recorded over, so every tab on the home page shows the same.
+wallpaper = "tiles"
+
+# Folders end with a slash.
+documents = [
+	"Budget 2026.numbers",
+	"Meeting notes.md",
+	"Travel plans.pages",
+	"Reports/",
+	"Reports/Quarterly report.pdf",
+	"Reports/Annual report 2026.pdf",
+	"Reports/Expense report.numbers",
+	"Reports/report-notes.md",
+	"Projects/",
+	"Projects/Launcher/",
+	"Projects/Launcher/README.md",
+	"Projects/Launcher/roadmap.md",
+	"Projects/Garden/",
+	"Projects/Garden/planting plan.txt",
+	"Projects/Website/",
+	"Projects/Website/index.html",
+	"Projects/notes.md",
+	"Recipes/",
+	"Recipes/Sourdough.md",
+]
+
+[[images]]
+page = "usage"
+name = "search"
+scenario = "scripts/docs-images/search.json"
+
+[[images]]
+page = "keywords"
+name = "list"
+scenario = "scripts/headless/keywords-list.json"
+
+[[images]]
+page = "keywords"
+name = "typing"
+scenario = "scripts/headless/keywords-ca.json"
+
+[[images]]
+page = "recent-items"
+name = "recent"
+scenario = "scripts/docs-images/recent-items.json"
+
+[[images]]
+page = "file-actions"
+name = "actions"
+scenario = "scripts/docs-images/file-actions.json"
+
+[[images]]
+page = "folder-browsing"
+name = "browse"
+scenario = "scripts/docs-images/folder-browsing.json"
+
+[[images]]
+page = "web-searches"
+name = "alias"
+scenario = "scripts/headless/web-search.json"
+
+[[images]]
+page = "web-searches"
+name = "every-search"
+scenario = "scripts/headless/web-keyword.json"
+
+[[images]]
+page = "calculator"
+name = "arithmetic"
+scenario = "scripts/headless/calculator-arithmetic.json"
+
+[[images]]
+page = "calculator"
+name = "units"
+scenario = "scripts/headless/calculator-conversion.json"
+
+[[images]]
+page = "calendar"
+name = "upcoming"
+scenario = "scripts/headless/calendar.json"
+
+[[images]]
+page = "clipboard"
+name = "history"
+scenario = "scripts/headless/clipboard-images.json"
+
+[[images]]
+page = "dictionary"
+name = "entry"
+scenario = "scripts/headless/dictionary.json"
+
+[[images]]
+page = "emoji"
+name = "browse"
+scenario = "scripts/headless/emoji.json"
+
+[[images]]
+page = "emoji"
+name = "search"
+scenario = "scripts/headless/emoji-search.json"
+
+[[images]]
+page = "snippets"
+name = "list"
+scenario = "scripts/headless/snippets.json"
+
+[[images]]
+page = "snapshots"
+name = "list"
+scenario = "scripts/headless/snapshots-keyword.json"
+
+[[images]]
+page = "window-management"
+name = "commands"
+scenario = "scripts/headless/window-management.json"
+
+[[images]]
+page = "extensions"
+name = "keyword"
+scenario = "scripts/headless/extension-js.json"
+
+[[images]]
+page = "extensions"
+name = "form"
+extension = "examples/extensions/notes-js"
+fixture = "notes.json"
+step = 4
+
+[[images]]
+page = "repo"
+name = "list"
+extension = "extensions/repo"
+fixture = "repos.json"
+step = 1
+
+[[images]]
+page = "repo"
+name = "search"
+extension = "extensions/repo"
+fixture = "repos.json"
+step = 3
+
+[[images]]
+page = "appearance"
+name = "ocean"
+scenario = "scripts/themes/preview.json"
+config = "scripts/themes/ocean.toml"
+
+[[images]]
+page = "appearance"
+name = "rose"
+scenario = "scripts/themes/preview.json"
+config = "scripts/themes/rose.toml"
+
+[[images]]
+page = "settings"
+name = "general"
+scenario = "scripts/docs-images/settings-general.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "search"
+scenario = "scripts/docs-images/settings-search.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "keywords"
+scenario = "scripts/docs-images/settings-keywords.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "snippets"
+scenario = "scripts/docs-images/settings-snippets.json"
+config = "scripts/headless/snippets.toml"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "appearance"
+scenario = "scripts/docs-images/settings-appearance.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "extensions"
+scenario = "scripts/docs-images/settings-extensions.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "permissions"
+scenario = "scripts/docs-images/settings-permissions.json"
+window = "prefs"
+width = 760
+
+# A clip is a short recording of `steps` played into the panel, rendered to
+# docs/images/<page>/<name>-<theme>.webp with a caption below the panel naming each key it
+# presses and the text it types. A step types text one character at a time (`type`, or all at
+# once with `burst = true`, for a search that would answer each prefix), presses a key (`key`,
+# with `cmd`, `shift`, `alt` or `ctrl`) or waits (`wait`, in seconds). `fixtures` names a scenario
+# whose sidecar fixtures the clip runs with, and `config` a configuration in place of the default
+# one, and `backdrop` a backdrop shader as `config.toml` names it. Every clip is embedded under
+# the steps of its page.
+#
+# The website's clips, on page `home`, play on a dark page only (`themes = ["dark"]`), at the
+# `scale` that keeps them sharp on a Retina screen at the size the page shows them. A backdrop shader changes every pixel
+# of every frame, so they are MP4 videos over the page's black (`video = true`, with a WebP
+# poster of the last frame).
+#
+# A `glass = true` clip shows Liquid Glass, which a headless render draws as an opaque fallback,
+# so `just docs-glass` (scripts/docs-glass.nu) records it from the real app over a `wallpaper`
+# (one of its presets or an image, the manifest's `wallpaper` unless the clip names its own) and
+# lists it in docs/images/glass.json. Until then `just docs-clips` renders it headless over its
+# `backdrop` in its place, and the website says so.
+#
+# A clip never types into a Spotlight search (Files after Space, or `in`): Spotlight answers
+# from this Mac's index, whatever the scratch home holds. Files clips start from Recent items and
+# folder browsing, which read only the scratch home.
+
+[[clips]]
+page = "tutorial"
+name = "apps"
+steps = [{ type = "maps" }, { key = "k", cmd = true }]
+
+[[clips]]
+page = "tutorial"
+name = "files"
+steps = [{ wait = 1.2 }, { key = "tab" }, { type = "ann" }]
+
+[[clips]]
+page = "tutorial"
+name = "dictionary"
+steps = [{ type = "d" }, { key = "space" }, { type = "serendipity", burst = true }]
+
+[[clips]]
+page = "tutorial"
+name = "keywords"
+steps = [{ type = "?" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "calculator"
+name = "clip"
+steps = [{ type = "12*3" }, { wait = 0.6 }, { key = "a", cmd = true }, { type = "5 km to mi" }]
+
+[[clips]]
+page = "calendar"
+name = "clip"
+fixtures = "scripts/headless/calendar.json"
+steps = [{ type = "cal" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "clipboard"
+name = "clip"
+fixtures = "scripts/headless/clipboard-images.json"
+steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "dictionary"
+name = "clip"
+steps = [
+	{ type = "define" },
+	{ key = "space" },
+	{ type = "serendipity", burst = true },
+	{ key = "right" },
+]
+
+[[clips]]
+page = "emoji"
+name = "clip"
+fixtures = "scripts/headless/emoji.json"
+steps = [{ type = "emoji" }, { key = "space" }, { type = "thumbs", burst = true }]
+
+[[clips]]
+page = "snippets"
+name = "clip"
+fixtures = "scripts/headless/snippets.json"
+steps = [{ type = "snip" }, { key = "space" }, { key = "down" }, { type = "sig" }]
+
+[[clips]]
+page = "snippets"
+name = "add"
+fixtures = "scripts/headless/snippets-add.json"
+steps = [
+	{ type = "snip" },
+	{ key = "space" },
+	{ key = "enter" },
+	{ type = "Meeting note" },
+	{ key = "tab" },
+	{ type = "mtg" },
+	{ key = "tab" },
+	{ type = "Notes for {date}" },
+	{ key = "enter", cmd = true },
+]
+
+[[clips]]
+page = "web-searches"
+name = "clip"
+steps = [
+	{ type = "gh" },
+	{ key = "space" },
+	{ type = "dupin" },
+	{ wait = 0.6 },
+	{ key = "a", cmd = true },
+	{ type = "?" },
+]
+
+[[clips]]
+page = "window-management"
+name = "clip"
+fixtures = "scripts/headless/window-management.json"
+steps = [{ type = "left half" }, { key = "down" }]
+
+[[clips]]
+page = "apps"
+name = "clip"
+steps = [{ type = "mus" }, { key = "down" }, { key = "right" }]
+
+[[clips]]
+page = "keywords"
+name = "clip"
+fixtures = "scripts/headless/keywords-ca.json"
+steps = [{ type = "ca" }, { key = "down" }, { key = "tab" }]
+
+[[clips]]
+page = "files"
+name = "clip"
+steps = [
+	{ wait = 0.6 },
+	{ key = "space" },
+	{ wait = 0.6 },
+	{ key = "backspace" },
+	{ type = "in" },
+	{ key = "space" },
+]
+
+[[clips]]
+page = "recent-items"
+name = "clip"
+steps = [{ wait = 1.2 }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "folder-browsing"
+name = "clip"
+steps = [
+	{ wait = 1.2 },
+	{ key = "tab" },
+	{ key = "down" },
+	{ type = "q" },
+	{ key = "backspace" },
+	{ key = "backspace" },
+]
+
+[[clips]]
+page = "file-actions"
+name = "clip"
+steps = [
+	{ wait = 1.2 },
+	{ key = "down" },
+	{ key = "down" },
+	{ key = "k", cmd = true },
+	{ key = "down" },
+]
+
+[[clips]]
+page = "send-to"
+name = "clip"
+steps = [
+	{ type = "maps" },
+	{ key = "k", cmd = true },
+	{ key = "down" },
+	{ key = "down" },
+	{ key = "down" },
+	{ key = "enter" },
+]
+
+[[clips]]
+page = "snapshots"
+name = "clip"
+fixtures = "scripts/headless/snapshots-keyword.json"
+steps = [{ type = "snap" }, { key = "space" }, { key = "down" }, { key = "right" }]
+
+[[clips]]
+page = "scripts"
+name = "clip"
+steps = [{ type = "Dupin fixture" }, { key = "down" }]
+
+[[clips]]
+page = "extensions"
+name = "clip"
+fixtures = "scripts/headless/extension-js.json"
+steps = [{ type = "wc" }, { key = "space" }, { type = "two words" }]
+
+# An extension's own fixture as a clip: `dupin ext render --record` replays its steps, up to `step`,
+# at a pace a reader can follow, and the keys it presses are captioned from its script.
+[[clips]]
+page = "extensions"
+name = "notes"
+extension = "examples/extensions/notes-js"
+fixture = "notes.json"
+step = 5
+
+# The home page's tabs, each one use of Dupin over Liquid Glass, as it opens by default.
+
+[[clips]]
+page = "home"
+name = "apps"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "files"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ wait = 1.0 }, { key = "tab" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "in-files"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "in" }, { key = "space" }, { wait = 1.0 }]
+
+[[clips]]
+page = "home"
+name = "dictionary"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "d" }, { key = "space" }, { type = "serendipity", burst = true }, { wait = 1.0 }]
+
+[[clips]]
+page = "home"
+name = "keywords"
+glass = true
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "?" }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "clipboard"
+# Not `glass`: the real app records copies only once macOS lets it read the clipboard in the
+# background, which a recording must not grant, so this stays headless over Flow.
+fixtures = "scripts/headless/clipboard-images.json"
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+# The Apps tab again over each backdrop shader, for the home page's backdrop switcher: one
+# recording per shader, not every tab over every shader, which would be six times the bytes to
+# show the same thing.
+
+[[clips]]
+page = "home"
+name = "apps-flow"
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-aurora"
+backdrop = "shaders/aurora.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-embers"
+backdrop = "shaders/embers.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-snow"
+backdrop = "shaders/snow.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
+
+[[clips]]
+page = "home"
+name = "apps-matrix"
+backdrop = "shaders/matrix.wgsl"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]

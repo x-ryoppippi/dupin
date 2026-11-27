@@ -10,46 +10,138 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+dupin-storage = { workspace = true }
+dupin-sync = { workspace = true }
+dupin-host-services = { path = "../dupin-host-services" }
+libc = { workspace = true }
+rune = { workspace = true }
 objc2 = { workspace = true }
 block2 = "0.6"
 objc2-foundation = { workspace = true, features = [
 	"std",
 	"NSArray",
 	"NSBundle",
+	"NSCalendar",
+	"NSData",
 	"NSDate",
+	"NSDateFormatter",
+	"NSDateIntervalFormatter",
 	"NSDictionary",
 	"NSEnumerator",
 	"NSError",
 	"NSFileManager",
+	"NSFormatter",
+	"NSGeometry",
+	"NSLocale",
 	"NSNotification",
 	"NSMetadata",
 	"NSMetadataAttributes",
 	"NSCompoundPredicate",
 	"NSObjCRuntime",
 	"NSObject",
+	"NSOperation",
 	"NSPredicate",
 	"NSRunLoop",
 	"NSString",
+	"NSTimeZone",
 	"NSURL",
+	"NSUserDefaults",
 	"NSValue",
+	"block2",
 ] }
 objc2-app-kit = { workspace = true, features = [
 	"std",
+	"NSAlert",
+	"NSButton",
+	"NSControl",
+	"NSSecureTextField",
+	"NSTextField",
 	"NSEvent",
+	"NSFontDescriptor",
+	"NSGraphics",
+	"NSGraphicsContext",
+	"NSImage",
+	"NSImageRep",
 	"NSApplication",
+	"NSOpenPanel",
+	"NSPanel",
+	"NSSavePanel",
+	"NSPasteboard",
+	"NSPasteboardItem",
 	"NSResponder",
 	"NSScreen",
+	"NSSharingService",
 	"NSView",
 	"NSWindow",
 	"NSWorkspace",
 	"NSRunningApplication",
 	"block2",
+	"libc",
+	"objc2-core-foundation",
+	"objc2-core-graphics",
 ] }
 objc2-quick-look-ui = { workspace = true }
+objc2-event-kit = { version = "0.3", default-features = false, features = [
+	"std",
+	"block2",
+	"EKCalendar",
+	"EKCalendarItem",
+	"EKEvent",
+	"EKEventStore",
+	"EKObject",
+	"EKTypes",
+] }
+objc2-service-management = { workspace = true, features = [
+	"objc2",
+	"objc2-foundation",
+	"SMAppService",
+] }
 
-objc2-core-foundation = { workspace = true, features = ["std", "CFString", "CFURL"] }
-objc2-core-text = { workspace = true, features = ["std", "CTFont", "CTFontDescriptor"] }
+objc2-core-foundation = { workspace = true, features = [
+	"std",
+	"CFArray",
+	"CFData",
+	"CFDictionary",
+	"CFNumber",
+	"CFPreferences",
+	"CFString",
+	"CFURL",
+] }
+objc2-core-text = { workspace = true, features = [
+	"std",
+	"CTFont",
+	"CTFontCollection",
+	"CTFontDescriptor",
+] }
+objc2-security = { version = "0.3", default-features = false, features = [
+	"std",
+	"SecBase",
+	"SecItem",
+	"SecTask",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+	"std",
+	"CGBitmapContext",
+	"CGColorSpace",
+	"CGContext",
+	"CGDataProvider",
+	"CGImage",
+] }
+# Decodes copied PNG, TIFF, HEIC and JPEG images and re-encodes them as PNG.
+objc2-image-io = { version = "0.3", default-features = false, features = [
+	"std",
+	"objc2-core-graphics",
+	"CGImageDestination",
+	"CGImageProperties",
+	"CGImageSource",
+] }
+objc2-uniform-type-identifiers = { version = "0.3", default-features = false, features = [
+	"std",
+	"UTType",
+] }
 memmap2 = { workspace = true }
+tempfile = "3"
+zeroize = "1.8"
 
 [lints]
 workspace = true

@@ -1,0 +1,19 @@
+{
+	"name": "calculator",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Calculator",
+		"keyword": "calc",
+		"icon": "sf:plus.forwardslash.minus",
+		"main": "main.ts",
+		"capabilities": {
+			"calculator": [
+				"evaluate"
+			],
+			"query": [
+				"read"
+			]
+		}
+	}
+}

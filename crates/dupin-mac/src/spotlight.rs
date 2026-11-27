@@ -10,11 +10,12 @@ use dupin_core::Config;
 use dupin_core::file_query::{FileKind, FileQuery};
 use dupin_core::file_rank::{self, FileDates};
 use dupin_core::fuzzy;
+use dupin_core::kind::Kinds;
 use dupin_core::{Item, Provider, ProviderError, Request};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
-    NSArray, NSCompoundPredicate, NSDate, NSDefaultRunLoopMode, NSMetadataItem,
+    NSArray, NSCompoundPredicate, NSDate, NSDefaultRunLoopMode, NSMetadataItem, NSMetadataItemContentTypeKey,
     NSMetadataItemFSContentChangeDateKey, NSMetadataItemLastUsedDateKey, NSMetadataItemPathKey,
     NSMetadataQuery, NSMetadataQueryLocalComputerScope, NSPredicate, NSRunLoop, NSString, NSURL,
 };
@@ -37,17 +38,23 @@ pub enum Target {
 pub struct SpotlightProvider {
     target: Target,
     demotions: Arc<RwLock<Vec<String>>>,
+    kinds: Kinds,
 }
 
 impl SpotlightProvider {
-    pub fn new(target: Target) -> Self {
-        Self::with_demotions(target, Arc::new(RwLock::new(Config::default().file_demotions)))
+    pub fn new(target: Target, kinds: Kinds) -> Self {
+        Self::with_demotions(
+            target,
+            Arc::new(RwLock::new(Config::default().file_demotions)),
+            kinds,
+        )
     }
 
-    pub fn with_demotions(target: Target, rules: Arc<RwLock<Vec<String>>>) -> Self {
+    pub fn with_demotions(target: Target, rules: Arc<RwLock<Vec<String>>>, kinds: Kinds) -> Self {
         SpotlightProvider {
             target,
             demotions: rules,
+            kinds,
         }
     }
 }
@@ -85,6 +92,7 @@ impl Provider for SpotlightProvider {
             query_terms: &query_terms,
             demotions: &demotions,
             now,
+            kinds: &self.kinds,
         };
         autoreleasepool(|_| run_query(request, emit, &job))
     }
@@ -97,6 +105,7 @@ struct SearchJob<'a> {
     query_terms: &'a str,
     demotions: &'a [PathBuf],
     now: u64,
+    kinds: &'a Kinds,
 }
 
 fn run_query(
@@ -153,9 +162,7 @@ fn run_query(
                     if !seen_paths.insert(path.clone()) {
                         continue;
                     }
-                    if let Some(item) =
-                        item(job.target, &result, path, job.query_terms, job.now, job.demotions)
-                    {
+                    if let Some(item) = item(job, &result, path) {
                         batch.push(item);
                     }
                 }
@@ -172,9 +179,7 @@ fn run_query(
                     else {
                         continue;
                     };
-                    if let Some(item) =
-                        item(job.target, &result, path, job.query_terms, job.now, job.demotions)
-                    {
+                    if let Some(item) = item(job, &result, path) {
                         batch.push(item);
                     }
                 }
@@ -202,33 +207,42 @@ fn run_query(
     Ok(())
 }
 
-fn item(
-    target: Target,
-    result: &AnyObject,
-    path: PathBuf,
-    query: &str,
-    now: u64,
-    demotions: &[PathBuf],
-) -> Option<Item> {
+fn item(job: &SearchJob<'_>, result: &AnyObject, path: PathBuf) -> Option<Item> {
+    let target = job.target;
+    let result: &NSMetadataItem = result.downcast_ref()?;
     let dates = if target == Target::Names {
-        file_dates(result.downcast_ref()?)
+        file_dates(result)
     } else {
         FileDates {
             last_used: None,
             modified: None,
         }
     };
-    item_for_path(target, path, query, dates, now, demotions)
+    // SAFETY: The content type key is a valid immutable Foundation metadata key.
+    let folder = result
+        .valueForAttribute(unsafe { NSMetadataItemContentTypeKey })
+        .and_then(|kind| kind.downcast::<NSString>().ok())
+        .is_some_and(|kind| kind.to_string() == "public.folder");
+    let found = Found { path, dates, folder };
+    item_for_path(job.kinds, target, found, job.query_terms, job.now, job.demotions)
+}
+
+/// A path Spotlight found, with what it knows about it.
+struct Found {
+    path: PathBuf,
+    dates: FileDates,
+    folder: bool,
 }
 
 fn item_for_path(
+    kinds: &Kinds,
     target: Target,
-    path: PathBuf,
+    found: Found,
     query: &str,
-    dates: FileDates,
     now: u64,
     demotions: &[PathBuf],
 ) -> Option<Item> {
+    let Found { path, dates, folder } = found;
     let title = path.file_name()?.to_string_lossy().into_owned();
     let (score, matched) = match target {
         Target::Names => {
@@ -243,9 +257,7 @@ fn item_for_path(
             (None, matched)
         }
     };
-    let mut item = Item::path(path, title, matched);
-    crate::quick_look::add_action(&mut item);
-    crate::file_actions::add(&mut item);
+    let mut item = kinds.file(path, title, matched, folder);
     item.score = score;
     Some(item)
 }
@@ -449,6 +461,10 @@ fn escape(word: &str) -> String {
 mod tests {
     use super::*;
     use objc2_foundation::NSDictionary;
+
+    fn kinds() -> Kinds {
+        crate::kinds::native()
+    }
 
     #[test]
     fn every_word_must_match_a_name() {
@@ -656,7 +672,12 @@ mod tests {
             last_used: Some(1_700_000_000),
             modified: Some(1_699_000_000),
         };
-        let item = item_for_path(Target::Names, path, "saf", dates, 1_700_000_100, &[]).unwrap();
+        let found = Found {
+            path,
+            dates,
+            folder: false,
+        };
+        let item = item_for_path(&kinds(), Target::Names, found, "saf", 1_700_000_100, &[]).unwrap();
 
         assert!(item.score.is_some());
         assert_eq!(
@@ -674,7 +695,12 @@ mod tests {
             last_used: Some(1_700_000_000),
             modified: Some(1_699_000_000),
         };
-        let ranked = item_for_path(Target::Names, path.clone(), &terms, dates, 1_700_000_100, &[]).unwrap();
+        let found = Found {
+            path: path.clone(),
+            dates,
+            folder: false,
+        };
+        let ranked = item_for_path(&kinds(), Target::Names, found, &terms, 1_700_000_100, &[]).unwrap();
         let expected = file_rank::score("saf", "Safari.pdf", &path, dates, 1_700_000_100, &[]);
 
         assert_eq!(ranked.score, Some(expected.score));
@@ -683,18 +709,15 @@ mod tests {
 
     #[test]
     fn contents_items_keep_spotlight_order_without_a_score() {
-        let item = item_for_path(
-            Target::Contents,
-            PathBuf::from("/Users/test/Documents/Guide.pdf"),
-            "gde",
-            FileDates {
+        let found = Found {
+            path: PathBuf::from("/Users/test/Documents/Guide.pdf"),
+            dates: FileDates {
                 last_used: Some(1_700_000_000),
                 modified: Some(1_699_000_000),
             },
-            1_700_000_100,
-            &[],
-        )
-        .unwrap();
+            folder: false,
+        };
+        let item = item_for_path(&kinds(), Target::Contents, found, "gde", 1_700_000_100, &[]).unwrap();
 
         assert_eq!(item.score, None);
         assert_eq!(item.matched, fuzzy::score("gde", "Guide.pdf").unwrap().positions);

@@ -1,0 +1,7 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "web " },
+		{ "t": 0.6, "type": "type", "text": "rust" },
+		{ "t": 2.0, "type": "mark", "name": "end" }
+	]
+}

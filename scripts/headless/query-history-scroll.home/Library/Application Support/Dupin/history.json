@@ -1,0 +1,21 @@
+{
+	"items": {
+		"$HOME/Applications/Ardia.app": {
+			"count": 1,
+			"visits": [1700000000],
+			"queries": {
+				"a": 1
+			}
+		},
+		"$HOME/Applications/Arto.app": {
+			"count": 60,
+			"visits": [1700000000],
+			"queries": {}
+		},
+		"$HOME/Applications/Arc.app": {
+			"count": 30,
+			"visits": [1700000000],
+			"queries": {}
+		}
+	}
+}

@@ -1,61 +1,46 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use dupin_core::{CommandId, CommandRegistry, CommandSpec, Config, Provider, QueryPresentation};
-use dupin_mac::{AppsProvider, DictionaryProvider, SpotlightProvider, Target};
+use dupin_core::kind::Kinds;
+use dupin_core::{
+    CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
+};
+use dupin_mac::privacy::CalendarAccess;
+use dupin_mac::{AppsProvider, system_commands};
 
-pub const APPS: &str = "apps.search";
-pub const FILES: &str = "files.names";
-pub const CONTENTS: &str = "files.contents";
-pub const DICTIONARY: &str = "dictionary.lookup";
-const SETTINGS: &str = "settings.search";
-const WEB_KEYWORDS: &str = "web.keywords";
-const WEB_FALLBACKS: &str = "web.fallbacks";
-const MAX_FILE_CANDIDATES: usize = 10_000;
+use crate::features::{MANIFEST, apps::APPS, files::FILES};
 
 pub struct Registration {
-    pub registry: CommandRegistry,
+    pub session: Session,
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
-    pub web: Arc<RwLock<crate::web::WebCatalog>>,
+    pub web: Arc<RwLock<crate::web::WebSearches>>,
+    pub scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
+    pub system_provider: Arc<system_commands::SystemProvider>,
+    /// The built-in commands bundled extensions answer, by command.
+    pub ports: HashMap<CommandId, Arc<crate::features::extensions::Port>>,
 }
 
 pub struct ConfiguredCommands {
     pub registry: CommandRegistry,
     pub notice: Option<String>,
-    pub web: crate::web::WebCatalog,
+    /// config.toml's web searches, as the bundled web-search package receives them.
+    pub web: crate::web::Configured,
+    /// What the bundled snippets package reads as `ctx.preferences`.
+    pub snippets: dupin_js_runtime::Preferences,
+    /// `[aliases]` that name a command no built-in answers, by alias: an extension's, which
+    /// gets them once it registers.
+    pub package_aliases: Vec<(String, String)>,
+    /// Why each alias that reaches nothing was left out, by alias.
+    pub alias_problems: std::collections::BTreeMap<String, String>,
 }
 
-fn parsed_file_query(
-    command: &CommandId,
-    raw: &str,
-) -> Option<Result<dupin_core::file_query::FileQuery, dupin_core::file_query::FileQueryError>> {
-    matches!(command.as_str(), FILES | CONTENTS).then(|| dupin_core::file_query::FileQuery::parse(raw))
-}
-
-pub fn query_qualifier_ranges(command: &CommandId, raw: &str) -> Vec<std::ops::Range<usize>> {
-    parsed_file_query(command, raw)
-        .and_then(Result::ok)
-        .map(|query| query.qualifier_ranges)
-        .unwrap_or_default()
-}
-
-pub fn query_problem(command: &CommandId, raw: &str) -> Option<&'static str> {
-    match parsed_file_query(command, raw)? {
-        Err(error) => Some(error.message()),
-        Ok(query) if command.as_str() == CONTENTS && query.terms.is_empty() && !raw.trim().is_empty() => {
-            Some("Type a word to search file contents.")
-        }
-        _ => None,
-    }
-}
-
-fn id(value: &str) -> CommandId {
+pub(super) fn id(value: &str) -> CommandId {
     CommandId::new(value).expect("built-in command IDs are valid")
 }
 
-fn presentation(
+pub(super) fn presentation(
     placeholder: &str,
     chip: Option<&str>,
     empty_hint: Option<&str>,
@@ -73,171 +58,597 @@ fn presentation(
     }
 }
 
-pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::CommandError> {
-    let file_limit = config.file_limit.min(MAX_FILE_CANDIDATES);
-    let apps_id = id(APPS);
-    let files_id = id(FILES);
-    let contents_id = id(CONTENTS);
-    let dictionary_id = id(DICTIONARY);
-    let mut registry = CommandRegistry::new(apps_id.clone(), Some(files_id.clone()));
-    for command in [
-        CommandSpec::new(
-            apps_id.clone(),
-            50,
-            presentation("Search apps", None, None, Some("No matches"), false, 0.0),
-        ),
-        CommandSpec::new(
-            files_id.clone(),
-            file_limit,
-            presentation(
-                "Search files",
-                Some("Files"),
-                Some("Type to search files with Spotlight  ·  ⌫ back to apps"),
-                Some("No matches"),
-                true,
-                1.0,
-            ),
-        )
-        .with_candidate_limit(file_limit.saturating_mul(4).min(MAX_FILE_CANDIDATES)),
-        CommandSpec::new(
-            contents_id.clone(),
-            file_limit,
-            presentation(
-                "Search inside files",
-                Some("In files"),
-                Some("Type to search inside files with Spotlight  ·  ⌫ back to apps"),
-                Some("No matches"),
-                true,
-                2.0,
-            ),
-        ),
-        CommandSpec::new(
-            dictionary_id.clone(),
-            1,
-            presentation(
-                "Look up a word",
-                Some("Define"),
-                Some("Type a word  ·  ⌫ back to apps"),
-                Some("No definition found"),
-                true,
-                3.0,
-            ),
-        ),
-    ] {
-        registry.register(command)?;
-    }
+pub(super) struct Configure {
+    pub registry: CommandRegistry,
+    pub defaults: Vec<CommandId>,
+    pub pinned: Option<CommandId>,
+    pub notices: Vec<String>,
+    pub web: crate::web::Configured,
+    pub snippets: dupin_js_runtime::Preferences,
+    pub package_aliases: Vec<(String, String)>,
+    pub alias_problems: std::collections::BTreeMap<String, String>,
+    /// Where an app is installed, by bundle identifier, for `app:` aliases.
+    pub application: fn(&str) -> Option<std::path::PathBuf>,
+}
 
-    registry.register(CommandSpec::new(
-        id(SETTINGS),
-        10,
-        presentation("Search settings", None, None, None, false, 0.0),
-    ))?;
-    registry.register(CommandSpec::new(
-        id(WEB_KEYWORDS),
-        1,
-        presentation("Web search", None, None, None, false, 0.0),
-    ))?;
-    registry.register(
-        CommandSpec::new(
-            id(WEB_FALLBACKS),
-            20,
-            presentation("Web search", None, None, None, false, 0.0),
-        )
-        .with_fallback(),
-    )?;
-    registry.set_default_providers(
-        vec![apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
-        Some(id(WEB_KEYWORDS)),
-    )?;
-
-    registry.add_keyword(&contents_id, "in")?;
-    let mut rejected = Vec::new();
-    for keyword in &config.dictionary_keywords {
-        if let Err(error) = registry.add_keyword(&dictionary_id, keyword) {
-            rejected.push(error.to_string());
+impl Configure {
+    pub fn add_keywords(&mut self, command: &CommandId, keywords: &[String], setting: &str) {
+        let rejected: Vec<_> = keywords
+            .iter()
+            .filter_map(|keyword| self.registry.add_keyword(command, keyword).err())
+            .map(|error| error.to_string())
+            .collect();
+        if !rejected.is_empty() {
+            self.notices.push(format!(
+                "Some keywords were not registered. Review {setting} in config.toml: {}",
+                rejected.join("; "),
+            ));
         }
     }
-    let dictionary_notice = (!rejected.is_empty()).then(|| {
-        format!(
-            "Some dictionary keywords were not registered. Review dictionary_keywords in config.toml: {}",
-            rejected.join("; "),
-        )
-    });
+}
 
-    let (web, web_notice) =
-        crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
-    let notices: Vec<_> = [dictionary_notice, web_notice].into_iter().flatten().collect();
-    let notice = (!notices.is_empty()).then(|| notices.join("\n"));
+pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
+    configured_with(config, dupin_mac::workspace::application_path)
+}
+
+/// [`configured`], finding apps for `app:` aliases with `application`.
+pub(crate) fn configured_with(
+    config: &Config,
+    application: fn(&str) -> Option<std::path::PathBuf>,
+) -> Result<ConfiguredCommands, CommandError> {
+    let mut commands = Configure {
+        registry: CommandRegistry::new(id(APPS), Some(id(FILES))),
+        defaults: Vec::new(),
+        pinned: None,
+        notices: Vec::new(),
+        web: crate::web::Configured::default(),
+        snippets: dupin_js_runtime::Preferences::new(),
+        package_aliases: Vec::new(),
+        alias_problems: std::collections::BTreeMap::new(),
+        application,
+    };
+    for feature in MANIFEST {
+        (feature.configure)(config, &mut commands)?;
+    }
+    commands
+        .registry
+        .set_default_providers(std::mem::take(&mut commands.defaults), commands.pinned.take())?;
+    append_sources(config, &mut commands);
+    for feature in MANIFEST {
+        (feature.prepare)(config, &mut commands);
+    }
+    crate::hotkey::mark_shortcuts(config, &mut commands.registry);
     Ok(ConfiguredCommands {
-        registry,
-        notice,
-        web,
+        registry: commands.registry,
+        notice: (!commands.notices.is_empty()).then(|| commands.notices.join("\n")),
+        web: commands.web,
+        snippets: commands.snippets,
+        package_aliases: commands.package_aliases,
+        alias_problems: commands.alias_problems,
     })
 }
 
-pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration, dupin_core::CommandError> {
+/// Search the sources `[advanced.commands.default]` appends after the main search's own. One
+/// whose feature is off answers no command, so it is left out with a notice.
+fn append_sources(config: &Config, commands: &mut Configure) {
+    let mut after = commands
+        .registry
+        .default_providers()
+        .last()
+        .cloned()
+        .unwrap_or_else(|| id(APPS));
+    for name in &config.advanced.commands.default.append_sources {
+        let command = id(crate::features::source_command(name));
+        let present = commands.registry.default_providers().contains(&command);
+        match commands.registry.add_default_provider(command.clone(), &after) {
+            Ok(()) if !present => after = command,
+            Ok(()) => {}
+            Err(_) => commands.notices.push(format!(
+                "advanced.commands.default.append_sources names `{name}`, whose feature is off, so the main search leaves it out."
+            )),
+        }
+    }
+}
+
+pub(super) struct Providers<'a> {
+    pub registration: &'a mut Registration,
+    pub apps: Arc<AppsProvider>,
+    pub kinds: Kinds,
+    composition: &'a crate::composition::Composition,
+    /// `None` in a headless run, which reads fixture events.
+    pub calendar_access: Option<CalendarAccess>,
+}
+
+impl Providers<'_> {
+    pub fn add(&mut self, command: &str, provider: Arc<dyn Provider>) {
+        self.registration.providers.insert(id(command), provider);
+    }
+
+    /// Register the native source `name` as its command's provider.
+    pub fn add_source(&mut self, name: &str, provider: Arc<dyn Provider>) {
+        self.add(crate::features::source_command(name), provider);
+    }
+
+    /// What the native source `name` is composed with.
+    pub fn rows(&self, name: &str) -> dupin_mac::kinds::Rows {
+        self.composition.rows(name)
+    }
+
+    /// Where the bundled extension that ports `command` is handed in once it loads.
+    pub fn port(&mut self, command: &str) -> Arc<crate::features::extensions::Port> {
+        self.registration.ports.entry(id(command)).or_default().clone()
+    }
+}
+
+pub fn register(
+    config: &Config,
+    apps: Arc<AppsProvider>,
+    composition: &crate::composition::Composition,
+    history: History,
+    calendar_access: Option<CalendarAccess>,
+) -> Result<Registration, CommandError> {
     let ConfiguredCommands {
         registry,
         notice,
         web,
+        snippets,
+        ..
     } = configured(config)?;
-    let web = Arc::new(RwLock::new(web));
-    let apps_id = id(APPS);
-    let files_id = id(FILES);
-    let contents_id = id(CONTENTS);
-    let dictionary_id = id(DICTIONARY);
+    let session = Session::new(history, registry)?;
+    crate::extensions::hand_over_kinds(composition.kinds().clone());
+    crate::extensions::preferences::set(crate::web::WEB_SEARCH_PACKAGE, web.preferences);
+    let web = Arc::new(RwLock::new(crate::web::WebSearches::default()));
+    crate::snippets::library().declare(&config.snippets, config.snippet_paste);
+    crate::features::snippets::hand_over(snippets);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
-    let providers: HashMap<_, Arc<dyn Provider>> = [
-        (apps_id, apps as Arc<dyn Provider>),
-        (
-            id(SETTINGS),
-            Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
-        ),
-        (
-            files_id,
-            Arc::new(SpotlightProvider::with_demotions(
-                Target::Names,
-                file_demotions.clone(),
-            )) as Arc<dyn Provider>,
-        ),
-        (
-            contents_id,
-            Arc::new(SpotlightProvider::new(Target::Contents)) as Arc<dyn Provider>,
-        ),
-        (
-            dictionary_id,
-            Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
-        ),
-        (
-            id(WEB_KEYWORDS),
-            Arc::new(crate::web::WebProvider::new(web.clone(), false)) as Arc<dyn Provider>,
-        ),
-        (
-            id(WEB_FALLBACKS),
-            Arc::new(crate::web::WebProvider::new(web.clone(), true)) as Arc<dyn Provider>,
-        ),
-    ]
-    .into();
-
-    Ok(Registration {
-        registry,
-        providers,
+    let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
+    let system_provider = Arc::new(system_commands::SystemProvider::new(config.system_automation));
+    let mut registration = Registration {
+        session,
+        providers: HashMap::new(),
         notice,
         web,
         file_demotions,
-    })
+        scripts,
+        system_provider,
+        ports: HashMap::new(),
+    };
+    let mut providers = Providers {
+        registration: &mut registration,
+        apps,
+        kinds: composition.kinds().clone(),
+        composition,
+        calendar_access,
+    };
+    for feature in MANIFEST {
+        (feature.start)(&mut providers);
+    }
+    Ok(registration)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::{
+        calculator::CALCULATOR,
+        calendar::CALENDAR,
+        clipboard::CLIPBOARD,
+        dictionary::DICTIONARY,
+        extensions::add_extensions,
+        files::{CONTENTS, MAX_FILE_CANDIDATES, query_problem, query_qualifier_ranges},
+        recent::RECENT,
+        snippets::SNIPPETS,
+        system::SYSTEM,
+        web::WEB_KEYWORDS,
+    };
+
+    #[test]
+    fn manifest_preserves_command_ids_provider_order_and_keywords() {
+        use dupin_core::Effect;
+
+        let mut config = Config {
+            calculator: true,
+            show_recent: true,
+            dictionary_keywords: ["in", "clip", "cal", "define", "shared"]
+                .map(str::to_owned)
+                .into(),
+            snippet_keywords: ["shared", "snip"].map(str::to_owned).into(),
+            web_searches: Some(crate::web::searches(
+                &["in", "clip", "cal", "define", "shared", "snip", "web"]
+                    .map(|keyword| (keyword, "Example", "https://example.com/?q={query}")),
+            )),
+            web_fallbacks: vec!["web".into()],
+            ..Config::default()
+        };
+        config.calendar.enabled = true;
+        config.clipboard.enabled = true;
+        let ConfiguredCommands { registry, web, .. } = configured(&config).unwrap();
+
+        let mut ids = registry.ids();
+        ids.sort();
+        assert_eq!(
+            ids,
+            [
+                "app.commands",
+                "apps.search",
+                "calculator.evaluate",
+                "calendar.events",
+                "clipboard.history",
+                "dictionary.lookup",
+                "files.browse",
+                "files.contents",
+                "files.names",
+                "recent.items",
+                "scripts.search",
+                "settings.search",
+                "snapshots.list",
+                "snippets.search",
+                "system.commands",
+                "web.fallbacks",
+                "web.keywords",
+            ]
+        );
+        for (keyword, expected) in [
+            ("in", Some("files.contents")),
+            ("clip", Some("clipboard.history")),
+            ("cal", Some("calendar.events")),
+            ("define", Some("dictionary.lookup")),
+            ("shared", Some("dictionary.lookup")),
+            ("snip", Some("snippets.search")),
+            ("web", None),
+        ] {
+            assert_eq!(registry.keyword(keyword).map(CommandId::as_str), expected);
+        }
+        let listed: Vec<_> = web.preferences["webSearches"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        assert_eq!(listed, ["web"]);
+        assert_eq!(web.preferences["webFallbacks"], serde_json::json!(["web"]));
+        assert_eq!(web.aliases.keys().collect::<Vec<_>>(), ["web"]);
+        assert!(matches!(
+            registry.holder("web"),
+            Some(dupin_core::KeywordHolder::Web("Search Example"))
+        ));
+
+        let mut session = Session::new(History::default(), registry).unwrap();
+        assert!(matches!(
+            session.refresh().as_slice(),
+            [Effect::Search { command, .. }] if command.as_str() == "recent.items"
+        ));
+        let effects = session.set_query("manifest");
+        let providers: Vec<_> = effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Search { command, .. } => Some(command.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            providers,
+            [
+                "calculator.evaluate",
+                "apps.search",
+                "system.commands",
+                "app.commands",
+                "scripts.search",
+                "settings.search",
+                "web.keywords",
+                "web.fallbacks",
+            ]
+        );
+    }
+
+    #[test]
+    fn native_sources_answer_registered_commands_with_matchers_dupin_registers() {
+        let config = Config {
+            show_recent: true,
+            ..Config::default()
+        };
+        let ConfiguredCommands { registry, .. } = configured(&config).unwrap();
+        let ids = registry.ids();
+        let composition = crate::composition::Composition::native(dupin_mac::kinds::native());
+        let mut sources = Vec::new();
+        for source in MANIFEST.iter().flat_map(|feature| feature.sources) {
+            assert!(
+                ids.iter().any(|id| id == source.command),
+                "{} answers no command",
+                source.name
+            );
+            assert_eq!(crate::features::source_command(source.name), source.command);
+            if let Some(matcher) = source.matcher {
+                let rows = composition.rows(source.name);
+                assert_eq!(rows.filters.current().matcher.name(), matcher);
+            }
+            sources.push((source.name, source.command, source.matcher));
+        }
+        assert_eq!(
+            sources,
+            [
+                ("files", "files.names", None),
+                ("files.contents", "files.contents", None),
+                ("folder", "files.browse", Some("builtin.fuzzy")),
+                ("apps", "apps.search", Some("builtin.fuzzy")),
+                ("recent", "recent.items", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn normal_search_dispatches_each_command_through_its_expected_activation() {
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session, SystemCommand};
+
+        let config = Config {
+            system_automation: true,
+            ..Config::default()
+        };
+        let provider = system_commands::SystemProvider::new(config.system_automation);
+        for (command, title, requires_confirmation) in [
+            (SystemCommand::Sleep, "Sleep", false),
+            (SystemCommand::LockScreen, "Lock Screen", false),
+            (SystemCommand::SleepDisplays, "Sleep Displays", false),
+            (SystemCommand::Restart, "Restart", true),
+            (SystemCommand::ShutDown, "Shut Down", true),
+            (SystemCommand::LogOut, "Log Out", true),
+            (SystemCommand::EmptyTrash, "Empty Trash", true),
+            (SystemCommand::ToggleDarkMode, "Toggle Dark Mode", false),
+        ] {
+            let configured = crate::commands::configured(&config).unwrap();
+            let origin = CommandId::new(SYSTEM).unwrap();
+            let mut session = Session::new(History::default(), configured.registry).unwrap();
+            let generation = session
+                .set_query(title)
+                .into_iter()
+                .find_map(|effect| match effect {
+                    Effect::Search {
+                        command, generation, ..
+                    } if command == origin => Some(generation),
+                    _ => None,
+                })
+                .unwrap();
+            provider
+                .search(
+                    &Request::detached(title, system_commands::COMMANDS.len()),
+                    &mut |items| {
+                        session.deliver_from(origin.clone(), Delivery::Batch { generation, items });
+                    },
+                )
+                .unwrap();
+            assert_eq!(session.selected_item().unwrap().display_title(), title);
+            let key = session.result_key(0);
+            let opened = session.intent(Intent::Open).unwrap();
+            let effects = if requires_confirmation {
+                assert_eq!(
+                    opened,
+                    [Effect::ShowActions {
+                        id: key.clone(),
+                        generation,
+                        confirmation: Some("run".into()),
+                    }]
+                );
+                assert!(session.run_key_action(&key, "run").is_empty());
+                session.run_confirmed_key_action(&key, "run")
+            } else {
+                assert!(session.run_confirmed_key_action(&key, "run").is_empty());
+                opened
+            };
+            let [Effect::Run(Action::System(picked)), ..] = effects.as_slice() else {
+                panic!("expected a system command, got {effects:?}");
+            };
+            system_commands::execute(*picked, true, |picked| {
+                assert_eq!(picked, command);
+                Ok(())
+            })
+            .unwrap();
+            assert!(!effects.contains(&Effect::SaveHistory));
+        }
+    }
+
+    #[test]
+    fn calculator_precedes_apps_and_enter_copies_without_recording_usage() {
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Item, ItemAction, Session, View};
+
+        let registry = configured(&Config::default()).unwrap().registry;
+        let mut session = Session::new(History::default(), registry).unwrap();
+        let effects = session.set_query("12*3");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command.as_str() == CALCULATOR => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        // The bundled calculator's row for it.
+        let mut answer = Item::path("/answer".into(), String::new(), Vec::new());
+        answer.id = "answer".into();
+        answer.view = View::Pair {
+            source: "12*3".into(),
+            result: "36".into(),
+        };
+        answer.icon = None;
+        answer.record_usage = false;
+        answer.actions = vec![ItemAction::new("copy", "Copy number", Action::Copy("36".into()))];
+        answer.primary = Some("copy".into());
+        let items = vec![answer];
+        session.deliver_from(
+            id(APPS),
+            Delivery::Batch {
+                generation,
+                items: vec![Item::path("/fixture.app".into(), "Fixture".into(), Vec::new())],
+            },
+        );
+        session.deliver_from(id(CALCULATOR), Delivery::Batch { generation, items });
+        assert_eq!(
+            session.selected_item().unwrap().view,
+            View::Pair {
+                source: "12*3".into(),
+                result: "36".into()
+            }
+        );
+        assert_eq!(session.items()[1].display_title(), "Fixture");
+        let activate = session.intent(Intent::Open).unwrap();
+        assert!(activate.contains(&Effect::Run(Action::Copy("36".into()))));
+        assert!(!activate.contains(&Effect::SaveHistory));
+    }
+
+    #[test]
+    fn disabling_calculator_refreshes_default_search_without_it() {
+        use dupin_core::{Delivery, Effect, History, Session};
+
+        let registry = configured(&Config::parse("file_limit = 20").unwrap())
+            .unwrap()
+            .registry;
+        let mut session = Session::new(History::default(), registry).unwrap();
+        let effects = session.set_query("12*3");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command.as_str() == CALCULATOR => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+
+        let disabled = Config::parse("calculator = false").unwrap();
+        let effects = session
+            .set_commands(configured(&disabled).unwrap().registry)
+            .unwrap();
+        assert!(!effects.is_empty());
+        assert!(effects.iter().all(
+            |effect| !matches!(effect, Effect::Search { command, .. } if command.as_str() == CALCULATOR)
+        ));
+        assert!(!session.deliver_from(id(CALCULATOR), Delivery::Done { generation }));
+    }
+
+    #[test]
+    fn recent_is_the_only_blank_search_provider_and_can_be_disabled() {
+        use dupin_core::{Effect, Session};
+
+        let mut config = Config::default();
+        let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
+        assert!(matches!(
+            session.refresh().as_slice(),
+            [Effect::Search { command, query, .. }] if *command == id(RECENT) && query.is_empty()
+        ));
+
+        config.show_recent = false;
+        let effects = session
+            .set_commands(configured(&config).unwrap().registry)
+            .unwrap();
+        assert_eq!(effects, [Effect::CancelSearch]);
+        assert!(session.items().is_empty());
+    }
+
+    #[test]
+    fn calendar_queries_use_an_opt_in_explicit_route_with_upcoming_results() {
+        use dupin_core::{Action, Batch, Delivery, Effect, Intent, Item, Session};
+
+        let base = configured(&Config::default()).unwrap();
+        assert!(base.registry.keyword("cal").is_none());
+        let enabled = Config::parse("[calendar]\nenabled = true").unwrap();
+        let mut session = Session::new(History::default(), configured(&enabled).unwrap().registry).unwrap();
+        let calendar = id(CALENDAR);
+        let ordinary = session.set_query("cal");
+        assert!(
+            !ordinary
+                .iter()
+                .any(|effect| matches!(effect, Effect::Search { command, .. } if command == &calendar))
+        );
+
+        let effects = session.intent(Intent::Space).unwrap();
+        let [
+            Effect::ClearQuery,
+            Effect::Search {
+                command,
+                generation,
+                query,
+                ..
+            },
+        ] = effects.as_slice()
+        else {
+            panic!("calendar mode should search immediately");
+        };
+        assert_eq!(command, &calendar);
+        assert!(query.is_empty());
+        let generation = *generation;
+        let event = |title: &str| Item {
+            id: title.into(),
+            payload: Default::default(),
+            view: dupin_core::View::Text {
+                title: title.into(),
+                subtitle: "10:00 · Work".into(),
+            },
+            record_usage: false,
+            icon: None,
+            matched: Vec::new(),
+            completion: None,
+            score: None,
+            primary: Some("open".into()),
+            alternate: None,
+            actions: vec![dupin_core::ItemAction::new(
+                "open",
+                "Open in Calendar",
+                Action::OpenUrl(format!("ical://ekevent/{title}?method=show&options=more")),
+            )],
+        };
+        for (section, titles) in [
+            ("Today", &["Project planning", "Design review"][..]),
+            ("Tomorrow", &["Out of office"]),
+            ("Wednesday 25 November", &["Dentist"]),
+        ] {
+            let batch = Batch::section(
+                section.to_owned(),
+                titles.iter().map(|title| event(title)).collect(),
+            );
+            session.deliver_from(calendar.clone(), Delivery::Presented { generation, batch });
+        }
+        session.deliver_from(calendar.clone(), Delivery::Done { generation });
+        assert_eq!(session.items().len(), 4);
+        assert_eq!(session.section_start(0), Some("Today"));
+        assert_eq!(session.section_start(2), Some("Tomorrow"));
+        assert!(session.capture().is_err());
+        session.intent(Intent::Up).unwrap();
+        assert_eq!(session.selected_item().unwrap().display_title(), "Dentist");
+        let effects = session.intent(Intent::Open).unwrap();
+        assert!(effects.iter().any(
+            |effect| matches!(effect, Effect::Run(Action::OpenUrl(url)) if url.starts_with("ical://ekevent/"))
+        ));
+        assert!(!effects.contains(&Effect::SaveHistory));
+        assert!(!session.deliver_from(calendar, Delivery::Done { generation }));
+    }
 
     #[test]
     fn web_results_use_the_registered_session_action_and_completion_paths() {
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
 
+        dupin_extension_host::skip_inside_a_sandbox!();
         let configured = configured(&Config::default()).unwrap();
-        let web = crate::web::WebProvider::new(Arc::new(RwLock::new(configured.web)), false);
+        // Lists fixed searches rather than reading the preferences the web tests change.
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().join("web-search");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name": "web-search", "version": "1.0.0", "dupin": {"title": "Web Search", "keyword": "web", "defaultSearch": true}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.js"),
+            "export function items() { return ['g', 'gh'].map((alias) => ({ id: alias, title: alias, webSearch: { alias, url: alias === 'g' ? 'https://www.google.com/search?q={query}' : 'https://github.com/search?q={query}', title: `${alias} {query}` } })); }",
+        )
+        .unwrap();
+        let bundled = crate::extensions::load_bundled(&root).unwrap();
+        let web = crate::web::WebProvider::new(
+            Arc::new(RwLock::new(crate::web::WebSearches::new(
+                vec![bundled],
+                std::collections::HashSet::new(),
+            ))),
+            false,
+        );
         let mut session = Session::new(History::default(), configured.registry).unwrap();
         let effects = session.set_query("g");
         let generation = effects
@@ -289,6 +700,307 @@ mod tests {
     }
 
     #[test]
+    fn extensions_get_keyword_routes_without_taking_existing_keywords() {
+        use crate::extensions::tests::extension;
+
+        let config = Config {
+            dictionary_keywords: vec!["define".into()],
+            ..Config::default()
+        };
+        let mut configured = configured(&config).unwrap();
+        let extensions: Vec<_> = [
+            ("Word Count", "wc"),
+            ("Dictionary Clash", "define"),
+            ("Contents Clash", "in"),
+            ("Web Clash", "gh"),
+            ("Snippet Clash", "snip"),
+            ("Second Count", "wc"),
+        ]
+        .into_iter()
+        .map(|(name, keyword)| Arc::new(extension(name, keyword)))
+        .collect();
+        let added = add_extensions(&mut configured, &extensions);
+
+        let words = id("extension.word-count");
+        let registered: Vec<_> = added.registered.iter().map(|(id, ..)| id.as_str()).collect();
+        assert_eq!(registered, ["extension.word-count"]);
+        assert_eq!(configured.registry.keyword("wc"), Some(&words));
+        assert_eq!(configured.registry.keyword("define"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
+        assert_eq!(configured.registry.keyword("snip"), Some(&id(SNIPPETS)));
+        assert_eq!(configured.registry.keyword("gh"), None);
+        assert_eq!(added.problems.len(), 5, "{:?}", added.problems);
+        assert!(
+            added.problems[2].contains("a web search in config.toml"),
+            "{}",
+            added.problems[2]
+        );
+        for (problem, folder) in added.problems.iter().zip([
+            "dictionary-clash-folder",
+            "contents-clash-folder",
+            "web-clash-folder",
+            "snippet-clash-folder",
+            "second-count-folder",
+        ]) {
+            assert!(
+                problem.starts_with(folder) && problem.contains("already used"),
+                "{problem}"
+            );
+        }
+
+        let mut session =
+            dupin_core::Session::new(dupin_core::History::default(), configured.registry).unwrap();
+        session.set_query("wc two words");
+        assert_eq!(session.command_id(), &words);
+        assert_eq!(session.query(), "two words");
+    }
+
+    #[test]
+    fn the_web_search_package_keeps_listing_searches_when_its_keyword_is_taken() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let web_search = || {
+            let mut bundled = extension("Web Search", "web");
+            bundled.package = dupin_extension_bridge::PackageId::new(crate::web::WEB_SEARCH_PACKAGE).unwrap();
+            bundled.default_search = true;
+            let mut other = extension("Other", "web");
+            other.default_search = true;
+            [Arc::new(bundled), Arc::new(other)]
+        };
+        let by_alias = Config {
+            web_searches: Some(crate::web::searches(&[(
+                "web",
+                "DuckDuckGo",
+                "https://duckduckgo.com/?q={query}",
+            )])),
+            ..Config::default()
+        };
+        let by_dictionary = Config {
+            dictionary_keywords: vec!["web".into()],
+            ..Config::default()
+        };
+        for (config, holder) in [
+            (by_alias, "a web search in config.toml"),
+            (by_dictionary, "another command"),
+        ] {
+            let mut configured = configured(&config).unwrap();
+            let added = add_extensions(&mut configured, &web_search());
+            let roles: Vec<_> = added
+                .registered
+                .iter()
+                .map(|(command, _, role)| (command.as_str(), *role))
+                .collect();
+            assert_eq!(roles, [("extension-search.web-search", Role::DefaultSearch)]);
+            assert_eq!(added.problems.len(), 2, "{:?}", added.problems);
+            assert!(
+                added.problems.iter().all(|problem| problem.contains(holder)),
+                "{:?}",
+                added.problems
+            );
+        }
+    }
+
+    #[test]
+    fn the_calculator_package_answers_the_main_search_and_no_keyword() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let calculator = Arc::new(extension("Calculator", "calc"));
+        assert_eq!(calculator.id, "calculator");
+        let mut on = configured(&Config::default()).unwrap();
+        let added = add_extensions(&mut on, std::slice::from_ref(&calculator));
+        let [(command, _, role)] = added.registered.as_slice() else {
+            panic!("{:?}", added.registered.len())
+        };
+        assert_eq!((command, *role), (&id(CALCULATOR), Role::MainSearch));
+        assert_eq!(on.registry.keyword("calc"), None);
+
+        let mut off = configured(&Config::parse("calculator = false").unwrap()).unwrap();
+        let added = add_extensions(&mut off, std::slice::from_ref(&calculator));
+        assert!(
+            added.registered.is_empty(),
+            "it answers only while Calculator is on"
+        );
+    }
+
+    #[test]
+    fn the_dictionary_package_answers_the_dictionary_aliases_instead_of_its_own_keyword() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let config = Config {
+            dictionary_keywords: vec!["word".into(), "lookup".into()],
+            ..Config::default()
+        };
+        let mut configured = configured(&config).unwrap();
+        let dictionary = Arc::new(extension("Dictionary", "define"));
+        assert_eq!(dictionary.id, "dictionary");
+        let added = add_extensions(&mut configured, std::slice::from_ref(&dictionary));
+
+        assert!(added.problems.is_empty(), "{:?}", added.problems);
+        let [(command, extension, role)] = added.registered.as_slice() else {
+            panic!("{:?}", added.registered.len())
+        };
+        assert_eq!((command, *role), (&id(DICTIONARY), Role::Keyword));
+        assert!(Arc::ptr_eq(extension, &dictionary));
+        assert_eq!(configured.registry.keyword("word"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("lookup"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("define"), None);
+        assert!(
+            !configured
+                .registry
+                .ids()
+                .contains(&"extension.dictionary".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_calendar_extension_answers_calendar_search_only_while_it_is_on() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let calendar = [Arc::new(extension("Calendar", "cal"))];
+        let mut off = configured(&Config::default()).unwrap();
+        let added = add_extensions(&mut off, &calendar);
+        assert!(added.registered.is_empty() && added.problems.is_empty());
+        assert!(off.registry.keyword("cal").is_none());
+
+        let mut on = configured(&Config::parse("[calendar]\nenabled = true").unwrap()).unwrap();
+        let added = add_extensions(&mut on, &calendar);
+        assert!(added.problems.is_empty(), "{:?}", added.problems);
+        let routes: Vec<_> = added
+            .registered
+            .iter()
+            .map(|(command, extension, role)| (command.as_str(), extension.id.as_str(), *role))
+            .collect();
+        assert_eq!(routes, [(CALENDAR, "calendar", Role::Keyword)]);
+        assert_eq!(on.registry.keyword("cal").map(CommandId::as_str), Some(CALENDAR));
+    }
+
+    #[test]
+    fn catalogues_that_ask_for_it_join_the_main_search_after_apps_in_folder_order() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+        use dupin_core::Effect;
+
+        let mut configured = configured(&Config::default()).unwrap();
+        let extensions: Vec<_> = [
+            ("Bookmarks", "bm", true),
+            ("Words", "wc", false),
+            ("Clips", "cl", true),
+        ]
+        .into_iter()
+        .map(|(name, keyword, default_search)| {
+            let mut extension = extension(name, keyword);
+            extension.default_search = default_search;
+            Arc::new(extension)
+        })
+        .collect();
+        let added = add_extensions(&mut configured, &extensions);
+        let roles: Vec<_> = added
+            .registered
+            .iter()
+            .map(|(command, _, role)| (command.as_str(), *role))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                ("extension.bookmarks", Role::Keyword),
+                ("extension-search.bookmarks", Role::DefaultSearch),
+                ("extension.words", Role::Keyword),
+                ("extension.clips", Role::Keyword),
+                ("extension-search.clips", Role::DefaultSearch),
+            ]
+        );
+        let mut session = Session::new(History::default(), configured.registry).unwrap();
+        let searched: Vec<_> = session
+            .set_query("anything")
+            .into_iter()
+            .filter_map(|effect| match effect {
+                Effect::Search { command, .. } => Some(command.as_str().to_owned()),
+                _ => None,
+            })
+            .collect();
+        let apps = searched
+            .iter()
+            .position(|command| command == "apps.search")
+            .unwrap();
+        assert_eq!(
+            searched[apps + 1..apps + 3],
+            ["extension-search.bookmarks", "extension-search.clips"]
+        );
+        // The keyword command lists its catalogue before anything is typed.
+        let effects = session.set_query("bm ");
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                Effect::Search { command, query, .. } if command.as_str() == "extension.bookmarks" && query.is_empty()
+            )),
+            "{effects:?}"
+        );
+    }
+
+    #[test]
+    fn clip_is_reserved_only_while_clipboard_history_is_enabled() {
+        use dupin_core::{Delivery, Effect, Session};
+
+        for enabled in [false, true] {
+            let mut config = Config::default();
+            config.clipboard.enabled = enabled;
+            config.web_searches = Some(crate::web::searches(&[(
+                "clip",
+                "Clips",
+                "https://clips.example/?q={query}",
+            )]));
+            let commands = configured(&config).unwrap();
+            let clipboard = id(CLIPBOARD);
+            assert_eq!(commands.registry.keyword("clip"), enabled.then_some(&clipboard));
+            assert_eq!(commands.notice.is_some(), enabled);
+
+            let mut session = Session::new(History::default(), commands.registry).unwrap();
+            let effects = session.set_query("clip term");
+            if enabled {
+                assert!(session.command().private_results);
+                let [
+                    Effect::ReplaceQuery(_),
+                    Effect::Search {
+                        command,
+                        generation,
+                        query,
+                        ..
+                    },
+                ] = effects.as_slice()
+                else {
+                    panic!("clip should enter clipboard history: {effects:?}");
+                };
+                assert_eq!(command, &clipboard);
+                assert_eq!(query, "term");
+
+                config.clipboard.enabled = false;
+                let effects = session
+                    .set_commands(configured(&config).unwrap().registry)
+                    .unwrap();
+                assert!(effects.contains(&Effect::ClearQuery));
+                assert_eq!(session.command_id(), &id(APPS));
+                assert!(!session.deliver_from(
+                    clipboard,
+                    Delivery::Done {
+                        generation: *generation
+                    }
+                ));
+            } else {
+                assert_eq!(session.command_id(), &id(APPS));
+                assert!(session.provider_spec(&clipboard).is_none());
+                assert!(effects.iter().any(|effect| matches!(
+                    effect,
+                    Effect::Search { command, query, .. } if *command == id(WEB_KEYWORDS) && query == "clip term"
+                )));
+            }
+        }
+    }
+
+    #[test]
     fn invalid_dictionary_keywords_are_skipped_with_a_notice() {
         let config = Config {
             dictionary_keywords: vec!["in".into(), "".into(), "look up".into()],
@@ -301,8 +1013,47 @@ mod tests {
         assert_eq!(configured.registry.keyword("look up"), Some(&dictionary));
         let notice = configured.notice.unwrap();
         assert!(notice.contains("dictionary_keywords"));
+        assert!(!notice.contains("snippet_keywords"));
         assert!(notice.contains("in"));
         assert!(notice.contains("must not be empty"));
+    }
+
+    #[test]
+    fn snippet_keywords_route_to_snippets_and_reserve_web_keywords() {
+        use dupin_core::config::Snippet;
+        use dupin_core::{Effect, Session};
+
+        let config = Config {
+            snippet_keywords: vec!["s".into(), "in".into()],
+            snippets: [(
+                "sig".into(),
+                Snippet {
+                    name: None,
+                    text: "Best wishes".into(),
+                },
+            )]
+            .into(),
+            web_searches: Some(crate::web::searches(&[(
+                "s",
+                "Search",
+                "https://example.com/?q={query}",
+            )])),
+            ..Config::default()
+        };
+        let configured = configured(&config).unwrap();
+        assert_eq!(configured.registry.keyword("s"), Some(&id(SNIPPETS)));
+        assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
+        assert_eq!(configured.registry.keyword("snip"), None);
+        let notice = configured.notice.unwrap();
+        assert!(notice.contains("snippet_keywords"));
+        assert!(notice.contains("web searches"));
+        assert_eq!(configured.snippets["snippets"].as_array().unwrap().len(), 1);
+        let mut session = Session::new(History::default(), configured.registry).unwrap();
+        assert!(matches!(
+            session.set_query("s ").as_slice(),
+            [Effect::ReplaceQuery(text), Effect::Search { command, query, .. }]
+                if text.is_empty() && *command == id(SNIPPETS) && query.is_empty()
+        ));
     }
 
     #[test]

@@ -1,11 +1,15 @@
-//! Where `config.toml` lives and what happens when it's missing or broken.
+//! Configuration files and their live settings service.
 
 use std::path::{Path, PathBuf};
 
 use dupin_core::Config;
 
+mod document;
+mod layers;
 mod live;
-pub use live::{Service, Update};
+pub mod overlay;
+pub use layers::{LockedKeys, Paths, load, read_layer, read_overlay, top_level};
+pub use live::{Service, Update, check_locked};
 
 /// `$XDG_CONFIG_HOME/dupin/config.toml`, else `~/.config/dupin/config.toml`.
 pub fn path() -> Option<PathBuf> {
@@ -16,15 +20,9 @@ pub fn path() -> Option<PathBuf> {
     Some(base.join("dupin/config.toml"))
 }
 
-/// Whether Dupin can't save config.toml, as when home-manager links it into the Nix store.
-/// Settings then shows the values without offering to change them.
-pub fn read_only() -> bool {
-    path().is_some_and(|path| !writable(&path))
-}
-
 /// Whether `write` can replace the file `path` resolves to: the file itself, if it exists,
 /// and the directory the new file is renamed in, or the nearest one that exists to make it in.
-fn writable(path: &Path) -> bool {
+pub fn writable(path: &Path) -> bool {
     let Ok(target) = resolve(path) else {
         return false;
     };
@@ -51,7 +49,7 @@ fn resolve(path: &Path) -> std::io::Result<PathBuf> {
     resolve_with(path, |_| {})
 }
 
-fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<PathBuf> {
+pub(super) fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<PathBuf> {
     let mut path = path.to_owned();
     'links: for _ in 0..40 {
         visit(&path);
@@ -89,31 +87,6 @@ fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<Pa
     )))
 }
 
-/// The config, or the defaults with a message saying why the file wasn't used.
-pub fn load() -> (Config, Option<String>) {
-    let Some(path) = path() else {
-        return (Config::default(), None);
-    };
-    let src = match read_source(&path) {
-        Ok(src) => src,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Config::default(), None),
-        Err(e) => {
-            return problem(format!(
-                "couldn't read {}: {e}; using the defaults",
-                path.display()
-            ));
-        }
-    };
-    match Config::parse(&src) {
-        Ok(config) => (config, None),
-        Err(e) => problem(format!(
-            "{} is invalid, using the defaults: {}",
-            path.display(),
-            e.message()
-        )),
-    }
-}
-
 fn read_source(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
@@ -125,7 +98,7 @@ fn read_source(path: &Path) -> std::io::Result<String> {
     if !file.metadata()?.is_file() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "config.toml must be a regular file",
+            "configuration must be a regular file",
         ));
     }
     let mut source = String::new();
@@ -133,14 +106,46 @@ fn read_source(path: &Path) -> std::io::Result<String> {
     Ok(source)
 }
 
-fn problem(message: String) -> (Config, Option<String>) {
-    crate::log::warn(&message);
-    (Config::default(), Some(message))
+/// Whether `source` would be accepted as config.toml: it parses, and its hotkey is one the
+/// launcher can register.
+pub fn check(source: &str) -> Result<Config, String> {
+    let config = Config::parse(source).map_err(|error| match error.span() {
+        Some(span) => {
+            let (line, column) = location(source, span.start);
+            format!("line {line}, column {column}: {}", error.message())
+        }
+        None => error.message().to_owned(),
+    })?;
+    crate::composition::check(&config.advanced)?;
+    crate::hotkey::parse(&config.hotkey).map_err(|_| format!("the hotkey {:?} is invalid", config.hotkey))?;
+    crate::hotkey::parse(&config.selection_hotkey)
+        .map_err(|_| format!("the selection hotkey {:?} is invalid", config.selection_hotkey))?;
+    Ok(config)
+}
+
+/// The one-based line and character column of byte `offset` in `source`.
+fn location(source: &str, offset: usize) -> (usize, usize) {
+    let mut start = offset.min(source.len());
+    while !source.is_char_boundary(start) {
+        start -= 1;
+    }
+    let prefix = &source[..start];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix
+        .rsplit('\n')
+        .next()
+        .map_or(1, |line| line.chars().count() + 1);
+    (line, column)
 }
 
 /// Rename a new file over the old one so a crash leaves the old one whole. A symlinked
-/// config.toml is written where it points, so the link, and whoever manages it, stays.
+/// config.toml is written where it points, so the link, and whoever manages it, stays. That
+/// folder may be one other users can write, so the new file takes a name no one can have
+/// put a link at. It keeps the old file's mode, so a file the user made private stays so.
 fn write(path: &Path, toml: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
     if !writable(path) {
         return Err(std::io::Error::other(format!("{} is read-only", path.display())));
     }
@@ -149,9 +154,22 @@ fn write(path: &Path, toml: &str) -> std::io::Result<()> {
         .parent()
         .ok_or_else(|| std::io::Error::other("no parent directory"))?;
     std::fs::create_dir_all(dir)?;
-    let tmp = target.with_extension("toml.tmp");
-    std::fs::write(&tmp, toml)?;
-    std::fs::rename(tmp, target)
+    let mut staged = tempfile::Builder::new()
+        .prefix(&format!(
+            ".{}.",
+            target.file_name().unwrap_or_default().to_string_lossy()
+        ))
+        .suffix(".tmp")
+        .tempfile_in(dir)?;
+    match std::fs::symlink_metadata(&target) {
+        Ok(old) => staged
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(old.permissions().mode() & 0o777))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    staged.write_all(toml.as_bytes())?;
+    staged.persist(target).map(drop).map_err(|error| error.error)
 }
 
 #[cfg(test)]
@@ -165,6 +183,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn loads_config_with_a_missing_script_binding_at_startup() {
+        let dir = scratch("missing-script");
+        let path = dir.join("config.toml");
+        let source = r#"
+file_limit = 37
+[bindings."alt+cmd+t"]
+target = "script"
+script = "missing.sh"
+"#;
+        std::fs::write(&path, source).unwrap();
+
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(config, Config::parse(source).unwrap());
+        assert_eq!(problem, None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_composition_naming_what_dupin_lacks_is_invalid_where_it_is_read() {
+        let dir = scratch("invalid-composition");
+        let path = dir.join("config.toml");
+        let source = "file_limit = 37\n[advanced.sources.apps]\nmatcher = \"builtin.prefx\"\n";
+        std::fs::write(&path, source).unwrap();
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(config, Config::default());
+        let problem = problem.unwrap();
+        assert!(
+            problem.starts_with(
+                "config.toml is invalid: [advanced.sources.apps]: `builtin.prefx` isn't a matcher Dupin has"
+            ),
+            "{problem}"
+        );
+        assert!(
+            check(source)
+                .unwrap_err()
+                .contains("`builtin.prefx` isn't a matcher")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -189,6 +254,17 @@ mod tests {
     }
 
     #[test]
+    fn check_locates_problems_and_rejects_unusable_hotkeys() {
+        assert_eq!(check("file_limit = 30\n").unwrap().file_limit, 30);
+        let problem = check("file_limit = 30\nfile_limit = \"é\"\n").unwrap_err();
+        assert!(problem.starts_with("line 2, column 1: "), "{problem}");
+        assert!(check("hotkey = \"Cmd+Nope\"\n").unwrap_err().contains("hotkey"));
+        assert!(check("hotkey = \"\"\n").is_ok());
+        assert_eq!(location("é\nab", 4), (2, 2));
+        assert_eq!(location("é", 1), (1, 1));
+    }
+
+    #[test]
     fn creates_a_missing_file() {
         let dir = scratch("missing");
         let path = dir.join("dupin/config.toml");
@@ -197,14 +273,16 @@ mod tests {
     }
 
     #[test]
-    fn saving_config_preserves_custom_dictionary_keywords() {
-        let config = dupin_core::Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
+    fn saving_config_preserves_custom_settings() {
+        let config =
+            dupin_core::Config::parse("dictionary_keywords = [\"word\", \"lookup\"]\ndisplay = \"active\"")
+                .unwrap();
         let toml = toml::to_string(&config).unwrap();
         let path = scratch("dictionary-keywords").join("config.toml");
         write(&path, &toml).unwrap();
 
         let loaded = dupin_core::Config::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(loaded.dictionary_keywords, ["word", "lookup"]);
+        assert_eq!(loaded, config);
     }
 
     #[test]
@@ -218,6 +296,45 @@ mod tests {
         write(&path, "a = 2\n").unwrap();
 
         assert!(std::fs::symlink_metadata(&path).unwrap().is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "a = 2\n");
+    }
+
+    #[test]
+    fn keeps_the_mode_of_the_file_it_replaces() {
+        let dir = scratch("mode");
+        let fresh = dir.join("fresh/config.toml");
+        write(&fresh, "a = 1\n").unwrap();
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&fresh), 0o600);
+
+        let real = dir.join("dotfiles.toml");
+        let path = dir.join("config.toml");
+        std::fs::write(&real, "a = 1\n").unwrap();
+        symlink(&real, &path).unwrap();
+        for kept in [0o600, 0o640, 0o644] {
+            std::fs::set_permissions(&real, std::fs::Permissions::from_mode(kept)).unwrap();
+            write(&path, "a = 2\n").unwrap();
+            assert_eq!(mode(&real), kept);
+        }
+    }
+
+    #[test]
+    fn never_writes_through_a_link_beside_the_target() {
+        let dir = scratch("planted-link");
+        let real = dir.join("dotfiles.toml");
+        std::fs::write(&real, "a = 1\n").unwrap();
+        let path = dir.join("config.toml");
+        symlink(&real, &path).unwrap();
+        let victim = dir.join("victim");
+        std::fs::write(&victim, "keep").unwrap();
+        let planted = real.with_extension("toml.tmp");
+        symlink(&victim, &planted).unwrap();
+
+        write(&path, "a = 2\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(&planted).unwrap().is_symlink());
+        assert!(std::fs::symlink_metadata(&real).unwrap().is_file());
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "a = 2\n");
     }
 

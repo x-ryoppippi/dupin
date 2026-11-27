@@ -1,0 +1,73 @@
+export def scenario-env [script: path, tmp: path]: nothing -> record {
+    let fixture = $script | path parse | update extension toml | path join
+    if not ($fixture | path exists) {
+        return {}
+    }
+    let name = $script | path parse | get stem
+    let config_dir = $tmp | path join $"($name)-config"
+    mkdir ($config_dir | path join dupin)
+    cp $fixture ($config_dir | path join dupin config.toml)
+    # A scenario's extensions live beside it, as `<name>.extensions/`.
+    let extensions = $script | path parse | update extension extensions | path join
+    if ($extensions | path exists) {
+        cp --recursive $extensions ($config_dir | path join dupin extensions)
+    }
+    # And the grants it declares, as `<name>.grants.toml`.
+    let grants = $script | path parse | update extension grants.toml | path join
+    if ($grants | path exists) {
+        cp $grants ($config_dir | path join dupin extension-grants.toml)
+    }
+    # And saved snapshots of its own, as `<name>.snapshots/snapshots.json`, a list Dupin seeds into
+    # scratch storage as if they had been saved.
+    let snapshots = $script | path parse | update extension snapshots | path join | path join snapshots.json
+    let data = if ($snapshots | path exists) {
+        {
+            DUPIN_HEADLESS_SNAPSHOTS: ($snapshots | path expand)
+        }
+    } else {
+        {}
+    }
+    # And a home folder of its own, as `<name>.home/`: apps in `Applications`, and the usage
+    # history in `Library/Application Support/Dupin/history.json`, where `$HOME` stands for the
+    # copy's path, as the history names apps by path.
+    let home = $script | path parse | update extension home | path join
+    let data = if ($home | path exists) {
+        let copy = $tmp | path join $"($name)-home"
+        cp --recursive $home $copy
+        let history = $copy | path join Library 'Application Support' Dupin history.json
+        if ($history | path exists) {
+            open --raw $history | str replace --all '$HOME' $copy | save --force $history
+        }
+        $data | merge {HOME: $copy}
+    } else {
+        $data
+    }
+    # And a clipboard history of its own, as `<name>.clipboard/history.json` beside the images it
+    # names, in place of the shared one, which the latency baselines are fingerprinted by.
+    let clipboard = $script | path parse | update extension clipboard | path join | path join history.json
+    if ($clipboard | path exists) {
+        {
+            XDG_CONFIG_HOME: $config_dir
+            DUPIN_HEADLESS_CLIPBOARD: ($clipboard | path expand)
+        } | merge $data
+    } else {
+        {XDG_CONFIG_HOME: $config_dir} | merge $data
+    }
+}
+
+# The panel's height in points, rounded up, from a `--tree` dump.
+export def panel-height []: record -> int {
+    let panel = $in.elements | where key? == "panel" and rect != null
+    if ($panel | is-empty) {
+        error make {msg: "the tree has no laid-out element keyed `panel`"}
+    }
+    $panel | first | get rect.3 | math ceil
+}
+
+# Run Dupin headless, quietly unless it fails.
+export def --wrapped headless [bin: path, ...args: string]: nothing -> nothing {
+    let result = ^$bin ...$args | complete
+    if $result.exit_code != 0 {
+        error make {msg: $"($bin) ($args | str join ' ') failed:\n($result.stderr)"}
+    }
+}

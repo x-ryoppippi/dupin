@@ -1,23 +1,39 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+use std::path::PathBuf;
 use std::thread;
 
-use crate::{Item, Provider, Request};
+use crate::{Batch, Item, Page, Provider, Request};
 
 /// What a [`Searcher`] hands back: a batch of new results for one generation, or the end of it.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Delivery {
-    Batch { generation: u64, items: Vec<Item> },
-    Done { generation: u64 },
-    Failed { generation: u64 },
-    Expired { generation: u64 },
+    Batch {
+        generation: u64,
+        items: Vec<Item>,
+    },
+    /// Rows under a section heading or with details, from [`Provider::search_batches`].
+    Presented {
+        generation: u64,
+        batch: Batch,
+    },
+    Done {
+        generation: u64,
+    },
+    Failed {
+        generation: u64,
+    },
+    Expired {
+        generation: u64,
+    },
 }
 
 impl Delivery {
     pub(crate) fn generation(&self) -> u64 {
         match self {
             Delivery::Batch { generation, .. }
+            | Delivery::Presented { generation, .. }
             | Delivery::Done { generation }
             | Delivery::Failed { generation }
             | Delivery::Expired { generation } => *generation,
@@ -27,6 +43,8 @@ impl Delivery {
 
 struct Job {
     query: String,
+    folder: Option<PathBuf>,
+    page: Option<Page>,
     limit: usize,
     generation: u64,
 }
@@ -68,11 +86,20 @@ impl Searcher {
     }
 
     /// Start a search for `generation` (above 0), superseding any other.
-    pub fn search(&self, generation: u64, query: String, limit: usize) {
+    pub fn search(
+        &self,
+        generation: u64,
+        query: String,
+        folder: Option<PathBuf>,
+        page: Option<Page>,
+        limit: usize,
+    ) {
         debug_assert_ne!(generation, NONE);
         self.current.store(generation, Ordering::Release);
         self.jobs.0.lock().unwrap().job = Some(Job {
             query,
+            folder,
+            page,
             limit,
             generation,
         });
@@ -114,14 +141,28 @@ fn run(
         if !is_current(job.generation) {
             continue;
         }
-        let request = Request::new(job.query, job.limit, job.generation, current.clone());
+        let request = Request::new(
+            job.query,
+            job.folder,
+            job.page,
+            job.limit,
+            job.generation,
+            current.clone(),
+        );
         let generation = job.generation;
         let mut remaining = job.limit;
-        let outcome = provider.search(&request, &mut |mut items| {
-            items.truncate(remaining);
-            remaining -= items.len();
-            if !items.is_empty() && is_current(generation) {
-                deliver(Delivery::Batch { generation, items });
+        let outcome = provider.search_batches(&request, &mut |mut batch| {
+            batch.items.truncate(remaining);
+            remaining -= batch.items.len();
+            if !batch.items.is_empty() && is_current(generation) {
+                deliver(if batch.is_plain() {
+                    Delivery::Batch {
+                        generation,
+                        items: batch.items,
+                    }
+                } else {
+                    Delivery::Presented { generation, batch }
+                });
             }
         });
         if is_current(generation) {
@@ -172,8 +213,8 @@ mod tests {
             gate: Mutex::new(Some(gate)),
         });
         let searcher = Searcher::spawn("test", provider, move |d| tx.send(d).unwrap());
-        searcher.search(1, "slow".into(), 10);
-        searcher.search(2, "fast".into(), 10);
+        searcher.search(1, "slow".into(), None, None, 10);
+        searcher.search(2, "fast".into(), None, None, 10);
         open_gate.send(()).unwrap();
         let mut got = Vec::new();
         loop {
@@ -193,6 +234,46 @@ mod tests {
         assert!(matches!(&got[0], Delivery::Batch { items, .. } if items[0].display_title() == "fast"));
     }
 
+    struct Sections;
+
+    impl Provider for Sections {
+        fn search(
+            &self,
+            request: &Request,
+            emit: &mut dyn FnMut(Vec<Item>),
+        ) -> Result<(), crate::ProviderError> {
+            self.search_batches(request, &mut |batch| emit(batch.items))
+        }
+
+        fn search_batches(
+            &self,
+            _: &Request,
+            emit: &mut dyn FnMut(Batch),
+        ) -> Result<(), crate::ProviderError> {
+            let row = |name: &str| Item::path(PathBuf::from(format!("/{name}")), name.into(), vec![]);
+            emit(Batch::section("Today", vec![row("a"), row("b")]));
+            emit(vec![row("c")].into());
+            emit(Batch::section("Later", vec![row("d")]));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn sections_reach_the_session_within_the_output_budget() {
+        let (tx, rx) = mpsc::channel();
+        let searcher = Searcher::spawn("test", Arc::new(Sections), move |d| tx.send(d).unwrap());
+        searcher.search(1, String::new(), None, None, 3);
+        let got: Vec<_> = (0..3)
+            .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap())
+            .collect();
+        assert!(matches!(
+            &got[0],
+            Delivery::Presented { batch, .. } if batch.section.as_deref() == Some("Today") && batch.items.len() == 2
+        ));
+        assert!(matches!(&got[1], Delivery::Batch { items, .. } if items.len() == 1));
+        assert_eq!(got[2], Delivery::Done { generation: 1 });
+    }
+
     #[test]
     fn cancel_silences_the_running_search() {
         let (open_gate, gate) = mpsc::channel();
@@ -201,7 +282,7 @@ mod tests {
             gate: Mutex::new(Some(gate)),
         });
         let searcher = Searcher::spawn("test", provider, move |d| tx.send(d).unwrap());
-        searcher.search(1, "slow".into(), 10);
+        searcher.search(1, "slow".into(), None, None, 10);
         searcher.cancel();
         open_gate.send(()).unwrap();
         assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());

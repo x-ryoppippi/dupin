@@ -1,0 +1,169 @@
+{
+	"name": "repo",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Repositories",
+		"keyword": "repo",
+		"icon": "sf:arrow.triangle.branch",
+		"main": "main.ts",
+		"preferences": {
+			"editor": {
+				"type": "select",
+				"title": "Open in editor",
+				"options": [
+					"Visual Studio Code",
+					"Cursor",
+					"Zed",
+					"Sublime Text",
+					"Nova",
+					"Xcode",
+					"Finder"
+				],
+				"default": "Visual Studio Code"
+			},
+			"terminal": {
+				"type": "select",
+				"title": "Open in terminal",
+				"options": [
+					"Terminal",
+					"Ghostty",
+					"iTerm",
+					"WezTerm"
+				],
+				"default": "Terminal"
+			},
+			"ghq": {
+				"type": "checkbox",
+				"title": "List what ghq lists",
+				"default": true
+			},
+			"scanGhq": {
+				"type": "checkbox",
+				"title": "Look in ~/ghq",
+				"default": true
+			},
+			"scanSrc": {
+				"type": "checkbox",
+				"title": "Look in ~/src",
+				"default": true
+			},
+			"scanDeveloper": {
+				"type": "checkbox",
+				"title": "Look in ~/Developer",
+				"default": true
+			},
+			"scanProjects": {
+				"type": "checkbox",
+				"title": "Look in ~/Projects",
+				"default": true
+			},
+			"depth": {
+				"type": "number",
+				"title": "Folders deep to look",
+				"min": 1,
+				"max": 4,
+				"default": 3
+			},
+			"checks": {
+				"type": "number",
+				"title": "Repositories whose Git status is read per refresh",
+				"min": 0,
+				"max": 32,
+				"default": 12
+			}
+		},
+		"capabilities": {
+			"files": {
+				"ghq": {
+					"kind": "directory",
+					"access": [
+						"list"
+					],
+					"path": "~/ghq"
+				},
+				"src": {
+					"kind": "directory",
+					"access": [
+						"list"
+					],
+					"path": "~/src"
+				},
+				"developer": {
+					"kind": "directory",
+					"access": [
+						"list"
+					],
+					"path": "~/Developer"
+				},
+				"projects": {
+					"kind": "directory",
+					"access": [
+						"list"
+					],
+					"path": "~/Projects"
+				}
+			},
+			"exec": {
+				"ghq-list": {
+					"args": [
+						"list",
+						"-p"
+					],
+					"output": true,
+					"background": true
+				},
+				"git-status": {
+					"program": "/usr/bin/git",
+					"args": [
+						"--no-optional-locks",
+						"-c",
+						"core.fsmonitor=false",
+						"-C",
+						"{path}",
+						"status",
+						"--porcelain=v2",
+						"--branch"
+					],
+					"output": true,
+					"background": true
+				},
+				"git-last-commit": {
+					"program": "/usr/bin/git",
+					"args": [
+						"-C",
+						"{path}",
+						"log",
+						"-1",
+						"--format=%ct"
+					],
+					"output": true,
+					"background": true
+				},
+				"git-remote": {
+					"program": "/usr/bin/git",
+					"args": [
+						"-C",
+						"{path}",
+						"config",
+						"--get",
+						"remote.origin.url"
+					],
+					"output": true,
+					"background": true
+				},
+				"open-app": {
+					"program": "/usr/bin/open",
+					"args": [
+						"-b",
+						"{app}",
+						"{path}"
+					]
+				}
+			},
+			"storage": {
+				"quotaBytes": 4194304
+			}
+		}
+	}
+}

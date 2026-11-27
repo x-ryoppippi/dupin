@@ -1,0 +1,34 @@
+# What Dupin.app ships: the dupin binary's crates for Apple silicon, without dev-dependencies.
+# checks.licences runs `cargo deny check licenses` over it, and packaging/notices.nu takes the
+# same allow-list for the third-party notices the app carries. See "Third-party code and data" in
+# docs/development.md.
+[graph]
+targets = ["aarch64-apple-darwin"]
+exclude-dev = true
+
+[licenses]
+# Licences whose terms let their code be distributed as part of a GPL-3.0-or-later program. A
+# licence missing here fails CI until someone checks it and adds it; never add one that is
+# GPL-incompatible (GPL-2.0-only, SSPL, non-commercial or no-derivatives terms).
+allow = [
+	"0BSD",
+	"Apache-2.0",
+	"Apache-2.0 WITH LLVM-exception",
+	"BSD-2-Clause",
+	"BSD-3-Clause",
+	"BSL-1.0",
+	"CC0-1.0",
+	"ISC",
+	"MIT",
+	"MIT-0",
+	"MPL-2.0",
+	"Unicode-3.0",
+	"Unlicense",
+	"Zlib",
+]
+unused-allowed-license = "allow"
+confidence-threshold = 0.93
+
+# The workspace's own crates, GPL-3.0-or-later like Dupin.
+[licenses.private]
+ignore = true

@@ -4,7 +4,7 @@
 
 Add a `tagpr:minor` or `tagpr:major` label to the release pull request for a bigger bump than a patch, or edit `VERSION` on its branch.
 
-The crates stay at version 0.0.0 and the Nix package reads `VERSION`, so a release changes neither `Cargo.lock` nor the vendored-dependency hash in `package.nix`.
+The crates stay at version 0.0.0 and the Nix package reads `VERSION`, so a release doesn't change `Cargo.lock`.
 
 A pull request that tagpr pushes with `GITHUB_TOKEN` starts no workflows, so the tagpr workflow dispatches CI on the release branch itself.
 
@@ -14,14 +14,14 @@ CI runs `nix flake check` on Blacksmith's Apple silicon macOS runners. `.github/
 
 ## Signed builds
 
-The Nix package is unsigned and never updates itself. The release builds come from `scripts/package-app.nu`, which copies the Nix-built `Dupin.app` out of the store, points its libiconv at the one macOS ships, writes the channel's version, build number (the commit count) and update feed into `Info.plist`, signs it with the Developer ID under the hardened runtime, notarizes and staples it, and writes `Dupin.zip` (what the updater installs), `Dupin.dmg` (signed, notarized and stapled, for downloading by hand: opening a zip leaves the app in Downloads, where App Translocation stops it updating itself) and `update.json`.
+The Nix package is unsigned and never updates itself. The release builds come from `scripts/package-app.nu`, which copies the Nix-built `Dupin.app` out of the store (`nix build .#dupin-release`, the one build with the [telemetry](./features/telemetry.md) collector's address compiled in), points its libiconv at the one macOS ships, writes the channel's version, build number (the commit count) and update feed into `Info.plist`, signs it with the Developer ID under the hardened runtime, notarizes and staples it, and writes `Dupin.zip` (what the updater installs), `Dupin.dmg` (signed, notarized and stapled, for downloading by hand: opening a zip leaves the app in Downloads, where App Translocation stops it updating itself) and `update.json`.
 
 `.github/workflows/package.yml` runs it for both channels:
 
 - **stable**: merging the tagpr pull request packages the tag and uploads the three files to its release. `releases/latest/download/update.json` is the stable feed.
 - **nightly**: `.github/workflows/nightly.yml` runs daily (and on demand) when `main` has moved since the last nightly, moves the `nightly` tag to it and replaces the files on the `nightly` prerelease.
 
-Try a signed bundle locally with `nu scripts/package-app.nu --channel nightly --identity "Developer ID Application: …"` (add `--notarize` with the notary variables set), or `--identity -` for an ad-hoc signature, which runs but never updates.
+Try a signed bundle locally with `nu scripts/package-app.nu --channel nightly --identity "Developer ID Application: …"` (add `--notarize` with the notary variables set), or `--identity -` for an ad-hoc signature, which runs but never updates or sends the usage ping.
 
 ### Secrets
 

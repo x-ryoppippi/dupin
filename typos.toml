@@ -5,6 +5,17 @@ extend-ignore-re = [
 	"(?Rm)^.*#\\s*spellchecker:disable-line$",
 ]
 
+[default.extend-words]
+centre = "centre"
+centred = "centred"
+colour = "colour"
+colours = "colours"
+licence = "licence"
+licences = "licences"
+maximise = "maximise"
+normalised = "normalised"
+sanitised = "sanitised"
+
 [files]
 ignore-hidden = false
 extend-exclude = [
@@ -15,4 +26,11 @@ extend-exclude = [
 	"assets",
 	"experiments/cargo-cache/results/*.json",
 	"experiments/nix-cargo-cache/results/*.json",
+	# Unicode and CLDR data, and the fixtures that list it, in its own spelling.
+	"extensions/emoji/catalogue.ts",
+	"extensions/emoji/fixtures/*.json",
+	# Word lists for passphrases, as published.
+	"crates/dupin-sync/data/*.txt",
+	# Licence texts, verbatim, typos included.
+	"packaging/licences/CC-BY-3.0-US.txt",
 ]

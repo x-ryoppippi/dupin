@@ -1,0 +1,551 @@
+{
+	"fixture": 1,
+	"description": "Each copy the watch delivers is stored and shows at the top; copying something kept again moves it there; text cut short and blank copies are skipped; Delete from History forgets one entry and Clear History every one, and a copy after clearing shows again.",
+	"environment": {
+		"now": "2026-11-24T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"source": "Notes",
+				"text": "hello world",
+				"type": "text"
+			},
+			"expect": {
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 1,
+						"source": "Notes",
+						"text": "hello world"
+					}
+				]
+			}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"type": "url",
+				"url": "https://dupin.app/download"
+			},
+			"expect": {
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 1,
+						"source": "Notes",
+						"text": "hello world"
+					},
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 2,
+						"text": "https://dupin.app/download"
+					}
+				]
+			}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"files": [
+					{
+						"folder": "/Users/Shared/Fixtures",
+						"handle": "h",
+						"name": "a.txt",
+						"path": "/Users/Shared/Fixtures/a.txt",
+						"size": 12
+					},
+					{
+						"folder": "/Users/Shared/Fixtures",
+						"handle": "h",
+						"name": "b.txt",
+						"path": "/Users/Shared/Fixtures/b.txt"
+					}
+				],
+				"type": "files"
+			},
+			"expect": {
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 1,
+						"source": "Notes",
+						"text": "hello world"
+					},
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 2,
+						"text": "https://dupin.app/download"
+					},
+					{
+						"copiedAt": 1795510800000,
+						"files": [
+							{
+								"folder": "/Users/Shared/Fixtures",
+								"handle": "h",
+								"name": "a.txt",
+								"path": "/Users/Shared/Fixtures/a.txt",
+								"size": 12
+							},
+							{
+								"folder": "/Users/Shared/Fixtures",
+								"handle": "h",
+								"name": "b.txt",
+								"path": "/Users/Shared/Fixtures/b.txt"
+							}
+						],
+						"kind": "files",
+						"seq": 3
+					}
+				]
+			}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"text": "   ",
+				"type": "text"
+			},
+			"expect": {}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"text": "cut short",
+				"truncated": true,
+				"type": "text"
+			},
+			"expect": {}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"text": "hello world",
+				"type": "text"
+			},
+			"expect": {
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 2,
+						"text": "https://dupin.app/download"
+					},
+					{
+						"copiedAt": 1795510800000,
+						"files": [
+							{
+								"folder": "/Users/Shared/Fixtures",
+								"handle": "h",
+								"name": "a.txt",
+								"path": "/Users/Shared/Fixtures/a.txt",
+								"size": 12
+							},
+							{
+								"folder": "/Users/Shared/Fixtures",
+								"handle": "h",
+								"name": "b.txt",
+								"path": "/Users/Shared/Fixtures/b.txt"
+							}
+						],
+						"kind": "files",
+						"seq": 3
+					},
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 4,
+						"text": "hello world"
+					}
+				]
+			}
+		},
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "4273b27f4293df2996ae489a5f69309a"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "4273b27f4293df2996ae489a5f69309a"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "4273b27f4293df2996ae489a5f69309a"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "4273b27f4293df2996ae489a5f69309a",
+						"subtitle": "11 characters",
+						"title": "hello world"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "3bf4e70dda4aa66876f47c1286fa443d"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "3bf4e70dda4aa66876f47c1286fa443d"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"reveal": "/Users/Shared/Fixtures/a.txt",
+								"title": "Reveal in Finder"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "3bf4e70dda4aa66876f47c1286fa443d"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "3bf4e70dda4aa66876f47c1286fa443d",
+						"subtitle": "2 files",
+						"title": "a.txt, b.txt"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "06c39664da55e7a9b981b89670320a01"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "06c39664da55e7a9b981b89670320a01"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "06c39664da55e7a9b981b89670320a01"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "06c39664da55e7a9b981b89670320a01",
+						"subtitle": "26 characters",
+						"title": "https://dupin.app/download"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"select": 1,
+			"expect": {
+				"selected": 1
+			}
+		},
+		{
+			"activate": "Delete from History",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "remove",
+						"data": {
+							"id": "3bf4e70dda4aa66876f47c1286fa443d"
+						}
+					}
+				},
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 2,
+						"text": "https://dupin.app/download"
+					},
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 4,
+						"text": "hello world"
+					},
+					{
+						"copiedAt": 1795510800000,
+						"ids": ["3bf4e70dda4aa66876f47c1286fa443d"],
+						"kind": "removed",
+						"seq": 5
+					}
+				]
+			}
+		},
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "4273b27f4293df2996ae489a5f69309a"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "4273b27f4293df2996ae489a5f69309a"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "4273b27f4293df2996ae489a5f69309a"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "4273b27f4293df2996ae489a5f69309a",
+						"subtitle": "11 characters",
+						"title": "hello world"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "06c39664da55e7a9b981b89670320a01"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "06c39664da55e7a9b981b89670320a01"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "06c39664da55e7a9b981b89670320a01"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "06c39664da55e7a9b981b89670320a01",
+						"subtitle": "26 characters",
+						"title": "https://dupin.app/download"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Clear History",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "clear",
+						"data": null
+					}
+				},
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "cleared",
+						"seq": 6
+					}
+				],
+				"toasts": ["Cleared the clipboard history"]
+			}
+		},
+		{
+			"query": "",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"text": "after clearing",
+				"type": "text"
+			},
+			"expect": {
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "cleared",
+						"seq": 6
+					},
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 7,
+						"text": "after clearing"
+					}
+				]
+			}
+		},
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "2bc2b5bd008964a21b9e05a9bbf7fb02"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "2bc2b5bd008964a21b9e05a9bbf7fb02"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "2bc2b5bd008964a21b9e05a9bbf7fb02"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "2bc2b5bd008964a21b9e05a9bbf7fb02",
+						"subtitle": "14 characters",
+						"title": "after clearing"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

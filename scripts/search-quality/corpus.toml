@@ -1,0 +1,569 @@
+# What scripts/search-quality.nu's cases search: a Mac's apps, the commands and web searches
+# keywords reach, aliases, and a heavy user's history. Fixtures only; nothing here is read from
+# a real Mac. See docs/development.md, "Search quality".
+
+# App names as Finder shows them, by the folder their bundles are in. The first folders are a
+# stock macOS install's; /Applications adds Apple's own apps and a plausible set of
+# third-party ones, chosen for names that compete for the same few letters.
+[apps]
+"/System/Applications" = [
+	"App Store",
+	"Automator",
+	"Books",
+	"Calculator",
+	"Calendar",
+	"Chess",
+	"Clock",
+	"Contacts",
+	"Dictionary",
+	"FaceTime",
+	"Find My",
+	"Font Book",
+	"Freeform",
+	"Games",
+	"Home",
+	"Image Capture",
+	"Image Playground",
+	"iPhone Mirroring",
+	"Journal",
+	"Mail",
+	"Maps",
+	"Messages",
+	"Mission Control",
+	"Music",
+	"News",
+	"Notes",
+	"Passwords",
+	"Phone",
+	"Photo Booth",
+	"Photos",
+	"Podcasts",
+	"Preview",
+	"QuickTime Player",
+	"Reminders",
+	"Shortcuts",
+	"Siri",
+	"Stickies",
+	"Stocks",
+	"System Settings",
+	"TextEdit",
+	"Time Machine",
+	"Tips",
+	"TV",
+	"Voice Memos",
+	"Weather",
+]
+"/System/Applications/Utilities" = [
+	"Activity Monitor",
+	"AirPort Utility",
+	"Audio MIDI Setup",
+	"Bluetooth File Exchange",
+	"ColorSync Utility",
+	"Console",
+	"Digital Color Meter",
+	"Disk Utility",
+	"Grapher",
+	"Keychain Access",
+	"Migration Assistant",
+	"Print Center",
+	"Screen Sharing",
+	"Screenshot",
+	"Script Editor",
+	"System Information",
+	"Terminal",
+	"VoiceOver Utility",
+]
+"/Applications" = [
+	".Karabiner-VirtualHIDDevice-Manager",
+	"1Password",
+	"1Password for Safari",
+	"AdGuard Mini",
+	"Affinity Designer 2",
+	"AirDrop & Continuity",
+	"Alfred 6",
+	"AppCleaner",
+	"Arc",
+	"Ardia",
+	"Arto",
+	"Bartender 5",
+	"BetterTouchTool",
+	"Brave Browser",
+	"ChatGPT",
+	"Claude",
+	"CleanShot X",
+	"Cursor",
+	"DeepL",
+	"Discord",
+	"Docker",
+	"Figma",
+	"Final Cut Pro",
+	"Firefox",
+	"GarageBand",
+	"Ghostty",
+	"Google Chrome",
+	"Hammerspoon",
+	"IINA",
+	"iMovie",
+	"Karabiner-Elements",
+	"Karabiner-EventViewer",
+	"Keka",
+	"Keynote",
+	"Keynote Creator Studio",
+	"Kindle",
+	"LINE",
+	"Linear",
+	"Little Snitch",
+	"Logi Options+",
+	"Logic Pro",
+	"Microsoft Excel",
+	"Microsoft Outlook",
+	"Microsoft PowerPoint",
+	"Microsoft Teams",
+	"Microsoft Word",
+	"Notion",
+	"Notion Calendar",
+	"Numbers",
+	"Obsidian",
+	"OrbStack",
+	"Pages",
+	"Pages Creator Studio",
+	"Pixelmator Pro",
+	"Postman",
+	"Raycast",
+	"Rectangle",
+	"Safari",
+	"Safari Technology Preview",
+	"Signal",
+	"Slack",
+	"Spark",
+	"Spotify",
+	"Steam",
+	"Sublime Text",
+	"TablePlus",
+	"Tailscale",
+	"Telegram",
+	"The Unarchiver",
+	"Things 3",
+	"Transmit 5",
+	"Visual Studio Code",
+	"VLC",
+	"Warp",
+	"WhatsApp",
+	"Wireshark",
+	"Xcode",
+	"Zed",
+	"zoom.us",
+	"Zotero",
+]
+
+# The other names Spotlight knows an app by (kMDItemAlternateNames and kMDItemKeywords), which
+# the apps source matches too, a little below the name Finder shows.
+[names]
+"Books" = ["Apple Books", "iBooks"]
+"ChatGPT" = ["Codex"]
+"Find My" = ["Find My iPhone", "Find My Mac"]
+"Music" = ["Apple Music", "Apple Radio", "Cloud Music Library"]
+"Passwords" = ["Keychain Passwords"]
+"Podcasts" = ["Apple Podcasts"]
+"QuickTime Player" = ["QuickTime"]
+"Screenshot" = ["Grab"]
+"Script Editor" = ["AppleScript Editor"]
+"System Settings" = ["System Preferences", "Preferences", "Settings"]
+"TV" = ["Apple TV"]
+"Visual Studio Code" = ["Code"]
+"zoom.us" = ["Zoom"]
+
+# Commands a keyword enters, as the bundled extensions and config.toml's defaults register them.
+[[commands]]
+id = "calendar.events"
+title = "Calendar"
+keywords = ["cal"]
+
+[[commands]]
+id = "calculator.evaluate"
+title = "Calculator"
+keywords = ["calc"]
+
+[[commands]]
+id = "dictionary.lookup"
+title = "Dictionary"
+keywords = ["define", "d"]
+
+[[commands]]
+id = "clipboard.history"
+title = "Clipboard History"
+keywords = ["clip"]
+
+[[commands]]
+id = "extension.emoji"
+title = "Emoji & Symbols"
+keywords = ["emoji"]
+
+[[commands]]
+id = "snapshots.list"
+title = "Snapshots"
+keywords = ["snap"]
+
+[[commands]]
+id = "snippets.search"
+title = "Snippets"
+keywords = ["snip"]
+
+[[commands]]
+id = "extension.window-management"
+title = "Window Management"
+keywords = ["window"]
+
+[[commands]]
+id = "extension.repo"
+title = "Repositories"
+keywords = ["repo"]
+
+[[commands]]
+id = "extension.dupin"
+title = "Dupin Help"
+keywords = ["help"]
+
+# Web searches, by alias: the bundled web-search package's, then ones a user added.
+[web]
+g = "Google"
+gh = "GitHub"
+maps = "Apple Maps"
+yt = "YouTube"
+ddg = "DuckDuckGo"
+w = "Wikipedia"
+npm = "npm"
+crates = "crates.io"
+mdn = "MDN"
+az = "Amazon"
+
+# [aliases] in config.toml: the user's own shorthands for apps.
+[aliases]
+vs = "Visual Studio Code"
+term = "Ghostty"
+ob = "Obsidian"
+
+# Picks: `times` opens of `app` after typing `query`, the latest `days` ago and each earlier one
+# `every_hours` (3 by default) before the next. A case runs with `base` unless it names others.
+
+# A heavy user's month: the apps they open many times a day and the few letters they type.
+[[history.base]]
+app = "Slack"
+query = "sl"
+times = 300
+
+[[history.base]]
+app = "Safari"
+query = "saf"
+times = 200
+
+[[history.base]]
+app = "Ghostty"
+query = "gho"
+times = 250
+
+[[history.base]]
+app = "Visual Studio Code"
+query = "code"
+times = 150
+
+[[history.base]]
+app = "Messages"
+query = "mes"
+times = 90
+
+[[history.base]]
+app = "Spotify"
+query = "sp"
+times = 120
+
+[[history.base]]
+app = "Spark"
+query = "spa"
+times = 80
+
+[[history.base]]
+app = "Obsidian"
+query = "obs"
+times = 60
+
+[[history.base]]
+app = "Claude"
+query = "cla"
+times = 80
+
+[[history.base]]
+app = "ChatGPT"
+query = "chat"
+times = 60
+
+[[history.base]]
+app = "Notion"
+query = "no"
+times = 70
+
+[[history.base]]
+app = "Notes"
+query = "note"
+times = 40
+
+[[history.base]]
+app = "Linear"
+query = "lin"
+times = 50
+
+[[history.base]]
+app = "Mail"
+query = "mail"
+times = 50
+
+[[history.base]]
+app = "Arto"
+query = "art"
+times = 80
+
+[[history.base]]
+app = "1Password"
+query = "1pa"
+times = 100
+
+[[history.base]]
+app = "Music"
+query = "mu"
+times = 60
+
+[[history.base]]
+app = "Calendar"
+query = "cale"
+times = 40
+
+[[history.base]]
+app = "Figma"
+query = "fig"
+times = 40
+
+[[history.base]]
+app = "Discord"
+query = "dis"
+times = 40
+
+[[history.base]]
+app = "zoom.us"
+query = "zo"
+times = 30
+
+[[history.base]]
+app = "System Settings"
+query = "sys"
+times = 30
+
+[[history.base]]
+app = "Activity Monitor"
+query = "act"
+times = 25
+
+[[history.base]]
+app = "Preview"
+query = "pre"
+times = 30
+
+[[history.base]]
+app = "Photos"
+query = "pho"
+times = 20
+
+[[history.base]]
+app = "Xcode"
+query = "xc"
+times = 20
+
+[[history.base]]
+app = "Google Chrome"
+query = "chr"
+times = 15
+days = 10
+
+# A habit given up four months ago: Terminal before Ghostty.
+[[history.base]]
+app = "Terminal"
+query = "ter"
+times = 200
+days = 120
+
+# The report of #300: apps opened often enough that frecency alone lifts them, Ardia opened
+# from `a` a few times, and picks made for `ar`, `ard` and `ardi` while Ardia was off screen.
+[[history.issue-300]]
+app = "Music"
+times = 400
+
+[[history.issue-300]]
+app = "Spark"
+times = 300
+
+[[history.issue-300]]
+app = "Calendar"
+times = 300
+
+[[history.issue-300]]
+app = "1Password"
+times = 200
+
+[[history.issue-300]]
+app = "Activity Monitor"
+times = 100
+
+[[history.issue-300]]
+app = "Arto"
+times = 80
+
+[[history.issue-300]]
+app = "Ardia"
+query = "a"
+times = 3
+
+[[history.issue-300]]
+app = "Spark"
+query = "ar"
+times = 1
+
+[[history.issue-300]]
+app = "Calendar"
+query = "ar"
+times = 1
+
+[[history.issue-300]]
+app = "AirPort Utility"
+query = "ar"
+times = 1
+
+[[history.issue-300]]
+app = "Activity Monitor"
+query = "ar"
+times = 1
+
+[[history.issue-300]]
+app = "AppCleaner"
+query = "ar"
+times = 1
+
+[[history.issue-300]]
+app = "Alfred 6"
+query = "ar"
+times = 1
+
+[[history.issue-300]]
+app = "Arto"
+query = "ar"
+times = 1
+
+[[history.issue-300]]
+app = "AdGuard Mini"
+query = "ard"
+times = 1
+
+[[history.issue-300]]
+app = "Alfred 6"
+query = "ard"
+times = 1
+
+[[history.issue-300]]
+app = "1Password"
+query = "ard"
+times = 1
+
+[[history.issue-300]]
+app = "Script Editor"
+query = "ard"
+times = 1
+
+[[history.issue-300]]
+app = "Passwords"
+query = "ard"
+times = 1
+
+[[history.issue-300]]
+app = "Music"
+query = "ardi"
+times = 1
+
+[[history.issue-300]]
+app = "AdGuard Mini"
+query = "ardi"
+times = 1
+
+[[history.issue-300]]
+app = "Pages Creator Studio"
+query = "ardi"
+times = 1
+
+[[history.issue-300]]
+app = "Keynote Creator Studio"
+query = "ardi"
+times = 1
+
+[[history.issue-300]]
+app = "AirDrop & Continuity"
+query = "ardi"
+times = 1
+
+# Picks of a longer name for the whole of a shorter one it starts.
+[[history.pages-creator]]
+app = "Pages Creator Studio"
+query = "pages"
+times = 100
+
+[[history.notion-calendar]]
+app = "Notion Calendar"
+query = "notion"
+times = 50
+
+# Picks for one query that point at different apps over time.
+[[history.stale-pick]]
+app = "Spark"
+query = "ar"
+times = 10
+days = 120
+
+[[history.stale-pick]]
+app = "Arc"
+query = "ar"
+times = 1
+
+[[history.recent-pick]]
+app = "Spark"
+query = "ar"
+times = 10
+
+# A pick for a longer query: `safari` typed in full once, yesterday.
+[[history.longer-query]]
+app = "Safari Technology Preview"
+query = "safari"
+times = 1
+days = 1
+
+# A pick for exactly the query, a week ago, of an app that matches it only loosely.
+[[history.same-query]]
+app = "Microsoft Teams"
+query = "te"
+times = 5
+days = 7
+
+# The same pick, five months ago.
+[[history.old-same-query]]
+app = "Microsoft Teams"
+query = "te"
+times = 5
+days = 150
+
+# A habit given up four months ago, and what replaced it, picked for the same letter.
+[[history.old-habit]]
+app = "Safari"
+query = "s"
+times = 100
+days = 120
+
+[[history.new-habit]]
+app = "Spotify"
+query = "s"
+times = 5
+days = 2

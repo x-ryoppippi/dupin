@@ -1,5 +1,7 @@
 # Calculator guest experiment
 
+> **Historical.** Dupin no longer runs Wasm guests: the Wasm path was removed once JavaScript extensions ran in the sandboxed extension host ([rollout](../../docs/design/extension-platform.md#rollout)). This workspace never depended on Dupin and still builds, but the runtime decision it informed is settled.
+
 This separate Cargo workspace exercises the runtime decision gate in
 [the plugin proposal](../../docs/plugin-design.md). Dupin does not depend on it.
 It is an experiment, not the plugin ABI or a runtime adoption decision.

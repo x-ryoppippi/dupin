@@ -1,0 +1,6 @@
+version = 1
+
+[packages.kana]
+enabled = true
+revision = "blake3:f879f5917b1412cfb54ab80c68df4ddb768d32169c664ba64f05ff60442386e0"
+grant = ["rows:app"]

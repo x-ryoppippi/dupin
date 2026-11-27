@@ -1,0 +1,16 @@
+{
+	"name": "dictionary",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Dictionary",
+		"keyword": "define",
+		"icon": "sf:character.book.closed",
+		"main": "main.ts",
+		"capabilities": {
+			"dictionary": [
+				"lookup"
+			]
+		}
+	}
+}

@@ -1,63 +1,73 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
-
-Saving from Settings merges the changed fields into the latest valid file, preserving unrelated external edits observed before saving. If the same field changed differently in the file, or the file is invalid, Settings reports the problem and leaves the file untouched. The final source check is best-effort: an editor that writes between that check and the atomic replacement can still have its edit overwritten.
-
-Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.toml` when `XDG_CONFIG_HOME` is unset. Every key is optional; a missing file means the defaults. File changes apply automatically while Dupin runs, including atomic replacements and changes to a linked file. The panel and Settings use the same configuration.
+Dupin reads `~/.config/dupin/config.toml` (`$XDG_CONFIG_HOME/dupin/config.toml` when `XDG_CONFIG_HOME` is set). Every key is optional. Settings (⌘, in the panel) and `dupin config set` write changes back to it, and Dupin reloads the file while it runs.
 
 ```toml
-hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
-file_limit = 200 # the most files a Spotlight search shows
-file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
-dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
-position = "center" # "center" puts the field at the middle of the display; "top" near its top
-input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
-auto_update = true # whether a release build checks for and installs its channel's updates by itself
-backdrop = "off" # "off", "flow", or the path to a WGSL shader
+display = "mouse" # "mouse", "main", or "active"
+position = "center" # "center" or "top"
+input_source = "ascii" # "ascii", "keep", or an input source identifier
 ```
 
-At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
+| Key            | Default    | Values                                                                                                                    |
+| -------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `display`      | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display             |
+| `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top                                              |
+| `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source) |
 
-Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
+Each feature's keys are on its own page; see [Feature configuration](#feature-configuration).
 
-Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
+> [!TIP]
+> If the file has an error, Dupin keeps working with the defaults (at launch) or the previous configuration (on reload), and shows the error in Settings and the next time the panel opens.
 
-Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+<details>
+<summary>Errors and reloads</summary>
 
-## Web searches
+At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error.
 
-The default keywords are `g` (Google), `gh` (GitHub) and `yt` (YouTube). Define `web_searches` to replace that set, or set it to `{}` to disable web searches. Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. Dupin encodes the text as UTF-8 URL data; it does not treat typed characters as URL syntax. Templates cannot contain credentials or put the placeholder in the origin.
+Dupin reloads changes while it runs, including atomic replacements and symlink retargets.
 
-```toml
-web_fallbacks = ["gh"]
+</details>
 
-[web_searches.gh]
-name = "GitHub"
-url = "https://github.com/search?q={query}"
+<details>
+<summary>How Settings saves</summary>
 
-[web_searches.docs]
-name = "Rust documentation"
-url = "https://doc.rust-lang.org/std/?search={query}"
-```
+Settings and `dupin config set` write changes to a writable `config.toml` in place: a save changes only the keys whose value changed, adds a key to the table that holds it (or a new one at the end), and removes a cleared binding or alias with its own lines. Your comments, key order, blank lines and inline tables stay as you wrote them. For a symlink, Dupin writes to the target and keeps the link.
 
-Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in` and configured Dictionary aliases keep their existing meaning. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
+Saves merge the edited keys into the latest valid configuration, preserving unrelated external edits. If the same key changed differently on disk, or an active file is invalid, Dupin reports the problem and leaves both files untouched. An editor that writes between the final source check and the atomic replacement can still have its edit overwritten.
 
-## File ranking
+</details>
 
-File-name search gathers up to four times `file_limit` candidates, ranks them, then applies the display limit. Both limits are capped at 10,000; zero displays no results. Better candidates can replace early results while the search runs. Selecting a row or opening its actions keeps that file available even if it falls below the normal display cut.
+<details>
+<summary>Read-only config.toml</summary>
 
-`file_demotions` lowers the rank of noisy directories without excluding them. Absolute paths and `~/` paths match directory prefixes; relative entries match directory-component sequences, ignoring case. Entries do not match file names, and an empty list disables these demotions. Edits reload automatically and refresh an active file-name search. Content search keeps Spotlight's order and does not use these rules.
+When `config.toml` is read-only, Dupin saves edits in its [encrypted storage](./features/storage.md), one record per top-level key: keys every Mac shares in the `settings` namespace and the rest, such as hotkeys and display choices, in `settings-local`, under `~/Library/Application Support/Dupin/storage` (or `$XDG_DATA_HOME/dupin/storage` when set).
 
-## Updates
+- Explicit keys in `config.toml` are locked and take precedence. For each remaining top-level key, Dupin uses the saved value if there is one, then the default.
+- A table such as `[theme]` is one top-level key.
+- If the saved settings can't be read, for example because the storage key in the Keychain is unavailable, Dupin uses the defaults, says why in Settings and saves nothing until they can be read again; `config.toml` itself stays plain TOML.
+- If the base later defines a key in the overlay, Dupin removes the shadowed entry on the next successful save and shows a notice.
+- A writable base uses only `config.toml`.
 
-A release build (the Homebrew cask or a zip from GitHub Releases) checks its channel every six hours and installs a newer build by itself: stable follows tagged releases, nightly follows the `nightly` prerelease. It downloads the update into a hidden `.Dupin-update-<build>` folder beside the app and keeps it only when it is signed with the same Developer ID as the running app and Gatekeeper accepts it. The installed app stays as it is until Dupin restarts into the update, which happens when the panel hides with Settings closed and nothing it opened still starting, or until you quit with ⌘Q, which installs it for the next launch. Either way the two apps swap places in one step, so the app is never missing; the next launch removes the old one. `~/Library/Logs/Dupin/dupin.log` records each update and each failed check.
+</details>
 
-Settings' Updates page (⌘, in the panel) shows the running version and what the updater is doing, and its switch sets `auto_update`: off stops the six-hourly checks. Check for Updates checks at once, even with `auto_update = false`; Restart to Update installs a downloaded update now.
+<details>
+<summary>Display and permissions</summary>
 
-When Dupin can't replace its own app (its folder isn't writable by you, or macOS runs it from a translocated copy because it wasn't moved out of Downloads), it only checks: Settings says "Download only" and offers a Download link to the newer build instead of installing it. Move Dupin to `/Applications` or `~/Applications` to let it update itself.
+Focused window (`display = "active"`) uses any existing Accessibility grant. If access or the focused window is unavailable, the panel opens on the main display with a notice. When access is missing, choose **Set Up Accessibility** in the notice to request access or open Accessibility Settings.
 
-A build from Nix or `cargo run` never updates itself and has no Updates page in Settings; update it through Nix. Set `DUPIN_DISABLE_UPDATES=1` in Dupin's environment to turn the updater off for a launch.
+Enabling Calendar search or Paste snippets, setting a Selection hotkey for the first time, or turning on an extension such as Window Management in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
+
+</details>
+
+## Input source
+
+Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while the panel shows and switches back when it hides, so a Japanese or other input method doesn't hold the query in composition.
+
+| Value         | Effect                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"ascii"`     | Leaves a source that already types ASCII alone; otherwise picks the most recently used one that does (ABC, or an input method's Roman mode) |
+| an identifier | Picks that source                                                                                                                           |
+| `"keep"`      | Leaves the input source alone                                                                                                               |
 
 ## Nix
 
@@ -78,90 +88,38 @@ The flake's home-manager module installs Dupin and writes `config.toml` from `se
 }
 ```
 
-With `settings` set, `config.toml` is a read-only link into the Nix store. Change it in Nix and activate the new generation; Dupin follows the updated link automatically. Leave `settings` empty to keep the file out of Nix and editable from Settings.
+Keys set in `settings` show as **Managed by Nix** in Settings; edits to the other keys are saved locally. `extensions` and `bundledExtensions` declare extensions; see [Extensions › Declaring them with Nix](./features/extensions.md#declaring-them-with-nix).
 
-## Input source
+<details>
+<summary>Changing a Nix-managed key</summary>
 
-Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while the panel shows and switches back when it hides, so a Japanese or other input method doesn't hold the query in composition. `"ascii"` leaves a source that already types ASCII alone and otherwise picks the most recently used one that does (ABC, or an input method's Roman mode); an identifier picks that source; `"keep"` leaves the input source alone.
+With `settings` set, `config.toml` links into the Nix store. To change a locked key, edit its Nix value and activate the new generation. To manage it from Settings, remove the key from Nix and activate the new generation.
 
-## Backdrop
+`extensions` declares extension packages and their grants, and `bundledExtensions` switches the extensions that ship with Dupin on or off and denies their scopes.
 
-A shader can animate behind the panel, the query field and its results, while it shows, as Ghostty's `custom-shader` does behind a terminal. `"flow"` is the built-in one, the accent color flowing as warped noise, swelling as you type. `"off"`, the default, draws nothing and leaves the panel plain glass. Anything else is the path to a WGSL file: `~/` is the home directory, and a relative path is relative to `config.toml`.
+</details>
 
-Settings offers `flow`, `off`, the shaders in [`examples/shaders`](../examples/shaders) and every `.wgsl` file in the `shaders` folder beside `config.toml`; the Shaders folder row on the Appearance page opens it. Picking an example copies it into the folder, unless a copy is already there, and points `backdrop` at the copy, so you can edit it.
+## Feature configuration
 
-Dupin reads the file each time the panel shows and compiles it when its text has changed, so you can edit a shader and see it at the next hotkey press. A file that can't be read or doesn't compile shows its error in the panel at every summon until it's fixed; meanwhile Dupin keeps the last version that compiled, or draws `flow`. [`examples/shaders`](../examples/shaders) describes how to write one.
-
-The backdrop holds still under System Settings → Accessibility → Display → Reduce motion.
-
-## Freeing the hotkey
-
-macOS delivers a chord to only one app, so free Dupin's hotkey elsewhere first. For the default ⌘Space:
-
-1. Turn off Spotlight's shortcut: System Settings → Keyboard → Keyboard Shortcuts… → Spotlight → untick "Show Spotlight search".
-2. Remove ⌘Space from any other launcher that uses it, such as Raycast (Settings → General → Raycast Hotkey) or Alfred.
-
-⌃Space is macOS's "Select the previous input source" shortcut (System Settings → Keyboard → Keyboard Shortcuts… → Input Sources), so free it there before using it.
-
-## When the hotkey is taken
-
-If the hotkey can't be registered, Dupin doesn't fail silently. It:
-
-- writes the reason to stderr and to `~/Library/Logs/Dupin/dupin.log`, where Console.app shows it;
-- posts a notification, when it runs as the bundled app;
-- opens the panel with the message, since it has no other window.
-
-It also names a macOS shortcut that holds the chord (Spotlight's, for one), which registers without an error but would take the key first.
-
-One case can't be detected: another app holding the chord through a non-exclusive registration, as Raycast and Alfred can. macOS accepts both registrations and delivers the key to only one of them, which is why step 2 above matters.
-
-# Themes
-
-Omitting `[theme]` preserves the default panel and follows system light/dark appearance.
-Themes are built in: share the TOML section below without installing an extension.
-
-```toml
-[theme]
-panel_width = 680
-row_height = 72
-corner_radius = 14
-font_family = "monospace" # "system" or "monospace"
-font_size = 18
-
-[theme.light]
-background = "#E9F4FA"
-accent = "#176EA6"
-
-[theme.dark]
-background = "#142734"
-accent = "#176EA6"
-```
-
-Each appearance accepts `background`, `text`, `secondary`, `accent`, `selected_text`,
-`hover` and `separator` as `#RRGGBB`. Omitted colors use the system palette. The
-background remains a tint over Liquid Glass; headless rendering uses its opaque fallback.
-Choose contrasting text and selection colors when overriding the palette.
-
-Geometry uses integer points: width 400–1200, row height 52–100, radius 0–32 and
-font size 12–20. Rows must be at least `3 * font_size + 7` points tall. Invalid
-reloads keep the last good configuration and show an error.
-
-Settings → Appearance shows light and dark previews at the configured width (scroll
-to see wide panels), with a menu for colors, font and geometry presets. Edit TOML
-for precise values. Changes use the usual settings save/conflict handling; the theme
-section is one setting for conflict detection. Read-only configurations lock the menu.
-Width, rows, colors and typography apply live without clearing the search. Corner
-radius requires relaunch because pinned Rune only sets native corners at window creation;
-the running panel keeps both its native and drawn corners at the launch radius.
-
-For headless checks, copy one of `scripts/themes/{default,ocean,rose}.toml` to
-`$XDG_CONFIG_HOME/dupin/config.toml` under a temporary directory, then run:
-
-```sh
-target/debug/dupin --script scripts/themes/preview.json --realtime \
-  --snap /tmp/theme.png --at mark:end --size 680x500 --scale 2
-```
-
-Use width 400 for Ocean and 900 for Rose. These fixtures disable hotkeys and updates;
-never point screenshot runs at your regular configuration. Headless snapshots show
-the same resolved colors, fonts and geometry, using the material fallback.
+- [Advanced composition](./features/advanced.md): `[advanced]`, recomposing sources, filters and kinds
+- [Appearance](./features/appearance.md)
+- [Calculator](./features/calculator.md#configuration)
+- [Calendar](./features/calendar.md#configuration)
+- [Clipboard history](./features/clipboard.md#configuration)
+- [Dictionary](./features/dictionary.md#configuration)
+- [Extensions](./features/extensions.md#turning-them-on)
+- [File ranking](./features/files.md#file-ranking)
+- [Hotkeys](./features/hotkeys.md#configuration)
+- [Keywords and aliases](./features/keywords.md#aliases)
+- [Launch at login](./features/settings.md#launch-at-login)
+- [Recent items](./features/recent-items.md#configuration)
+- [Repositories](./features/repo.md#configuration)
+- [Script commands](./features/scripts.md#configuration)
+- [Search selected text](./features/selected-text.md#configuration)
+- [Snippets](./features/snippets.md#configuration)
+- [Sync](./features/sync.md#configuration): `[sync]`, the folder this Mac syncs through
+- [System commands](./features/system-commands.md#configuration)
+- [Telemetry](./features/telemetry.md#configuration): `telemetry`, the anonymous daily usage ping
+- [Updates](./features/updates.md#configuration)
+- [Web searches](./features/web-searches.md#configuration)
+- [Window management](./features/window-management.md#configuration)

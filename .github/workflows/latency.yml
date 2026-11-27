@@ -1,0 +1,105 @@
+name: Latency
+
+# Keypress-to-results latency (scripts/latency.nu). Main's runs are the baseline pull requests
+# are compared with; a pull request only reports against it, in its summary and in the comment
+# latency-comment.yml keeps, because a shared runner's noise is larger than many real changes
+# and some slowdowns are worth what they buy. A feature whose bundled extension is declared beside its
+# native implementation must match it, or, once the native one is deleted, match what this job
+# measured of it at its last commit (scripts/latency/native-baseline.json), so that comparison
+# fails the job. CI calls this workflow whenever the app could have changed, and its required
+# e2e job fails unless this one passed, so a port that falls behind native can't merge.
+# Dispatching with `ref` measures that commit's native implementations instead, to record such a
+# baseline.
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit whose native implementations to measure instead of the branch's head
+        type: string
+        required: false
+
+# No concurrency group: a called workflow's would be CI's own, and each dispatch is one of a
+# baseline's repeated measurements.
+
+permissions:
+  contents: read
+  # setup-nix's Hestia cache checks for evicted packs up front; the baseline is main's artifact.
+  actions: read
+
+jobs:
+  latency:
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 45
+    steps:
+      # actions/checkout takes only a full SHA, branch or tag, so a short SHA is resolved first.
+      - name: Resolve the commit to measure
+        id: target
+        if: ${{ inputs.ref }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+        run: |
+          if ! sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$REF" --jq .sha)"; then
+            echo "::error::ref $REF names no commit of $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+
+      - run: nix build .#dupin-latency --out-link result-latency
+
+      # A baseline is of native implementations; a commit's ports may not run in its own build.
+      - name: Measure
+        env:
+          IMPLEMENTATION: ${{ inputs.ref && 'native' || '' }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu scripts/latency.nu run --bin result-latency/bin/dupin --out "$RUNNER_TEMP/latency/results.json"
+          ${IMPLEMENTATION:+--implementation "$IMPLEMENTATION"}
+
+      # Comparing with main is informational, so none of its steps can fail the job: a pull
+      # request's artifact also carries main's results it was compared with, and
+      # latency-comment.yml comments with the comparison.
+      - name: Fetch main's results
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/latency.nu fetch-main "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          --out "$RUNNER_TEMP/latency/main.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: latency
+          path: ${{ runner.temp }}/latency/
+          if-no-files-found: error
+
+      - name: Compare with main
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          main=()
+          if [[ -f $RUNNER_TEMP/latency/main.json ]]; then
+            main=("$RUNNER_TEMP/latency/main.json")
+          fi
+          nix shell --inputs-from . nixpkgs#nushell --command nu --no-config-file scripts/latency.nu report \
+            "$RUNNER_TEMP/latency/results.json" "${main[@]}" --repo "$GITHUB_REPOSITORY" --commit "$HEAD" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # A baseline run measures only native implementations, so it has no port to hold.
+      - name: Hold extensions to native parity
+        if: ${{ !inputs.ref }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu scripts/latency.nu parity "$RUNNER_TEMP/latency/results.json" --summary "$GITHUB_STEP_SUMMARY"

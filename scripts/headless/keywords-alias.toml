@@ -1,0 +1,7 @@
+[calendar]
+enabled = true
+
+[aliases]
+c = "calendar"
+fin = "app:com.apple.finder"
+goo = "web:g"

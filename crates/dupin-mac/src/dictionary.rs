@@ -1,9 +1,12 @@
-//! Dictionary Services lookups for the `define` launcher mode.
+//! Dictionary Services lookups, laid out for the extension `dictionary` capability.
 
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_host_services::ServiceError;
+use dupin_host_services::dictionary::{Dictionaries, Entry};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
+
+mod layout;
 
 #[repr(C)]
 struct DCSDictionary {
@@ -19,29 +22,57 @@ unsafe extern "C-unwind" {
     ) -> Option<NonNull<CFString>>;
 }
 
-pub struct DictionaryProvider {
+/// The dictionaries turned on in Dictionary's settings, or fixed definitions in their layout.
+pub struct SystemDictionary {
     lookup: fn(&str) -> Option<String>,
 }
 
-impl Default for DictionaryProvider {
+impl Default for SystemDictionary {
     fn default() -> Self {
         Self { lookup: definition }
     }
 }
 
-impl Provider for DictionaryProvider {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
-        let term = request.query.trim();
-        if request.limit == 0 || term.is_empty() || request.is_cancelled() {
-            return Ok(());
+impl SystemDictionary {
+    /// Fixed definitions in Dictionary Services' layout, for headless renders that must not
+    /// depend on the dictionaries this Mac has.
+    pub fn fixtures() -> Self {
+        Self {
+            lookup: fixture_definition,
         }
-        let Some(definition) = (self.lookup)(term) else {
-            return Ok(());
-        };
-        if !request.is_cancelled() {
-            emit(vec![item(term, definition)]);
+    }
+}
+
+fn fixture_definition(term: &str) -> Option<String> {
+    Some(match term {
+        "serendipity" => "serendipity | ˌsɛr(ə)nˈdɪpɪti | noun the happy accident of finding something good \
+            without looking for it: a moment of pure serendipity. ORIGIN mid 18th century: from Serendip, \
+            an old name for Sri Lanka, after a fairy tale whose heroes kept making such discoveries."
+            .into(),
+        "run" => "run | rʌn | verb (runs, running; past ran; past participle run) 1 [no object] move on \
+            foot faster than walking: she ran to the station | he ran the last few yards. • (of a machine) \
+            operate: the engine runs on diesel. • [with object] cause to operate: run the dishwasher twice a \
+            week. 2 [with object] be in charge of: he runs a small bakery. 3 extend in a direction: the path \
+            runs along the river. noun 1 an act of running: a morning run. 2 a journey on a regular route: \
+            the school run. PHRASES on the run trying to avoid being caught. ORIGIN Old English."
+            .into(),
+        _ => return None,
+    })
+}
+
+impl Dictionaries for SystemDictionary {
+    fn lookup(&self, term: &str, dictionaries: Option<&[String]>) -> Result<Vec<Entry>, ServiceError> {
+        if dictionaries.is_some() {
+            return Err(ServiceError::Unsupported(
+                "macOS looks terms up in the dictionaries turned on in Dictionary's settings, \
+                 not in named ones"
+                    .into(),
+            ));
         }
-        Ok(())
+        Ok((self.lookup)(term)
+            .map(|definition| layout::structure(term, &definition))
+            .into_iter()
+            .collect())
     }
 }
 
@@ -65,104 +96,40 @@ fn full_range(text: &CFString) -> CFRange {
     }
 }
 
-fn item(term: &str, definition: String) -> Item {
-    Item {
-        id: format!("dictionary:{term}"),
-        view: View::Detail {
-            title: term.to_owned(),
-            body: definition,
-        },
-        record_usage: false,
-        icon: None,
-        matched: Vec::new(),
-        completion: None,
-        score: None,
-        primary: None,
-        alternate: None,
-        actions: vec![ItemAction::new(
-            "open-dictionary",
-            "Open in Dictionary",
-            Action::OpenUrl(dictionary_url(term)),
-        )],
-    }
-}
-
-fn dictionary_url(term: &str) -> String {
-    let mut url = String::from("dict://");
-    for byte in term.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            url.push(char::from(byte));
-        } else {
-            use std::fmt::Write;
-            write!(url, "%{byte:02X}").expect("writing to a String cannot fail");
-        }
-    }
-    url
-}
-
 #[cfg(test)]
 mod tests {
-    fn detail_body(item: &dupin_core::Item) -> &str {
-        let dupin_core::View::Detail { body, .. } = &item.view else {
-            panic!("expected detail")
-        };
-        body
-    }
     use super::*;
 
-    fn fixture_definition(term: &str) -> Option<String> {
-        (term == "serendipity").then(|| "The occurrence of events by chance.".into())
-    }
-
     #[test]
-    fn provider_returns_the_definition_from_its_lookup() {
-        let provider = DictionaryProvider {
-            lookup: fixture_definition,
-        };
-        let request = Request::detached("serendipity", 1);
-        let mut batches = Vec::new();
-        provider
-            .search(&request, &mut |items| batches.push(items))
+    fn the_service_returns_the_layout_as_data() {
+        use dupin_host_services::dictionary::{Dictionary, Lookup};
+
+        let service = Dictionary::new(SystemDictionary::fixtures());
+        let [entry] = service
+            .lookup(&Lookup::new("serendipity", None).unwrap())
+            .unwrap()
+            .try_into()
             .unwrap();
-
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0][0].display_title(), "serendipity");
-        assert_eq!(detail_body(&batches[0][0]), "The occurrence of events by chance.");
-    }
-
-    #[test]
-    fn zero_limit_does_not_lookup_or_emit() {
-        let provider = DictionaryProvider {
-            lookup: |_| panic!("zero limit must skip lookup"),
-        };
-        provider
-            .search(&Request::detached("serendipity", 0), &mut |_| {
-                panic!("zero limit must not emit")
-            })
-            .unwrap();
-    }
-
-    #[test]
-    fn definition_result_displays_the_definition_and_opens_dictionary() {
-        let item = item("serendipity", "The occurrence of events by chance.".into());
-        assert!(!item.record_usage);
-        assert_eq!(item.display_title(), "serendipity");
-        assert_eq!(detail_body(&item), "The occurrence of events by chance.");
-        assert_eq!(item.primary, None);
+        assert_eq!(entry.headword, "serendipity");
+        assert_eq!(entry.pronunciation.as_deref(), Some("ˌsɛr(ə)nˈdɪpɪti"));
+        assert_eq!(entry.groups[0].part_of_speech.as_deref(), Some("Noun"));
         assert_eq!(
-            item.action("open-dictionary"),
-            Some(&Action::OpenUrl("dict://serendipity".into()))
+            entry.groups[0].senses[0].examples,
+            ["a moment of pure serendipity."]
         );
-        assert_eq!(item.alternate, None);
-    }
-
-    #[test]
-    fn dictionary_url_escapes_url_delimiters_and_unicode() {
-        let value = dictionary_url("a b/#é");
-        assert_eq!(value, "dict://a%20b%2F%23%C3%A9");
+        assert_eq!(entry.sections[0].title, "Origin");
+        assert!(entry.text.starts_with("serendipity | "));
+        assert!(entry.markdown.starts_with("### Noun\n\n"), "{}", entry.markdown);
         assert!(
-            objc2_foundation::NSURL::URLWithString(&objc2_foundation::NSString::from_str(&value)).is_some()
+            service
+                .lookup(&Lookup::new("unknown", None).unwrap())
+                .unwrap()
+                .is_empty()
         );
+        assert!(matches!(
+            service.lookup(&Lookup::new("run", Some(vec!["Oxford".into()])).unwrap()),
+            Err(ServiceError::Unsupported(_))
+        ));
     }
 
     #[test]

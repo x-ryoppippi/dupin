@@ -1,11 +1,12 @@
 # Calculator query protocol fixture
 
+> **Historical.** Dupin no longer runs Wasm guests: `dupin-plugin-runtime` and wasmi were removed once JavaScript extensions ran in the sandboxed extension host ([rollout](../../docs/design/extension-platform.md#rollout)). The host here depends on that crate, so it builds only from a checkout of commit `7f74a07` or earlier. It stays as the record of the Wasm protocol work.
+
 This separate workspace exercises the [experimental query protocol](../../docs/plugin-protocol.md)
-with a real calculator Wasm guest. It is not loaded by Dupin and changes no app
-permissions, entitlements or runtime dependency. The protocol and bounded Wasm
-host live in the root workspace as `dupin-plugin-protocol` and
-`dupin-plugin-runtime`; the fixture CLI uses that same host implementation.
-Neither crate adds a runtime dependency to the launcher executable.
+with a real calculator Wasm guest. The protocol and bounded Wasm host live in
+the root workspace as `dupin-plugin-protocol` and `dupin-plugin-runtime`; the
+fixture CLI uses that same host implementation, and the launcher uses it for
+[user extensions](../../docs/features/extensions.md).
 
 Build the guest using the repository's Rust toolchain and bare Wasm standard
 library. Nix's temporary linker shell supplies `lld` without a global install:

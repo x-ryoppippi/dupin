@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 use dupin_core::{Delivery, Provider, Searcher};
+use dupin_mac::kinds::{self, Rows};
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 
 fn main() {
@@ -13,18 +14,22 @@ fn main() {
     let kind = args.next().unwrap_or_default();
     let query = args.collect::<Vec<_>>().join(" ");
     let provider: Arc<dyn Provider> = match kind.as_str() {
-        "apps" => Arc::new(AppsProvider::standard()),
-        "files" => Arc::new(SpotlightProvider::new(Target::Names)),
-        "in" => Arc::new(SpotlightProvider::new(Target::Contents)),
+        "apps" => Arc::new(AppsProvider::standard(Rows::native())),
+        "files" => Arc::new(SpotlightProvider::new(Target::Names, kinds::native())),
+        "in" => Arc::new(SpotlightProvider::new(Target::Contents, kinds::native())),
         _ => return eprintln!("usage: search apps|files|in <query>"),
     };
     let (tx, rx) = mpsc::channel();
     let searcher = Searcher::spawn(&kind, provider, move |d| drop(tx.send(d)));
     let start = Instant::now();
-    searcher.search(1, query, 50);
+    searcher.search(1, query, None, None, 50);
     for delivery in rx {
         match delivery {
-            Delivery::Batch { items, .. } => {
+            Delivery::Batch { items, .. }
+            | Delivery::Presented {
+                batch: dupin_core::Batch { items, .. },
+                ..
+            } => {
                 println!("-- batch of {} at {:?}", items.len(), start.elapsed());
                 for item in items {
                     println!("{}\t{:?}", item.display_title(), item.view);

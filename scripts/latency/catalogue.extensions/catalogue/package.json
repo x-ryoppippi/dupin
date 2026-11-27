@@ -1,0 +1,11 @@
+{
+	"name": "catalogue",
+	"version": "0.1.0",
+	"private": true,
+	"description": "A 5,000-row items() catalogue for the keypress latency benchmark.",
+	"dupin": {
+		"title": "Catalogue",
+		"keyword": "cat",
+		"defaultSearch": true
+	}
+}

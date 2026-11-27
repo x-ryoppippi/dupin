@@ -2,5 +2,12 @@
 	"$schema": "https://unpkg.com/oxfmt/configuration_schema.json",
 	"useTabs": true,
 	"singleQuote": true,
-	"ignorePatterns": ["target", "result", ".git", ".direnv", "assets"]
+	"ignorePatterns": [
+		"target",
+		"result",
+		".git",
+		".direnv",
+		"assets",
+		"telemetry/src/v1/ping-schema.gen.ts"
+	]
 }

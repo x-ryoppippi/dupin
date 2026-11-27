@@ -13,11 +13,46 @@
 		"enabled": true
 	},
 	"minimumReleaseAge": "3 days",
+	"customManagers": [
+		{
+			"description": "Rune has no releases, so Cargo.toml pins a commit of its default branch, and every Rune crate and patch shares that rev.",
+			"customType": "regex",
+			"managerFilePatterns": ["/^Cargo\\.toml$/"],
+			"matchStrings": [
+				"git = \"https://github\\.com/anomalyco/rune\", rev = \"(?<currentDigest>[0-9a-f]{40})\""
+			],
+			"depNameTemplate": "rune",
+			"packageNameTemplate": "https://github.com/anomalyco/rune",
+			"currentValueTemplate": "dev",
+			"datasourceTemplate": "git-refs"
+		}
+	],
 	"packageRules": [
 		{
 			"description": "Lock file maintenance has no release timestamp, so the age gate would keep it pending forever.",
 			"matchUpdateTypes": ["lockFileMaintenance"],
 			"minimumReleaseAge": null
+		},
+		{
+			"description": "Without the age gate, lock file maintenance can pick up a release minutes old, and main ships to the signed nightly feed, so a person merges it.",
+			"matchUpdateTypes": ["lockFileMaintenance"],
+			"automerge": false
+		},
+		{
+			"description": "The cargo manager sees Rune's dependencies but not its [patch.crates-io] entries, so it would split the rev; the custom manager moves every one.",
+			"matchManagers": ["cargo"],
+			"matchPackageNames": ["https://github.com/anomalyco/rune"],
+			"enabled": false
+		},
+		{
+			"description": "A git-refs digest has no release timestamp, so the age gate would keep Rune pending forever. Without the gate an update can be minutes old, and main ships to the signed nightly feed, so a person merges it once autofix.ci has refreshed Cargo.lock and the vendor hash. Rune lands dozens of commits a day, so the PR moves once a week instead of on each one.",
+			"matchManagers": ["custom.regex"],
+			"matchDepNames": ["rune"],
+			"groupName": "Rune",
+			"minimumReleaseAge": null,
+			"automerge": false,
+			"schedule": ["* 0-5 * * 1"],
+			"updateNotScheduled": false
 		}
 	],
 	"nix": {

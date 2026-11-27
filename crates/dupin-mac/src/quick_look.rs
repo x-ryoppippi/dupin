@@ -5,32 +5,15 @@ use std::ffi::c_void;
 use std::path::Path;
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventType, NSResponder, NSView, NSWindow, NSWindowDelegate,
+    NSApplication, NSEvent, NSEventType, NSResponder, NSView, NSWindowDelegate,
     NSWindowDidResignKeyNotification,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol, NSString, NSURL};
 use objc2_quick_look_ui::{QLPreviewItem, QLPreviewPanel, QLPreviewPanelDataSource, QLPreviewPanelDelegate};
-
-pub const ACTION_ID: &str = "quick-look";
-
-/// Add Quick Look to a result created by `Item::path`.
-pub(crate) fn add_action(item: &mut Item) {
-    let Some(Action::Open(path)) = item.action("open") else {
-        return;
-    };
-    let action = ItemAction::new(ACTION_ID, "Quick Look", Action::Preview(path.clone())).keep_open();
-    let at = item
-        .actions
-        .iter()
-        .position(|candidate| candidate.id == "copy-path")
-        .unwrap_or(item.actions.len());
-    item.actions.insert(at, action);
-}
 
 struct ControllerState {
     item: RefCell<Option<Retained<NSURL>>>,
@@ -240,7 +223,7 @@ impl Previewer {
         // SAFETY: The owner chain changed when its selected URL was set; this asks QL to find us.
         unsafe { panel.updateController() };
         let owner = self.view.window();
-        let owner_was_key = owner.as_ref().is_some_and(|window| window.isKeyWindow());
+        let owner_was_key = crate::window::view_is_key(&self.view);
         panel.makeKeyAndOrderFront(None);
         if !current_controller_is(&panel, &self.controller) {
             if std::env::var_os("DUPIN_TRACE").is_some() {
@@ -255,7 +238,7 @@ impl Previewer {
                 }
                 trace_preview(&format!(
                     "controller not adopted; owner_key={} app_active={} app_key={} responders={}",
-                    self.owner_is_key(),
+                    crate::window::view_is_key(&self.view),
                     app.isActive(),
                     app.keyWindow().is_some(),
                     chain.join(" -> ")
@@ -268,7 +251,7 @@ impl Previewer {
             }
             if owner_was_key
                 && let Some(owner) = owner
-                && !owner.isKeyWindow()
+                && !crate::window::view_is_key(&self.view)
             {
                 owner.makeKeyWindow();
             }
@@ -309,14 +292,6 @@ impl Previewer {
         ));
     }
 
-    pub fn owner_is_key(&self) -> bool {
-        MainThreadMarker::new().is_some()
-            && self
-                .view
-                .window()
-                .is_some_and(|window: Retained<NSWindow>| window.isKeyWindow())
-    }
-
     pub fn finish_focus_transfer(&self) -> bool {
         let Some(mtm) = MainThreadMarker::new() else {
             return false;
@@ -329,7 +304,7 @@ impl Previewer {
                 .is_some_and(|current| !same_object(&*current, &*self.controller))
         }) {
             self.controller.clear_item();
-            return self.owner_is_key();
+            return crate::window::view_is_key(&self.view);
         }
         let visible = panel.as_ref().is_some_and(|panel| panel.isVisible());
         trace_preview(&format!(
@@ -346,7 +321,7 @@ impl Previewer {
                 .as_ref()
                 .is_some_and(|panel| current_controller_is(panel, &self.controller) && panel.isKeyWindow()),
             visible,
-            owner.as_ref().is_some_and(|window| window.isKeyWindow()),
+            crate::window::view_is_key(&self.view),
             owner.as_ref().is_some_and(|window| window.isVisible()),
             app.isActive(),
             app.keyWindow().is_some(),
@@ -505,36 +480,5 @@ mod tests {
                 FocusTransfer::Dismiss
             );
         }
-    }
-
-    #[test]
-    fn adds_quick_look_to_path_results_before_copy_path() {
-        let path = Path::new("/tmp/brief.md").to_path_buf();
-        let mut item = Item::path(path.clone(), "brief.md".into(), Vec::new());
-
-        add_action(&mut item);
-
-        assert_eq!(
-            item.actions
-                .iter()
-                .map(|action| action.id.as_str())
-                .collect::<Vec<_>>(),
-            ["open", "reveal", ACTION_ID, "copy-path"]
-        );
-        assert_eq!(item.action(ACTION_ID), Some(&Action::Preview(path)));
-    }
-
-    #[test]
-    fn does_not_add_quick_look_when_a_result_cannot_be_opened_as_a_path() {
-        let mut item = Item::path(
-            Path::new("/tmp/brief.md").to_path_buf(),
-            "brief.md".into(),
-            Vec::new(),
-        );
-        item.actions.retain(|action| action.id != "open");
-
-        add_action(&mut item);
-
-        assert!(item.item_action(ACTION_ID).is_none());
     }
 }

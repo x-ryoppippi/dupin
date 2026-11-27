@@ -1,0 +1,31 @@
+[private]
+default:
+    @just --list
+
+# Install the Worker's dependencies from the lockfile
+install:
+    pnpm install --frozen-lockfile
+
+# Run the Worker locally
+dev: install
+    pnpm run dev
+
+# Build the Worker
+build: install
+    pnpm run build
+
+# Run the Worker's Vitest tests
+test: install
+    pnpm run test
+
+# Type-check the Worker
+typecheck: install
+    pnpm run typecheck
+
+# Deploy the Worker to Cloudflare
+deploy: install
+    pnpm run deploy
+
+# Regenerate src/v1/ping-schema.gen.ts from the Rust `Ping` type
+generate-schema:
+    cd .. && cargo run --locked -p dupin-telemetry --bin generate-telemetry-schema -- telemetry/src/v1/ping-schema.gen.ts
