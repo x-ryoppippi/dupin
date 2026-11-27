@@ -13,7 +13,7 @@ const WARNING: Color = Color {
     a: 0.14,
 };
 
-pub(super) fn panel_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
+pub(super) fn panel_notices(parts: &mut Vec<El>, s: &Ui, t: &ResolvedTheme, accent: Color) {
     let notices = [
         ("config-problem", s.config_problem.as_deref()),
         ("hotkey-problem", s.hotkey_problem.as_deref()),
@@ -22,7 +22,8 @@ pub(super) fn panel_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Co
         ("backdrop-notice", s.backdrop.problem()),
     ];
     for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
-        panel = panel.child(divider(t)).child(
+        parts.push(divider(t));
+        parts.push(
             row().key(key).w_full().px(18.0).py(12.0).fill(WARNING).child(
                 text(notice)
                     .font(t.font(type_::BODY.lh(18.0)))
@@ -41,7 +42,8 @@ pub(super) fn panel_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Co
                 "Couldn't find the focused window's display. Using the main display."
             }
         };
-        panel = panel.child(divider(t)).child(
+        parts.push(divider(t));
+        parts.push(
             col()
                 .key("display-notice")
                 .w_full()
@@ -68,7 +70,8 @@ pub(super) fn panel_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Co
         );
     }
     if s.selection_permission_required {
-        panel = panel.child(divider(t)).child(
+        parts.push(divider(t));
+        parts.push(
             col()
                 .key("selection-permission")
                 .w_full()
@@ -96,12 +99,11 @@ pub(super) fn panel_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Co
                 ),
         );
     }
-    panel
 }
 
-pub(super) fn search_notices(mut panel: El, s: &Ui, t: &ResolvedTheme) -> El {
+pub(super) fn search_notices(parts: &mut Vec<El>, s: &Ui, t: &ResolvedTheme) {
     for (origin, failure) in s.session.failures() {
-        panel = panel.child(
+        parts.push(
             row()
                 .key(format!("failure-{origin}"))
                 .w_full()
@@ -126,5 +128,4 @@ pub(super) fn search_notices(mut panel: El, s: &Ui, t: &ResolvedTheme) -> El {
                 ),
         );
     }
-    panel
 }

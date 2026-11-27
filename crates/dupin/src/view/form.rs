@@ -12,7 +12,7 @@ const CONTROL_H: f32 = 34.0;
 
 /// An extension's form: each field beside its title, with what is wrong with it beneath, and
 /// the keys that submit and cancel it.
-pub(super) fn form(draft: &Draft, budget: f32, t: &ResolvedTheme, accent: Color) -> El {
+pub(super) fn form(draft: &Draft, budget: f32, grows_up: bool, t: &ResolvedTheme, accent: Color) -> El {
     let fields = draft
         .form
         .fields
@@ -59,29 +59,28 @@ pub(super) fn form(draft: &Draft, budget: f32, t: &ResolvedTheme, accent: Color)
     } else {
         format!("⌘↵ {} · ⇥ Next field · esc Cancel", draft.form.submit_title)
     };
+    let scroll = col()
+        .key("form-scroll")
+        .w_full()
+        .shrink()
+        .max_h(budget - 48.0)
+        .scroll(ScrollSpec { stick_bottom: false })
+        .child(col().w_full().py(LIST_PAD).gap(14.0).children(fields));
+    let hint = row().w_full().center_y().child(el().grow(1.0)).child(
+        text(hint)
+            .key("form-hint")
+            .font(t.font(type_::LABEL))
+            .color(t.text_secondary),
+    );
+    // The hint closes the form at the edge away from the field.
+    let parts = if grows_up { [hint, scroll] } else { [scroll, hint] };
     col()
         .key("form")
         .w_full()
         .px(18.0)
         .py(12.0)
         .gap(12.0)
-        .child(
-            col()
-                .key("form-scroll")
-                .w_full()
-                .shrink()
-                .max_h(budget - 48.0)
-                .scroll(ScrollSpec { stick_bottom: false })
-                .child(col().w_full().py(LIST_PAD).gap(14.0).children(fields)),
-        )
-        .child(
-            row().w_full().center_y().child(el().grow(1.0)).child(
-                text(hint)
-                    .key("form-hint")
-                    .font(t.font(type_::LABEL))
-                    .color(t.text_secondary),
-            ),
-        )
+        .children(parts)
 }
 
 fn field_control(

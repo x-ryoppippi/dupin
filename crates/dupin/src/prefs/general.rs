@@ -179,28 +179,31 @@ fn position_setting(s: &Prefs, k: &Kit) -> El {
 }
 
 fn pick_position(s: &mut Prefs, tx: &mut Tx) {
-    let options = [(Position::Center, "center"), (Position::Top, "top")]
-        .map(|(p, id)| (id.to_owned(), position_title(p).to_owned()))
+    const POSITIONS: [Position; 3] = [Position::Center, Position::Top, Position::Bottom];
+    let options = POSITIONS
+        .map(|p| (position_id(p).to_owned(), position_title(p).to_owned()))
         .to_vec();
-    let selected = match s.config.position {
+    choose(tx, POSITION, options, position_id(s.config.position), |s, id| {
+        if let Some(position) = POSITIONS.into_iter().find(|p| position_id(*p) == id) {
+            s.set(|c| c.position = position);
+        }
+    });
+}
+
+/// The position's name in config.toml.
+fn position_id(position: Position) -> &'static str {
+    match position {
         Position::Center => "center",
         Position::Top => "top",
-    };
-    choose(tx, POSITION, options, selected, |s, id| {
-        s.set(|c| {
-            c.position = if id == "top" {
-                Position::Top
-            } else {
-                Position::Center
-            }
-        });
-    });
+        Position::Bottom => "bottom",
+    }
 }
 
 fn position_title(position: Position) -> &'static str {
     match position {
         Position::Center => "Center",
         Position::Top => "Top",
+        Position::Bottom => "Bottom",
     }
 }
 

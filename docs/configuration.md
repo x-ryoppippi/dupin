@@ -4,15 +4,17 @@ Dupin reads `~/.config/dupin/config.toml` (`$XDG_CONFIG_HOME/dupin/config.toml` 
 
 ```toml
 display = "mouse" # "mouse", "main", or "active"
-position = "center" # "center" or "top"
+position = "center" # "center", "top", or "bottom"
 input_source = "ascii" # "ascii", "keep", or an input source identifier
 ```
 
-| Key            | Default    | Values                                                                                                                    |
-| -------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `display`      | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display             |
-| `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top                                              |
-| `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source) |
+| Key            | Default    | Values                                                                                                                                                         |
+| -------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `display`      | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display                                                  |
+| `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top; `"bottom"` near its bottom, with results above it. Settings → General → Position |
+| `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source)                                      |
+
+With `position = "bottom"` the panel is laid out as fzf and Telescope lay theirs out: the field sits as far above the bottom of the display as `"top"` puts it below the top, and the results run upwards from it, the best match next to the field. The panel's bottom edge stays put as the results change. <kbd>↑</kbd> moves to the row above, the next match, and <kbd>↓</kbd> back towards the field; the ⌘K actions and pickers follow the same order. Hints and notices sit next to the field, and footers, such as the folder picker's <kbd>↩</kbd> Choose folder line, at the top. Forms and cards keep reading top to bottom above the field. The panel doesn't animate its size in this position, so its edge and the field never slide.
 
 The result list fills the room the display leaves on its side of the field, so a taller display shows more rows before the list scrolls: at least as many as fit in 416 points (eight rows at the default `row_height`), at most as many as fit in 832. A smaller `row_height` fits more rows into the same room.
 

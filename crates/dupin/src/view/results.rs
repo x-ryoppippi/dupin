@@ -112,14 +112,14 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .growth(GrowthSpec::default())
             .no_scroll_anchor()
             .virtualize(s.theme.row_height as f32)
-            .on_visible_rows(Ui::rows_in_view)
-            .children(rows);
+            .on_visible_rows(rows_in_view(s, rows.len()))
+            .children(list_order(rows, s.grows_up()));
         return col().key("results").w_full().py(LIST_PAD).child(
             col()
                 .key("scroll")
                 .w_full()
                 .h(s.list_budget + CARDS_EXTRA_H)
-                .scroll(ScrollSpec { stick_bottom: false })
+                .scroll(list_scroll(s))
                 .on_scroll_offset(report_offset(s))
                 .instant_changes()
                 .child(list),
@@ -144,14 +144,17 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
                 sectioned(s, index, row, t)
             })
             .collect::<Vec<_>>();
-        let content = col().key("content-rows").w_full().children(rows);
+        let content = col()
+            .key("content-rows")
+            .w_full()
+            .children(list_order(rows, s.grows_up()));
         return col().key("results").w_full().py(LIST_PAD).child(
             col()
                 .key("content-scroll")
                 .w_full()
                 .shrink()
                 .max_h(s.list_budget + CARDS_EXTRA_H)
-                .scroll(ScrollSpec { stick_bottom: false })
+                .scroll(list_scroll(s))
                 .on_scroll_offset(report_offset(s))
                 .child(content),
         );
@@ -180,7 +183,8 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
         let shown = items.len().min(visible_rows(s.list_budget, row_height)) as f32;
         (
             shown * row_height,
-            list.virtualize(row_height).on_visible_rows(Ui::rows_in_view),
+            list.virtualize(row_height)
+                .on_visible_rows(rows_in_view(s, rows.len())),
         )
     } else {
         let full = items.len() as f32 * row_height + headings as f32 * SECTION_H;
@@ -194,47 +198,85 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .key("scroll")
             .w_full()
             .h(height)
-            .scroll(ScrollSpec { stick_bottom: false })
+            .scroll(list_scroll(s))
             .on_scroll_offset(report_offset(s))
             .instant_changes()
-            .child(list.children(rows)),
+            .child(list.children(list_order(rows, s.grows_up()))),
     )
 }
 
-fn report_offset(s: &Ui) -> impl Fn(rune::ScrollPos) + 'static {
-    let offset = s.list_offset.clone();
-    move |at| {
-        offset.set(at.offset[1]);
+/// The rows, first match first, in the order they stack from the list's top: a list that runs
+/// upwards from the field puts the first match at its bottom, next to the field.
+pub(super) fn list_order<T>(mut rows: Vec<T>, grows_up: bool) -> Vec<T> {
+    if grows_up {
+        rows.reverse();
+    }
+    rows
+}
+
+/// A list that runs upwards opens at its bottom, where the first match is, and stays there as
+/// its rows change.
+fn list_scroll(s: &Ui) -> ScrollSpec {
+    ScrollSpec {
+        stick_bottom: s.grows_up(),
     }
 }
 
-/// `result` under its section's heading when it starts one. The heading shares the row's key,
-/// so revealing the row reveals its heading too.
+/// The rows in view, as the windowed list reports them in its own order, by result index.
+fn rows_in_view(s: &Ui, len: usize) -> impl Fn(&mut Ui, std::ops::Range<usize>) -> bool + 'static {
+    let grows_up = s.grows_up();
+    move |s, shown| s.rows_in_view(result_range(shown, len, grows_up))
+}
+
+fn result_range(shown: std::ops::Range<usize>, len: usize, grows_up: bool) -> std::ops::Range<usize> {
+    if grows_up {
+        len.saturating_sub(shown.end)..len.saturating_sub(shown.start)
+    } else {
+        shown
+    }
+}
+
+/// Records how far the list is scrolled away from the field's end, where the first match is.
+fn report_offset(s: &Ui) -> impl Fn(rune::ScrollPos) + 'static {
+    let offset = s.list_offset.clone();
+    let grows_up = s.grows_up();
+    move |at| {
+        offset.set(if grows_up {
+            (at.max[1] - at.offset[1]).max(0.0)
+        } else {
+            at.offset[1]
+        });
+    }
+}
+
+/// `result` under its section's heading when it starts one, or over it in a list that runs
+/// upwards: read from the field outwards, a heading comes before its section either way. The
+/// heading shares the row's key, so revealing the row reveals its heading too.
 fn sectioned(s: &Ui, index: usize, result: El, t: &ResolvedTheme) -> El {
     let Some(section) = s.session.section_start(index) else {
         return result.key(row_key(&s.session.layout_key(index)));
     };
     let key = row_key(&s.session.layout_key(index));
-    col()
-        .key(key.clone())
+    let heading = row()
+        .key(format!("{key}-section"))
         .w_full()
+        .h(SECTION_H)
+        .px(LIST_PAD + 10.0)
+        .center_y()
+        .role("heading")
         .child(
-            row()
-                .key(format!("{key}-section"))
-                .w_full()
-                .h(SECTION_H)
-                .px(LIST_PAD + 10.0)
-                .pt(8.0)
-                .center_y()
-                .role("heading")
-                .child(
-                    text(section)
-                        .font(t.font(type_::SECTION))
-                        .color(t.text_secondary)
-                        .truncate(),
-                ),
-        )
-        .child(result.key(format!("{key}-row")))
+            text(section)
+                .font(t.font(type_::SECTION))
+                .color(t.text_secondary)
+                .truncate(),
+        );
+    let result = result.key(format!("{key}-row"));
+    let section = col().key(key).w_full();
+    if s.grows_up() {
+        section.child(result).child(heading.pb(8.0))
+    } else {
+        section.child(heading.pt(8.0)).child(result)
+    }
 }
 
 fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, accent: Color) -> El {
@@ -555,7 +597,22 @@ pub fn row_key(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET, list_budget, visible_rows};
+    use super::{DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET, list_budget, list_order, result_range, visible_rows};
+
+    #[test]
+    fn a_list_that_runs_upwards_puts_the_first_match_next_to_the_field() {
+        assert_eq!(list_order(vec![0, 1, 2], false), [0, 1, 2]);
+        assert_eq!(list_order(vec![0, 1, 2], true), [2, 1, 0]);
+    }
+
+    #[test]
+    fn rows_in_view_are_reported_by_result_index() {
+        // Ten results, the bottom four shown: the first four matches.
+        assert_eq!(result_range(6..10, 10, true), 0..4);
+        assert_eq!(result_range(0..3, 10, true), 7..10);
+        assert_eq!(result_range(6..10, 10, false), 6..10);
+        assert_eq!(result_range(0..0, 0, true), 0..0);
+    }
 
     #[test]
     fn themed_lists_keep_the_original_height_budget() {

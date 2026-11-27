@@ -390,6 +390,11 @@ impl Ui {
         ui
     }
 
+    /// Whether the panel's lists run upwards from the field, the best match next to it.
+    pub(crate) fn grows_up(&self) -> bool {
+        self.position.grows_up()
+    }
+
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
         self.poll_picker(clock, tx);
         let notice_expired = self.notices.expire(clock);
