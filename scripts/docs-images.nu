@@ -449,7 +449,7 @@ export def encode-video [pngs: list<string>, out: path, video: record]: nothing 
     if $result.exit_code != 0 {
         error make {msg: $"ffmpeg failed for ($out):\n($result.stderr)"}
     }
-    ^magick ($pngs | last) -quality 90 $video.poster
+    ^magick ($pngs | last) -quality 95 -define webp:sns-strength=0 -define webp:filter-strength=0 $video.poster
 }
 
 # An extension's fixture played through `dupin ext render --record`, up to `step` or its last

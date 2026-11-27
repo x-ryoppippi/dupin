@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { Attachment } from 'svelte/attachments';
-
 	// A recording of the app from scripts/docs-images/images.toml. It plays, muted and looping,
-	// only while it is on screen; under reduced motion it stays on its poster until played.
+	// only while it is on screen and `active`; under reduced motion it stays on its poster until
+	// played. An inactive one is paused and rewound, so it starts from its first frame when it
+	// is shown, and `onready` says when that frame can be drawn.
 	type Props = {
 		src: string;
 		poster: string;
@@ -10,35 +10,52 @@
 		height: number;
 		label: string;
 		preload?: 'auto' | 'metadata' | 'none';
+		active?: boolean;
+		onready?: () => void;
 		class?: string;
 	};
 
-	let { src, poster, width, height, label, preload = 'metadata', class: className }: Props = $props();
+	let {
+		src,
+		poster,
+		width,
+		height,
+		label,
+		preload = 'metadata',
+		active = true,
+		onready,
+		class: className,
+	}: Props = $props();
 
-	let video: HTMLVideoElement | undefined;
+	let video = $state<HTMLVideoElement>();
 	let paused = $state(true);
+	let seen = $state(false);
+	let reduced = $state(false);
 	// Paused by hand, so scrolling it back into view leaves it paused.
 	let chosen = false;
 
-	const autoplay: Attachment<HTMLVideoElement> = (element) => {
-		video = element;
+	$effect(() => {
+		if (!video) return;
+		const element = video;
 		const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
-		let seen = false;
-		const sync = () => {
-			if (seen && !chosen && !motion.matches) void element.play().catch(() => undefined);
-			else if (!seen || motion.matches) element.pause();
-		};
-		const observer = new IntersectionObserver(([entry]) => {
-			seen = entry?.isIntersecting ?? false;
-			sync();
-		});
+		reduced = motion.matches;
+		const change = () => (reduced = motion.matches);
+		const observer = new IntersectionObserver(([entry]) => (seen = entry?.isIntersecting ?? false));
 		observer.observe(element);
-		motion.addEventListener('change', sync);
+		motion.addEventListener('change', change);
+		if (element.readyState >= 2) onready?.();
 		return () => {
 			observer.disconnect();
-			motion.removeEventListener('change', sync);
+			motion.removeEventListener('change', change);
 		};
-	};
+	});
+
+	$effect(() => {
+		if (!video) return;
+		if (active && seen && !chosen && !reduced) void video.play().catch(() => undefined);
+		else video.pause();
+		if (!active && video.currentTime > 0) video.currentTime = 0;
+	});
 
 	const toggle = () => {
 		chosen = !paused;
@@ -49,7 +66,7 @@
 
 <figure class={['clip', paused && 'is-paused', className]}>
 	<video
-		{@attach autoplay}
+		bind:this={video}
 		{poster}
 		{width}
 		{height}
@@ -58,6 +75,7 @@
 		loop
 		playsinline
 		aria-label={label}
+		onloadeddata={() => onready?.()}
 		onplay={() => (paused = false)}
 		onpause={() => (paused = true)}
 	>
