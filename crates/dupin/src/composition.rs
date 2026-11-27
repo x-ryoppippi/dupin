@@ -644,13 +644,10 @@ export const filters = {
         assert_eq!(scores, [Some(6), None, Some(25)]);
 
         composition.apply(&advanced("[advanced.sources.apps]\nsorter = \"kana/spin\""));
-        let started = std::time::Instant::now();
+        let started = crate::extensions::host_now();
         assert_eq!(stages().batch_order(&titles), None, "an overrun falls back");
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "{:?}",
-            started.elapsed()
-        );
+        let spent = crate::extensions::host_now() - started;
+        assert!(spent < Duration::from_secs(2), "{spent:?}");
 
         composition.apply(&advanced("[advanced.sources.apps]\nmatcher = \"kana/longest\""));
         assert_eq!(

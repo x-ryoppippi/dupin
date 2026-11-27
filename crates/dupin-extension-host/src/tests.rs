@@ -153,7 +153,7 @@ fn a_replaying_host_holds_a_call_to_its_helpers_processor_time_not_the_wall_cloc
     assert_eq!(failed(search(&wall, &echo, "a", within)).code, "host-starting");
     let replaying = Host::replaying(
         slow_launch(|| helper_command("tests::helper_entry"), "1"),
-        ENVIRONMENT,
+        Some(ENVIRONMENT),
     );
     let before = replaying.now();
     std::thread::sleep(Duration::from_millis(50));

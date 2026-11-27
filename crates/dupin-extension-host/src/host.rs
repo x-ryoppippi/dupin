@@ -259,10 +259,10 @@ impl Host {
     /// the processor time its helpers spend on them, from [`Host::now`]: a replay checks what
     /// the guest does in the time the launcher gives it, which a busy machine's wait for a
     /// processor isn't part of.
-    pub fn replaying(launch: Launcher, environment: Environment) -> Self {
+    pub fn replaying(launch: Launcher, environment: Option<Environment>) -> Self {
         Self::build(
             launch,
-            Some(environment),
+            environment,
             TICK,
             Clock::Processor {
                 origin: Instant::now(),

@@ -476,13 +476,16 @@ pub(crate) fn play_headless_copies(clock: f64) {
 
 /// The one extension host every JavaScript extension shares, which starts a trust domain's
 /// helper on that domain's first query. Every bundled package's calls queue for one helper, and
-/// the wait counts against each call's deadline. A headless run renders as a fixture replays, so
-/// its host replays too, holding guests to the processor time they spend.
+/// the wait counts against each call's deadline. A headless run renders as a fixture replays,
+/// and a test checks what a guest does however busy the other tests keep the machine, so both
+/// hold guests to the processor time they spend; the launcher a person waits on keeps the wall
+/// clock.
 fn host() -> &'static Host {
     launcher_wide!(
         Host,
         match headless_environment() {
-            Some(environment) => Host::replaying(Box::new(helper_command), environment),
+            Some(environment) => Host::replaying(Box::new(helper_command), Some(environment)),
+            None if cfg!(test) => Host::replaying(Box::new(helper_command), None),
             None => Host::new(Box::new(helper_command)),
         }
     )
@@ -491,7 +494,12 @@ fn host() -> &'static Host {
 /// The moment `within` from now on the extension host's clock, which every deadline of a call
 /// to an extension is measured against.
 pub fn deadline_in(within: std::time::Duration) -> Instant {
-    host().now() + within
+    host_now() + within
+}
+
+/// The moment on the extension host's clock.
+pub fn host_now() -> Instant {
+    host().now()
 }
 
 /// The process ID and processor time of the helper that runs `extension`'s searches.
