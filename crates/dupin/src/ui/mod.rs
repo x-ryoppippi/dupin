@@ -147,6 +147,10 @@ pub struct Ui {
     pub shown: bool,
     /// The command the panel last applied effects in, to tell entering or leaving one apart.
     entered: dupin_core::CommandId,
+    /// Entered a command on screen whose first results haven't come: they move as the entry did.
+    entering: bool,
+    /// When the panel last entered or left a command on screen.
+    entered_at: f64,
     /// The clock when the panel last showed, and when the query last changed.
     pub shown_at: f64,
     pub typed_at: f64,
@@ -355,6 +359,8 @@ impl Ui {
             rows: config.rows,
             shown: false,
             entered,
+            entering: false,
+            entered_at: f64::NEG_INFINITY,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
             typed_at: f64::NEG_INFINITY,

@@ -7,10 +7,14 @@ use super::{Busy, Ui, query::mark_session_query};
 impl Ui {
     pub(super) fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
         // Rune animates a key's commit but lands typing and what no key in the panel caused (a
-        // hotkey, an extension's answer) at once; entering or leaving a command moves the same
-        // way whatever caused it.
-        if entered(&mut self.entered, &self.session) && self.shown {
-            tx.animated();
+        // hotkey, an extension's answer, a search's results) at once; entering or leaving a
+        // command moves the same way whatever caused it, up to its first results.
+        if entered(&mut self.entered, &self.session) {
+            self.entering = self.on_screen();
+            if self.entering {
+                self.entered_at = tx.clock();
+                tx.animated();
+            }
         }
         for effect in effects {
             match effect {

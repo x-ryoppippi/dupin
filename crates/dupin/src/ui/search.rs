@@ -22,6 +22,10 @@ impl Ui {
     fn deliver(&mut self, origin: CommandId, delivery: Delivery, sent: Instant, tx: &mut Tx) -> bool {
         let delivered = self.session.deliver_from(origin.clone(), delivery);
         if delivered {
+            if self.entering && !self.session.items().is_empty() {
+                self.entering = false;
+                tx.animated();
+            }
             crate::latency::delivered(&origin, sent, |generation| {
                 self.session.pending(&origin, generation)
             });
