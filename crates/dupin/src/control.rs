@@ -601,19 +601,21 @@ mod tests {
             .env("TMPDIR", tmp)
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            if let Some(status) = child.try_wait().unwrap() {
-                assert!(status.success(), "child failed: {status}");
-                break;
-            }
-            if Instant::now() >= deadline {
-                child.kill().unwrap();
-                child.wait().unwrap();
-                panic!("control subprocess hung");
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        // Waited for however long a busy machine takes to start it; one that hung would hang the
+        // test for the harness to report.
+        let status = child.wait().unwrap();
+        assert!(status.success(), "child failed: {status}");
+    }
+
+    /// Waits until nothing holds `dir`'s lock any more. Under load the lock outlives the server
+    /// this process dropped, for seconds at times, while other processes the test binary started
+    /// hold copies of its descriptor, and a server started then would find the directory owned.
+    /// Once the server is gone this process holds no descriptor for it, so no new copy appears.
+    fn released(dir: &std::path::Path) {
+        use std::os::fd::AsRawFd;
+        let directory = std::fs::File::open(dir).unwrap();
+        // SAFETY: directory owns a valid descriptor; closing it releases the lock again.
+        assert_eq!(unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX) }, 0);
     }
     #[test]
     fn disposable_process() {
@@ -655,6 +657,7 @@ mod tests {
         let server = Server::bind(path.clone(), |_| {}).unwrap();
         assert!(Server::bind(path.clone(), |_| {}).is_err());
         drop(server);
+        released(&dir);
         subprocess("shutdown", &dir, "/unused-second");
         std::fs::remove_dir(dir).unwrap();
     }
