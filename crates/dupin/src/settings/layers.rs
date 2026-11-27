@@ -100,6 +100,14 @@ fn check_navigation(config: &Config) -> Result<(), String> {
     };
     let up = parse("navigation_up", &config.navigation_up)?;
     let down = parse("navigation_down", &config.navigation_down)?;
+    if up.iter().chain(down.iter()).any(|shortcut| {
+        matches!(
+            shortcut.physical_key(),
+            rune::PhysicalKeyCode::ArrowUp | rune::PhysicalKeyCode::ArrowDown
+        )
+    }) {
+        return Err("`navigation_up` and `navigation_down` cannot override the arrow keys".into());
+    }
     if up.is_some() && up == down {
         return Err("`navigation_up` and `navigation_down` must use different keys".into());
     }
@@ -152,4 +160,28 @@ fn parse_problem(name: &str, source: &str, error: &toml::de::Error) -> String {
     };
     let (line, column) = super::location(source, span.start);
     format!("{name} is invalid at line {line}, column {column}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_navigation;
+    use dupin_core::Config;
+
+    #[test]
+    fn navigation_accepts_the_physical_shortcut_format_recorded_by_settings() {
+        let config = Config {
+            navigation_down: "ctrl+KeyJ".into(),
+            ..Config::default()
+        };
+        assert!(check_navigation(&config).is_ok());
+    }
+
+    #[test]
+    fn navigation_does_not_allow_overriding_native_arrow_keys() {
+        let config = Config {
+            navigation_up: "down".into(),
+            ..Config::default()
+        };
+        assert!(check_navigation(&config).is_err());
+    }
 }

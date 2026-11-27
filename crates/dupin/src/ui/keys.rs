@@ -1,5 +1,5 @@
 use dupin_core::{Effect, Intent};
-use rune::{Chord, Key, KeyEvent, Tx};
+use rune::{Key, KeyEvent, PhysicalKeyCode, Shortcut, Tx};
 
 use super::Ui;
 
@@ -18,6 +18,9 @@ impl Ui {
         }
         if tx.focused().is_some() {
             return false;
+        }
+        if self.navigation_key(ev, tx).is_some() {
+            return self.key(ev, tx);
         }
         if ev.key == Key::Backspace && !self.query.text.is_empty() {
             tx.focus("query", false);
@@ -178,13 +181,12 @@ impl Ui {
             return None;
         }
         let config = self.configuration.values.borrow();
-        if Chord::parse(&config.navigation_up).is_ok_and(|chord| chord.matches_tx(ev, tx)) {
-            Some(Key::Up)
-        } else if Chord::parse(&config.navigation_down).is_ok_and(|chord| chord.matches_tx(ev, tx)) {
-            Some(Key::Down)
-        } else {
-            None
-        }
+        configured_navigation_key(
+            &config.navigation_up,
+            &config.navigation_down,
+            ev,
+            tx.physical_key(),
+        )
     }
 
     /// A click on a result row.
@@ -209,6 +211,31 @@ impl Ui {
         let effects = self.session.open_link(id, url);
         self.apply(effects, tx);
     }
+}
+
+/// Recorded settings name physical keys, so matching must use the same identity on every layout.
+fn configured_navigation_key(
+    up: &str,
+    down: &str,
+    ev: &KeyEvent,
+    physical_key: Option<PhysicalKeyCode>,
+) -> Option<Key> {
+    if matches!(ev.key, Key::Up | Key::Down) {
+        return None;
+    }
+    if navigation_shortcut_matches(up, ev, physical_key) {
+        Some(Key::Up)
+    } else if navigation_shortcut_matches(down, ev, physical_key) {
+        Some(Key::Down)
+    } else {
+        None
+    }
+}
+
+fn navigation_shortcut_matches(value: &str, ev: &KeyEvent, physical_key: Option<PhysicalKeyCode>) -> bool {
+    value.parse::<Shortcut>().is_ok_and(|shortcut| {
+        physical_key == Some(shortcut.physical_key()) && shortcut.modifiers() == ev.mods
+    })
 }
 
 /// ↑ and ↓ as the lists see them: a list that runs upwards from the field shows its next row
@@ -241,4 +268,42 @@ fn quick_look_shortcut_is_command_y() {
     assert!(is_quick_look_shortcut(&Key::Command('y')));
     assert!(!is_quick_look_shortcut(&Key::Command('k')));
     assert!(!is_quick_look_shortcut(&Key::Text("y".into())));
+}
+
+#[cfg(test)]
+#[test]
+fn navigation_shortcuts_match_the_recorded_physical_key() {
+    use rune::{KeyEvent, Mods};
+
+    let event = KeyEvent {
+        key: Key::Text("z".into()),
+        mods: Mods {
+            ctrl: true,
+            cmd: !cfg!(target_os = "macos"),
+            ..Mods::default()
+        },
+    };
+    assert_eq!(
+        configured_navigation_key("", "ctrl+KeyY", &event, Some(PhysicalKeyCode::KeyY)),
+        Some(Key::Down),
+        "a layout-dependent character still matches the physical key recorded by the shortcut",
+    );
+    assert_eq!(
+        configured_navigation_key("", "ctrl+KeyY", &event, Some(PhysicalKeyCode::KeyZ)),
+        None,
+        "a different physical key does not match just because of its typed character",
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn configured_navigation_does_not_remap_native_arrows() {
+    let event = KeyEvent {
+        key: Key::Down,
+        mods: rune::Mods::default(),
+    };
+    assert_eq!(
+        configured_navigation_key("up", "", &event, Some(PhysicalKeyCode::ArrowDown)),
+        None,
+    );
 }

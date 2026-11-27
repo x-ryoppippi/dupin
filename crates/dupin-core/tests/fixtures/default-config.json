@@ -16,6 +16,8 @@
 	"position": "center",
 	"rows": "auto",
 	"input_source": "ascii",
+	"navigation_up": "",
+	"navigation_down": "",
 	"auto_update": true,
 	"telemetry": true,
 	"system_automation": false,
