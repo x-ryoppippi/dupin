@@ -71,3 +71,11 @@ export def --wrapped headless [bin: path, ...args: string]: nothing -> nothing {
         error make {msg: $"($bin) ($args | str join ' ') failed:\n($result.stderr)"}
     }
 }
+
+# Run Dupin headless with exactly `environment`, inheriting none of this shell's, as
+# `dupin ext render` runs its own: a variable left over from the shell, such as `DO_NOT_TRACK`,
+# would otherwise change what a render draws.
+export def --wrapped headless-in [environment: record, bin: path, ...args: string]: nothing -> nothing {
+    let variables = $environment | transpose name value | each {|variable| $"($variable.name)=($variable.value)" }
+    headless /usr/bin/env -i ...$variables $bin ...$args
+}
