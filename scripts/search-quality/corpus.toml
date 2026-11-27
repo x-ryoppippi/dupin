@@ -3,8 +3,9 @@
 # a real Mac. See docs/development.md, "Search quality".
 
 # App names as Finder shows them, by the folder their bundles are in. The first folders are a
-# stock macOS install's; /Applications adds Apple's own apps and a plausible set of
-# third-party ones, chosen for names that compete for the same few letters.
+# stock macOS install's (the CoreServices ones hold only the apps Dupin lists from outside the
+# app folders); /Applications adds Apple's own apps and a plausible set of third-party ones,
+# chosen for names that compete for the same few letters.
 [apps]
 "/System/Applications" = [
 	"App Store",
@@ -63,7 +64,6 @@
 	"Digital Color Meter",
 	"Disk Utility",
 	"Grapher",
-	"Keychain Access",
 	"Migration Assistant",
 	"Print Center",
 	"Screen Sharing",
@@ -72,6 +72,15 @@
 	"System Information",
 	"Terminal",
 	"VoiceOver Utility",
+]
+"/System/Library/CoreServices" = ["Finder"]
+"/System/Library/CoreServices/Applications" = [
+	"Archive Utility",
+	"Directory Utility",
+	"Feedback Assistant",
+	"Keychain Access",
+	"Ticket Viewer",
+	"Wireless Diagnostics",
 ]
 "/Applications" = [
 	".Karabiner-VirtualHIDDevice-Manager",

@@ -30,7 +30,7 @@ Other keys: [Keys](../usage.md#keys).
 
 ## Notes
 
-- Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~/Applications`, one folder deep (so `Utilities` is included).
+- Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~/Applications`, one folder deep (so `Utilities` is included), and these apps macOS keeps elsewhere: Finder, Archive Utility, Directory Utility, Feedback Assistant, Keychain Access, Ticket Viewer and Wireless Diagnostics.
 - An app matches by any name macOS knows it by:
   - the name Finder shows, localized (システム設定 for System Settings on a Japanese Mac);
   - its file name, when that differs;
