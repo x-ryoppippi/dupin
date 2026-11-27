@@ -8,7 +8,9 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{MainThreadMarker, msg_send, sel};
 use objc2_app_kit::{NSApplication, NSEvent, NSScreen, NSView, NSWorkspace};
-use objc2_foundation::{NSArray, NSIntersectionRect, NSMouseInRect, NSNumber, NSRect, NSString};
+use objc2_foundation::{
+    NSArray, NSIntersectionRect, NSMouseInRect, NSNumber, NSPoint, NSRect, NSSize, NSString,
+};
 
 use crate::{accessibility, accessibility_window};
 
@@ -25,13 +27,15 @@ pub unsafe fn is_key_window(ns_view: NonNull<c_void>) -> bool {
 }
 
 /// Move and size the view's window to the frame AppKit saved under `name`, if it saved one, and
-/// save it there again whenever it moves or resizes. False when the window has no such name.
+/// save it there again whenever it moves or resizes. Either way the window is kept inside its
+/// screen's visible area, so a default size or a frame left on a larger display still fits.
+/// False when the window has no such name.
 ///
 /// # Safety
 ///
 /// `ns_view` must point to a live AppKit `NSView` on the main thread.
 pub unsafe fn autosave_frame(ns_view: NonNull<c_void>, name: &str) -> bool {
-    let Some(_main) = MainThreadMarker::new() else {
+    let Some(main) = MainThreadMarker::new() else {
         return false;
     };
     // SAFETY: The caller guarantees a live NSView for this borrow.
@@ -41,7 +45,23 @@ pub unsafe fn autosave_frame(ns_view: NonNull<c_void>, name: &str) -> bool {
     };
     let name = NSString::from_str(name);
     window.setFrameUsingName(&name);
+    if let Some(screen) = window.screen().or_else(|| NSScreen::mainScreen(main)) {
+        let frame = window.frame();
+        let fitted = fit_within(frame, screen.visibleFrame());
+        if fitted != frame {
+            window.setFrame_display(fitted, false);
+        }
+    }
     window.setFrameAutosaveName(&name)
+}
+
+/// `frame` shrunk to fit `area` and moved inside it, keeping its top edge where it can.
+fn fit_within(frame: NSRect, area: NSRect) -> NSRect {
+    let width = frame.size.width.min(area.size.width);
+    let height = frame.size.height.min(area.size.height);
+    let x = frame.origin.x.clamp(area.origin.x, area.max().x - width);
+    let top = frame.max().y.clamp(area.origin.y + height, area.max().y);
+    NSRect::new(NSPoint::new(x, top - height), NSSize::new(width, height))
 }
 
 /// Keep the bottom edge of the view's window at `bottom`, in AppKit's bottom-up screen points,
@@ -305,6 +325,25 @@ mod tests {
             None
         );
         assert!(appkit_frame(rect(0.0, 0.0, 0.0, 450.0), 900.0).is_none());
+    }
+
+    #[test]
+    fn a_window_too_large_or_off_its_screen_is_fitted_inside_it() {
+        let visible = rect(0.0, 80.0, 1280.0, 720.0);
+        let inside = rect(100.0, 200.0, 960.0, 500.0);
+        assert_eq!(fit_within(inside, visible), inside);
+        // Taller and wider than the screen: it shrinks to the visible area.
+        assert_eq!(fit_within(rect(-50.0, 0.0, 2000.0, 1200.0), visible), visible);
+        // Left on a display to the right: it comes back, top edge kept.
+        assert_eq!(
+            fit_within(rect(1500.0, 300.0, 960.0, 400.0), visible),
+            rect(320.0, 300.0, 960.0, 400.0)
+        );
+        // Above the menu bar: its top comes down to the visible area's.
+        assert_eq!(
+            fit_within(rect(100.0, 600.0, 960.0, 640.0), visible),
+            rect(100.0, 160.0, 960.0, 640.0)
+        );
     }
 
     #[test]
