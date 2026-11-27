@@ -34,4 +34,4 @@ jobs:
           path-to-document: https://github.com/x-ryoppippi/dupin/blob/main/CLA.md
           # Signatures live on their own unprotected branch, away from main.
           branch: cla-signatures
-          allowlist: ryoppippi,autofix-ci[bot],dependabot[bot],renovate[bot],github-actions[bot],coderabbitai[bot]
+          allowlist: ryoppippi,dupin-release[bot],autofix-ci[bot],dependabot[bot],renovate[bot],github-actions[bot],coderabbitai[bot]

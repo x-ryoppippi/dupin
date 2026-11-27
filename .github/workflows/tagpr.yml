@@ -20,23 +20,42 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
-      contents: write
-      pull-requests: write
-      issues: read
+      contents: read
     outputs:
       tag: ${{ steps.tagpr.outputs.tag }}
       pull_request: ${{ steps.tagpr.outputs.pull_request }}
     steps:
+      # GITHUB_TOKEN's pushes and pull requests start no workflows, so a release pull request
+      # tagpr opened with it would get no CI and could never merge. The App's token starts them.
+      - name: Require the release App's secrets
+        env:
+          CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ -z "$PRIVATE_KEY" ]; then
+            echo "::error title=Release App secrets missing::Set RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY; see docs/releasing.md."
+            exit 1
+          fi
+      - id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: read
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
+          # tagpr pushes the tag with whatever credentials checkout left behind, ahead of its own.
+          persist-credentials: false
       - id: tagpr
         uses: Songmu/tagpr@047aec4b6c0ce166f52958b5a97f5a3d927fd65b # v1.22.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
-  # A tag pushed with GITHUB_TOKEN starts no workflows either, so package the release here.
+  # No workflow runs on a tag push, so package the release here.
   release:
     needs: tagpr
     if: needs.tagpr.outputs.tag != ''
@@ -53,25 +72,3 @@ jobs:
       NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
       NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
       NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
-
-  # A pull request pushed with GITHUB_TOKEN starts no workflows, so run CI on the release
-  # branch explicitly.
-  ci:
-    needs: tagpr
-    if: needs.tagpr.outputs.tag == '' && needs.tagpr.outputs.pull_request != ''
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-nix-cache
-      - name: Dispatch CI on the release branch
-        shell: nix shell --inputs-from . nixpkgs#nushell --command nu {0}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ fromJSON(needs.tagpr.outputs.pull_request).head.ref }}
-        run: gh workflow run ci.yml --repo $env.GITHUB_REPOSITORY --ref $env.HEAD_REF
