@@ -8,7 +8,7 @@ Works out calculations and unit or currency conversions typed in the main search
 | On by default | Yes (`calculator = true`); currencies only with `calculator_currency` |
 | User docs     | [Calculator](../../docs/features/calculator.md)                       |
 
-A port of the former native Calculator; see [Built-ins as bundled extensions](../../docs/design/extension-platform.md#built-ins-as-bundled-extensions). The built-in registers no keyword, so the `calc` keyword in `package.json` is never typed.
+A port of the former native Calculator; see [Built-ins as bundled extensions](../../docs/design/extension-platform.md#built-ins-as-bundled-extensions).
 
 ## How it's built
 

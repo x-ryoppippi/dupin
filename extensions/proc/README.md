@@ -27,12 +27,12 @@ Lists the processes running on your Mac, shows one's details, and stops one when
 
 ## Files
 
-| Path              | What                                                                                                                                                        |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `package.json`    | The manifest and its exec profiles.                                                                                                                         |
-| `main.ts`         | `items`, the `details` view and the actions.                                                                                                                |
-| `ps.ts`           | Parsing `ps` and `lsof` output, and sending signals. [`agent/ps.ts`](../agent/ps.ts) is the same file, since a package can import only from its own folder. |
-| `fixtures/*.json` | The list, consent, details, the hand-off to Ports, and Terminate and Force Quit.                                                                            |
+| Path              | What                                                                                                                                                                                                                                         |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `package.json`    | The manifest and its exec profiles.                                                                                                                                                                                                          |
+| `main.ts`         | `items`, the `details` view and the actions.                                                                                                                                                                                                 |
+| `ps.ts`           | Parsing `ps` and `lsof` output, and sending signals. [`agent/ps.ts`](../agent/ps.ts) is the same file, since a package can import only from its own folder; `cargo test -p dupin a_module_bundled_packages_share` fails once the two differ. |
+| `fixtures/*.json` | The list, consent, details, the hand-off to Ports, and Terminate and Force Quit.                                                                                                                                                             |
 
 ## Test it
 
