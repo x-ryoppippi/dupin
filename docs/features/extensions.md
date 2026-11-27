@@ -2,6 +2,14 @@
 
 An extension is a JavaScript or TypeScript package that answers one keyword: type the keyword and Space, then a query, and Dupin shows the rows the extension returns. It runs inside Dupin, sandboxed; to drive Dupin from a terminal, a script or an AI agent, use the [command line](./cli.md) or the [MCP server](./mcp.md).
 
+Every search in Dupin is a pipeline, a model Dupin owes to Shougo Matsushita's [unite.vim](https://github.com/Shougo/unite.vim), [denite.nvim](https://github.com/Shougo/denite.nvim) and [ddu.vim](https://github.com/Shougo/ddu.vim): sources produce rows, filters match and order them, and each row's kind gives it actions. The core stays small, and an extension can plug into each stage.
+
+<Pipeline>
+
+Sources produce rows for the query, filters (matchers and sorters) match and order them, and kinds (text, URL, file and app) give each row its actions. An extension can be a source with its own keyword, provide a matcher or sorter (with the `rows:<kind>` and `query` scopes), or add an action to a kind's rows (with `rows:<kind>`); [`[advanced]`](./advanced.md) recomposes the stages.
+
+</Pipeline>
+
 ## Open it
 
 Type an extension's keyword and Space in the panel; `?` lists every keyword. Manage extensions in Settings → Extensions, and install or write them with `dupin ext`.
