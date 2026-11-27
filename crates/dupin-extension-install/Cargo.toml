@@ -9,6 +9,7 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
+dupin-spawn = { workspace = true }
 # Rune already links it, so hashing installed packages adds no crate to the app.
 blake3 = "1.8"
 dupin-broker = { path = "../dupin-broker" }

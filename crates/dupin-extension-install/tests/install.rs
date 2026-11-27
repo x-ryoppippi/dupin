@@ -1,7 +1,7 @@
 //! Installs from fixture Git repositories and folders on disk; nothing here touches the network.
 
+use dupin_spawn::Command;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use dupin_extension_install::{
     Change, Error, Git, GitHub, Installer, Integrity, Lock, LockStore, MemoryLock, State, guard_path,

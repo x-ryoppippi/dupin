@@ -6,7 +6,6 @@
 use std::io;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
@@ -20,6 +19,7 @@ use dupin_js_runtime::{
     Reason, Row, RunError, Sources, ViewAnswer,
 };
 use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, is_web_url};
+use dupin_spawn::{Child, Command, Stdio};
 
 use crate::wire::{self, Answer, Call, FromHelper, Preferences, ToHelper};
 

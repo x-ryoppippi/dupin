@@ -571,8 +571,8 @@ fn read_headless_environment() -> Option<dupin_js_runtime::Environment> {
 
 /// Dupin's own executable as the extension host, with nothing inherited it doesn't need. A
 /// headless run's guests keep to the calendar fixtures' UTC unless it names a zone.
-fn helper_command() -> std::io::Result<std::process::Command> {
-    let mut command = std::process::Command::new(std::env::current_exe()?);
+fn helper_command() -> std::io::Result<dupin_spawn::Command> {
+    let mut command = dupin_spawn::Command::new(std::env::current_exe()?);
     command.env_clear().current_dir("/");
     match std::env::var_os("TZ") {
         Some(zone) => {

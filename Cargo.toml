@@ -16,6 +16,7 @@ license = "GPL-3.0-or-later"
 dupin-plugin-protocol = { path = "crates/dupin-plugin-protocol" }
 dupin-core = { path = "crates/dupin-core" }
 dupin-mac = { path = "crates/dupin-mac" }
+dupin-spawn = { path = "crates/dupin-spawn" }
 dupin-storage = { path = "crates/dupin-storage" }
 dupin-sync = { path = "crates/dupin-sync" }
 

@@ -1,12 +1,12 @@
 use dupin_core::script::{LineDecoder, OutputBuffer, ScriptRun, Stream};
 use dupin_host_services::exec;
+use dupin_spawn::{Command, Stdio};
 use std::{
     collections::{HashMap, VecDeque},
     io::{self, Read},
     os::fd::{AsRawFd, RawFd},
-    os::unix::process::CommandExt,
     path::PathBuf,
-    process::{ChildStderr, Command, Stdio},
+    process::ChildStderr,
     sync::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},

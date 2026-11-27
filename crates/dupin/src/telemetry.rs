@@ -11,8 +11,8 @@
 //! `telemetry = false`, `DUPIN_TELEMETRY_DISABLED` or `DO_NOT_TRACK` turns it off at once, and
 //! turning the setting off deletes the stored anonymous ID.
 
+use dupin_spawn::Stdio;
 use std::io::Write;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

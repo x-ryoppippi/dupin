@@ -593,7 +593,7 @@ mod tests {
         );
     }
     fn subprocess(mode: &str, dir: &std::path::Path, tmp: &str) {
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        let mut child = dupin_spawn::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "control::tests::disposable_process", "--nocapture"])
             .env("DUPIN_CONTROL_TEST", mode)
             .env("DUPIN_CONTROL_TEST_DIR", dir)

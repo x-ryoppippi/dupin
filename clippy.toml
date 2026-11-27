@@ -1,0 +1,3 @@
+disallowed-types = [
+	{ path = "std::process::Command", reason = "a child it starts can inherit descriptors other threads are opening; use dupin_spawn::Command" },
+]
