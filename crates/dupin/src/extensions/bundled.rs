@@ -191,6 +191,24 @@ mod tests {
         assert_eq!(seals.0.len(), folders);
     }
 
+    /// A package imports only from its own folder, so that it can be ejected, sealed and
+    /// granted as one, so a module that several bundled packages share is copied into each.
+    #[test]
+    fn a_module_bundled_packages_share_is_the_same_in_each() {
+        const SHARED: &[(&str, &[&str])] = &[("ps.ts", &["agent", "proc"])];
+        let source = directory().unwrap();
+        for (module, packages) in SHARED {
+            let (first, rest) = packages.split_first().unwrap();
+            let canonical = std::fs::read(source.join(first).join(module)).unwrap();
+            for package in rest {
+                assert!(
+                    std::fs::read(source.join(package).join(module)).unwrap() == canonical,
+                    "extensions/{package}/{module} differs from extensions/{first}/{module}; change both"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_folder_the_build_did_not_seal_is_refused() {
         let bundled = tempfile::tempdir().unwrap();
