@@ -16,7 +16,7 @@ pub const QUICK_LOOK: &str = "quick-look";
 /// The IDs of the file kind's own actions, in the order its rows list them: `browse` only on
 /// a folder, and the actions from `rename` to `compress` only on a name that is UTF-8.
 /// `[advanced.kinds.file]` `hide` and `order` name them.
-pub const FILE_ACTIONS: [&str; 12] = [
+pub(crate) const FILE_ACTIONS: [&str; 12] = [
     "open",
     "browse",
     "open-with",
@@ -32,7 +32,7 @@ pub const FILE_ACTIONS: [&str; 12] = [
 ];
 
 /// The IDs of the app kind's own actions, in the order its rows list them.
-pub const APP_ACTIONS: [&str; 3] = ["open", "reveal", QUICK_LOOK];
+pub(crate) const APP_ACTIONS: [&str; 3] = ["open", "reveal", QUICK_LOOK];
 
 /// The kinds Dupin registers: `text`, `url`, `file` and `app`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,7 +102,7 @@ impl Subject {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Resolved {
     /// In the order the action menu lists them.
-    pub actions: Vec<ItemAction>,
+    pub(crate) actions: Vec<ItemAction>,
     /// The action ID Enter runs.
     pub(crate) primary: Option<String>,
     /// The action ID ⌘Enter runs.
@@ -162,7 +162,7 @@ impl Kinds {
 
     /// The actions of a row Dupin produced for `subject`: its kind's own, then the ones
     /// config.toml adds, arranged by the kind's `hide` and `order`.
-    pub fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
+    fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
         let mut resolved = self.get(subject.kind()).actions(subject, title);
         let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
         let config = kind_config(&configured, subject.kind());
