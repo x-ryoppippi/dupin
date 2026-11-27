@@ -26,6 +26,8 @@ Show the panel and type part of an app's name.
 | <kbd>⌘Y</kbd>                                | Preview it with Quick Look                                     |
 | <kbd>→</kbd>, <kbd>⌘K</kbd> or <kbd>⌃K</kbd> | Show its actions: Open, Reveal in Finder, Quick Look, Send to… |
 
+With [Running Apps](./running-apps.md) on, the actions of an app that runs add **Hide**, **Quit** and **Force Quit…**.
+
 Other keys: [Keys](../usage.md#keys).
 
 ## Notes

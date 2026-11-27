@@ -174,6 +174,13 @@ assert
     "windows:read"
     "windows:arrange"
   ];
+assert
+  bundledExtensions.running-apps == [
+    "apps:read"
+    "apps:control"
+    "rows:app"
+  ];
+assert rejects { bundledExtensions.running-apps.deny = [ "apps:quit" ]; };
 assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
 assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
   "proc"

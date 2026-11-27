@@ -239,6 +239,18 @@ window = "prefs"
 width = 960
 
 [[images]]
+page = "running-apps"
+name = "list"
+extension = "extensions/running-apps"
+fixture = "list.json"
+step = 1
+
+[[images]]
+page = "running-apps"
+name = "actions"
+scenario = "scripts/headless/running-apps-actions.json"
+
+[[images]]
 page = "philosophy"
 name = "agents"
 extension = "extensions/agent"

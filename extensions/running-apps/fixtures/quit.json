@@ -1,0 +1,214 @@
+{
+	"fixture": 1,
+	"description": "Quit asks an app to quit and says it did; one that is asking to save hasn't quit yet, which Dupin says after a moment, and Force Quit, after Dupin's confirmation, stops it.",
+	"environment": {
+		"now": "2026-11-26T12:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"apps": {
+			"running": [
+				{
+					"active": true,
+					"bundleId": "com.apple.Safari",
+					"hidden": false,
+					"name": "Safari",
+					"path": "/Applications/Safari.app",
+					"pid": 321
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.Notes",
+					"hidden": false,
+					"name": "Notes",
+					"path": "/System/Applications/Notes.app",
+					"pid": 412
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.Music",
+					"hidden": true,
+					"name": "Music",
+					"path": "/System/Applications/Music.app",
+					"pid": 518
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.Preview",
+					"hidden": false,
+					"name": "Preview",
+					"path": "/System/Applications/Preview.app",
+					"pid": 640
+				},
+				{
+					"active": false,
+					"bundleId": "com.apple.finder",
+					"hidden": false,
+					"name": "Finder",
+					"path": "/System/Library/CoreServices/Finder.app",
+					"pid": 201
+				}
+			],
+			"refuse": [412]
+		}
+	},
+	"steps": [
+		{
+			"query": "safari",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "Active"
+							}
+						],
+						"actions": [
+							{
+								"run": {
+									"action": "quit",
+									"data": {
+										"path": "/Applications/Safari.app"
+									}
+								},
+								"title": "Quit"
+							},
+							{
+								"run": {
+									"action": "hide",
+									"data": {
+										"path": "/Applications/Safari.app"
+									}
+								},
+								"title": "Hide"
+							},
+							{
+								"run": {
+									"action": "quit_forcibly",
+									"data": {
+										"path": "/Applications/Safari.app"
+									}
+								},
+								"title": "Force Quit…"
+							},
+							{
+								"reveal": "/Applications/Safari.app",
+								"title": "Reveal in Finder"
+							}
+						],
+						"id": "com.apple.Safari",
+						"keywords": ["com.apple.Safari"],
+						"subtitle": "com.apple.Safari",
+						"title": "Safari"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Quit",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "quit",
+						"data": {
+							"path": "/Applications/Safari.app"
+						}
+					}
+				},
+				"invalidated": true,
+				"toasts": ["Quit Safari"]
+			}
+		},
+		{
+			"query": "notes",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "quit",
+									"data": {
+										"path": "/System/Applications/Notes.app"
+									}
+								},
+								"title": "Quit"
+							},
+							{
+								"run": {
+									"action": "hide",
+									"data": {
+										"path": "/System/Applications/Notes.app"
+									}
+								},
+								"title": "Hide"
+							},
+							{
+								"run": {
+									"action": "quit_forcibly",
+									"data": {
+										"path": "/System/Applications/Notes.app"
+									}
+								},
+								"title": "Force Quit…"
+							},
+							{
+								"reveal": "/System/Applications/Notes.app",
+								"title": "Reveal in Finder"
+							}
+						],
+						"id": "com.apple.Notes",
+						"keywords": ["com.apple.Notes"],
+						"subtitle": "com.apple.Notes",
+						"title": "Notes"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Quit",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "quit",
+						"data": {
+							"path": "/System/Applications/Notes.app"
+						}
+					}
+				},
+				"invalidated": true,
+				"toasts": ["Notes hasn't quit yet; it may be asking you something"]
+			}
+		},
+		{
+			"activate": "Force Quit…",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "quit_forcibly",
+						"data": {
+							"path": "/System/Applications/Notes.app"
+						}
+					}
+				},
+				"invalidated": true,
+				"toasts": ["Forced Notes to quit"]
+			}
+		},
+		{
+			"query": "notes",
+			"expect": {
+				"rows": []
+			}
+		}
+	]
+}

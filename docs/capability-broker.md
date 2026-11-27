@@ -38,10 +38,11 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 | `calendar`   | `read` within `pastDays` and `futureDays` of today, each 0–366.                                                                                                                                                                                  | the capability    |
 | `windows`    | `read`, the displays and the focused window, and `arrange`, moving and resizing it, which needs an activation.                                                                                                                                   | access            |
 | `context`    | `frontmost`, the app in front when the panel opened, and `document`, the file its focused window showed. Neither needs an activation or macOS access of its own.                                                                                 | access            |
+| `apps`       | `read`, the apps that run now with a place in the Dock, and `control`, hiding, quitting and force quitting one of them, which needs an activation. Neither needs macOS access.                                                                   | access            |
 | `rows`       | For each kind of row Dupin's own sources find (`text`, `url`, `file`, `app`), the fields the package's filters and kind actions may receive: `title`, and `text`, `url`, `name` or `path`.                                                       | kind              |
 | `query`      | `read`: what is typed beyond the package's keyword: in the searches its matchers are composed into, and the main search for the built-in it answers there (Calculator).                                                                          | the capability    |
 
-A scope is written as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `context:document`, `rows:file` or `query` in grant files.
+A scope is written as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `context:document`, `apps:control`, `rows:file` or `query` in grant files.
 
 ## Checking an operation
 

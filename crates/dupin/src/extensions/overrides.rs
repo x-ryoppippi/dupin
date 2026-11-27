@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use dupin_core::{CommandId, Config, Provider};
 use dupin_extension_bridge::services::{self, Services};
 use dupin_extension_bridge::{
-    Bridge, ClipboardAccess, ConsentState, Failure, OsAccess, OsPermission, PackageId, Request, Scope,
-    StorageOp, Trigger, WindowsAccess,
+    AppsAccess, Bridge, ClipboardAccess, ConsentState, Failure, OsAccess, OsPermission, PackageId, Request,
+    Scope, StorageOp, Trigger, WindowsAccess,
 };
 use dupin_host_services::calendar;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Storage};
@@ -82,6 +82,11 @@ fn case(name: &str) -> Option<Override> {
         "window-management" => Override::extension(
             "window-management",
             Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),
+        )
+        .ships_off(),
+        "running-apps" => Override::extension(
+            "running-apps",
+            Some(Use::Effect(Request::Apps(AppsAccess::Control))),
         )
         .ships_off(),
         _ => return None,
