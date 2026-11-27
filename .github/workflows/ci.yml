@@ -38,9 +38,12 @@ jobs:
               (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" ])))')"
           nix build --no-link "${checks[@]}"
 
-  # A pull request that only touches website/ or telemetry/ cannot change the app, so build and
-  # e2e skip; skipped jobs still satisfy required checks, which paths-ignore would not. The
-  # collector's ping schema is the exception: dupin-telemetry's test holds it to the Rust type.
+  # A pull request that only touches prose (docs/, experiments/, the top-level Markdown files) or
+  # website/ cannot change the app or the collector: no Nix build reads them (package.nix's
+  # filesets name what the Rust builds see) and neither do CI's scripts, so the Rust jobs and
+  # telemetry skip. telemetry/ alone skips the Rust jobs, except the collector's ping schema,
+  # which dupin-telemetry's test holds to the Rust type. Skipped jobs still satisfy required
+  # checks, which paths-ignore would not. Any other path, CI's own files included, runs both.
   changes:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -50,35 +53,45 @@ jobs:
       actions: read
     outputs:
       app: ${{ steps.diff.outputs.app }}
+      telemetry: ${{ steps.diff.outputs.telemetry }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-nix-cache
       - id: diff
-        name: Decide whether the app could have changed
+        name: Decide whether the app or the collector could have changed
         shell: nix shell --inputs-from . nixpkgs#nushell --command nu {0}
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          let app = if $env.EVENT != 'pull_request' {
-            true
-          } else {
-            # A rename counts by both paths, so moving a file into website/ still builds.
+          let paths = if $env.EVENT == 'pull_request' {
+            # A rename counts by both paths, so moving a file into docs/ still builds.
             (gh api --paginate $"repos/($env.GITHUB_REPOSITORY)/pulls/($env.PR)/files"
               --jq '.[] | .filename, (.previous_filename // empty)')
             | lines
-            | any {|path|
-              let web = ($path | str starts-with 'website/') or ($path | str starts-with 'telemetry/')
-              (not $web) or ($path == 'telemetry/src/v1/ping-schema.gen.ts')
-            }
           }
-          $"app=($app)\n" | save --append $env.GITHUB_OUTPUT
+          def prose []: string -> bool {
+            let path = $in
+            let prose_dir = ['website/' 'docs/' 'experiments/'] | any {|dir| $path | str starts-with $dir }
+            let top_markdown = ($path | str ends-with '.md') and not ($path | str contains '/')
+            $prose_dir or $top_markdown
+          }
+          def collector []: string -> bool {
+            let path = $in
+            ($path | str starts-with 'telemetry/') and $path != 'telemetry/src/v1/ping-schema.gen.ts'
+          }
+          # Anything but a pull request (a push to main, a dispatch) runs everything.
+          let app = $paths == null or ($paths | any {|path| not (($path | prose) or ($path | collector)) })
+          let telemetry = $paths == null or ($paths | any {|path| not ($path | prose) })
+          $"app=($app)\ntelemetry=($telemetry)\n" | save --append $env.GITHUB_OUTPUT
 
   # The collector Worker in telemetry/: its tests, type check and build, which need no Mac.
   telemetry:
+    needs: changes
+    if: needs.changes.outputs.telemetry == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
