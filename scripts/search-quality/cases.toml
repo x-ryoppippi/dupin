@@ -293,6 +293,12 @@ query = "find my"
 tags = ["prefix"]
 
 [[cases]]
+id = "prefix.finder"
+intent = "app:Finder"
+query = "finder"
+tags = ["prefix"]
+
+[[cases]]
 id = "prefix.final-cut"
 intent = "app:Final Cut Pro"
 query = "final cut"
@@ -711,6 +717,13 @@ tags = ["prefix", "keyword"]
 id = "fresh.safari"
 intent = "app:Safari"
 query = "safari"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.finder"
+intent = "app:Finder"
+query = "finder"
 history = []
 tags = ["prefix", "fresh"]
 
