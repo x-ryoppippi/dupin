@@ -74,5 +74,6 @@ Drive Dupin from a terminal, a script or an AI agent.
 - [Extension capabilities](./extension-capabilities.md): the host side of the `files` and `exec` capabilities
 - [The `http` capability](./extension-http.md): the host service that will fetch for extensions, its scope checks and limits
 - [Sync design](./design/sync.md): syncing Dupin between Macs through an end-to-end encrypted synced folder
+- [Native kind actions: what moves](./design/native-kind-actions.md): which native actions can become bundled extensions, and the platform gaps in the way
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
 - [Releasing](./releasing.md): tagpr and CI
