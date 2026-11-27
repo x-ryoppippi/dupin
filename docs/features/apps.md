@@ -26,11 +26,13 @@ Show the panel and type part of an app's name.
 | <kbd>⌘Y</kbd>                                | Preview it with Quick Look                                     |
 | <kbd>→</kbd>, <kbd>⌘K</kbd> or <kbd>⌃K</kbd> | Show its actions: Open, Reveal in Finder, Quick Look, Send to… |
 
+With [Running Apps](./running-apps.md) on, the actions of an app that runs add **Hide**, **Quit** and **Force Quit…**.
+
 Other keys: [Keys](../usage.md#keys).
 
 ## Notes
 
-- Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~/Applications`, one folder deep (so `Utilities` is included).
+- Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~/Applications`, one folder deep (so `Utilities` is included), and these apps macOS keeps elsewhere: Finder, Archive Utility, Directory Utility, Feedback Assistant, Keychain Access, Ticket Viewer and Wireless Diagnostics.
 - An app matches by any name macOS knows it by:
   - the name Finder shows, localized (システム設定 for System Settings on a Japanese Mac);
   - its file name, when that differs;

@@ -563,7 +563,7 @@ fn a_render_answers_host_requests_from_the_fixture_it_renders() {
         .catalogue(
             "",
             10,
-            Instant::now() + QUERY_DEADLINE,
+            crate::extensions::deadline_in(QUERY_DEADLINE),
             &call,
             crate::extensions::Role::Keyword,
             None,

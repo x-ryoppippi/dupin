@@ -141,7 +141,7 @@ fn fixture_host(name: &str, fixture: &Fixture) -> Result<Host, Diagnostic> {
         command.env("TZ", &zone);
         Ok(command)
     });
-    Ok(Host::fixed(launch, Some(guest_environment(fixture))))
+    Ok(Host::replaying(launch, Some(guest_environment(fixture))))
 }
 
 fn guest_environment(fixture: &Fixture) -> dupin_js_runtime::Environment {
@@ -230,7 +230,7 @@ impl<'a> Held<'a> {
         call: &Call,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<Row>, RunError> {
-        let deadline = Instant::now() + QUERY_DEADLINE;
+        let deadline = host.now() + QUERY_DEADLINE;
         let mut fetch = self.extension.fetch(
             host,
             super::Fetching::Resident,
@@ -291,7 +291,7 @@ fn query_rows(
     call: &Call,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<Row>, RunError> {
-    let exports = host.check(&extension.compiled, Instant::now() + QUERY_DEADLINE, cancelled)?;
+    let exports = host.check(&extension.compiled, host.now() + QUERY_DEADLINE, cancelled)?;
     let limit = dupin_js_runtime::MAX_ROWS;
     let mut rows = Vec::new();
     if exports.search && (extension.empty_query || !query.trim().is_empty()) {
@@ -299,7 +299,7 @@ fn query_rows(
             &extension.compiled,
             query,
             limit,
-            Instant::now() + QUERY_DEADLINE,
+            host.now() + QUERY_DEADLINE,
             cancelled,
             &call.services,
         )?;

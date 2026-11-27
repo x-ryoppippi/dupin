@@ -93,6 +93,37 @@ a:hover .arrow {
 	transform: translate(2px, -2px);
 }
 
+.btn-primary {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 22px;
+	border: 0;
+	border-radius: 10px;
+	background: var(--accent-btn);
+	color: #fff;
+	font: inherit;
+	font-size: 15px;
+	font-weight: 600;
+	cursor: pointer;
+	transition:
+		background 0.18s ease,
+		transform 0.18s ease;
+}
+
+/* Touch browsers keep :hover after a tap, which would leave the button lifted. */
+@media (hover: hover) {
+	.btn-primary:hover {
+		background: var(--accent-btn-hover);
+		transform: translateY(-1px);
+	}
+}
+
+.btn-primary .btn-icon {
+	width: 16px;
+	height: 16px;
+}
+
 .btn-secondary {
 	display: inline-flex;
 	align-items: center;
@@ -126,7 +157,7 @@ a:hover .arrow {
 	stroke-width: 1.6;
 }
 
-/* The four design choices (components/docs/DesignChoices.svelte), shared by the home page and the docs. */
+/* The four design choices (components/docs/DesignChoices.svelte) in the docs; the home page lays them out as tiles. */
 .doc-choices {
 	list-style: none;
 	margin: 0;

@@ -204,6 +204,13 @@ window = "prefs"
 width = 760
 
 [[images]]
+page = "snapshots"
+name = "settings"
+scenario = "scripts/docs-images/settings-snapshots.json"
+window = "prefs"
+width = 960
+
+[[images]]
 page = "settings"
 name = "appearance"
 scenario = "scripts/docs-images/settings-appearance.json"
@@ -223,6 +230,32 @@ name = "permissions"
 scenario = "scripts/docs-images/settings-permissions.json"
 window = "prefs"
 width = 760
+
+[[images]]
+page = "philosophy"
+name = "snapshots-page"
+scenario = "scripts/docs-images/settings-snapshots.json"
+window = "prefs"
+width = 960
+
+[[images]]
+page = "running-apps"
+name = "list"
+extension = "extensions/running-apps"
+fixture = "list.json"
+step = 1
+
+[[images]]
+page = "running-apps"
+name = "actions"
+scenario = "scripts/headless/running-apps-actions.json"
+
+[[images]]
+page = "philosophy"
+name = "agents"
+extension = "extensions/agent"
+fixture = "list.json"
+step = 1
 
 # A clip is a short recording of `steps` played into the panel, rendered to
 # docs/images/<page>/<name>-<theme>.webp with a caption below the panel naming each key it
@@ -430,6 +463,50 @@ extension = "examples/extensions/notes-js"
 fixture = "notes.json"
 step = 5
 
+[[clips]]
+page = "philosophy"
+name = "basics"
+fixtures = "scripts/headless/calendar.json"
+steps = [
+	{ type = "cal" },
+	{ key = "space" },
+	{ key = "down" },
+	{ wait = 0.6 },
+	{ key = "backspace" },
+	{ type = "?" },
+	{ key = "down" },
+]
+
+[[clips]]
+page = "philosophy"
+name = "doorway"
+steps = [{ type = "ma" }, { wait = 0.8 }]
+
+[[clips]]
+page = "philosophy"
+name = "same-keys"
+steps = [
+	{ type = "maps" },
+	{ key = "k", cmd = true },
+	{ wait = 0.6 },
+	{ key = "escape" },
+	{ key = "a", cmd = true },
+	{ type = "12*3" },
+	{ wait = 0.6 },
+	{ key = "k", cmd = true },
+]
+
+[[clips]]
+page = "philosophy"
+name = "keystrokes"
+steps = [
+	{ type = "ca", burst = true },
+	{ wait = 0.5 },
+	{ type = "l" },
+	{ wait = 0.5 },
+	{ type = "e" },
+]
+
 # The home page's tabs, each one use of Dupin over Liquid Glass, as it opens by default.
 
 [[clips]]
@@ -445,8 +522,7 @@ steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "
 [[clips]]
 page = "home"
 name = "files"
-# Not `glass`: the real app on the runner listed no Recent items from the scratch home's
-# history, so there was no folder to browse; this stays headless over Flow.
+glass = true
 backdrop = "flow"
 themes = ["dark"]
 scale = 2
@@ -486,60 +562,10 @@ steps = [{ type = "?" }, { key = "down" }, { key = "down" }, { key = "down" }]
 [[clips]]
 page = "home"
 name = "clipboard"
-# Not `glass`: the real app records copies only once macOS lets it read the clipboard in the
-# background, which a recording must not grant, so this stays headless over Flow.
+glass = true
 fixtures = "scripts/headless/clipboard-images.json"
 backdrop = "flow"
 themes = ["dark"]
 scale = 2
 video = true
 steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
-
-# The Apps tab again over each backdrop shader, for the home page's backdrop switcher: one
-# recording per shader, not every tab over every shader, which would be six times the bytes to
-# show the same thing.
-
-[[clips]]
-page = "home"
-name = "apps-flow"
-backdrop = "flow"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-aurora"
-backdrop = "shaders/aurora.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-embers"
-backdrop = "shaders/embers.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-snow"
-backdrop = "shaders/snow.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-matrix"
-backdrop = "shaders/matrix.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "maps" }, { wait = 0.4 }, { key = "k", cmd = true }, { key = "down" }]

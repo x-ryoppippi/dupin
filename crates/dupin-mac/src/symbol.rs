@@ -23,6 +23,17 @@ pub fn rgba(name: &str, canvas: u32, glyph: u32, ink: [u8; 4]) -> Option<Vec<u8>
     autoreleasepool(|_| draw(name, canvas, glyph, ink))
 }
 
+/// Whether the system has a symbol named `name`, which tells a name it lacks apart from sizes
+/// [`rgba`] refuses. Like [`rgba`], call it off the panel's thread: the first lookup loads the
+/// symbol catalogue.
+pub fn exists(name: &str) -> bool {
+    dupin_core::item::is_symbol_name(name)
+        && autoreleasepool(|_| {
+            NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)
+                .is_some()
+        })
+}
+
 fn draw(name: &str, canvas: u32, glyph: u32, ink: [u8; 4]) -> Option<Vec<u8>> {
     if !dupin_core::item::is_symbol_name(name)
         || canvas == 0
@@ -138,6 +149,13 @@ mod tests {
         };
         assert_eq!(most(&solid), 255);
         assert_eq!(most(&faint), 128);
+    }
+
+    #[test]
+    fn a_name_exists_when_the_system_has_its_symbol() {
+        assert!(exists("moon.fill"));
+        assert!(!exists("no.such.symbol.anywhere"));
+        assert!(!exists("../moon"));
     }
 
     #[test]

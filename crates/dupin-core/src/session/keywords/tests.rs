@@ -331,3 +331,15 @@ fn entering_a_command_leaves_whatever_showed_with_its_query_typed() {
     s.reset();
     assert_eq!(s.command_id().as_str(), "apps.search");
 }
+
+#[test]
+fn a_main_search_starts_afresh_with_a_web_search_typed() {
+    let mut s = session();
+    s.enter_command(&id("clipboard.history"), "draft").unwrap();
+    assert_eq!(s.web_search("g"), Some("g"));
+    assert_eq!(s.web_search("nope"), None);
+    let effects = s.search_main("g rust");
+    assert_eq!(effects[0], Effect::ReplaceQuery("g rust".into()));
+    assert_eq!(s.command_id().as_str(), "apps.search");
+    assert_eq!(s.query(), "g rust");
+}

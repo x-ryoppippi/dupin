@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use dupin_core::{Anchor, CommandId, ExtensionRequest, Navigated, Page, Provider};
 use dupin_extension_bridge::{Bridge, Notice, PackageId, ScopeKey, Trigger};
@@ -279,9 +278,10 @@ impl Ui {
     ) -> bool {
         let current = self.session.command_id().clone();
         let installed = self.extensions.install(registration, &current);
-        self.composition
-            .guests()
-            .set_extensions(self.extensions.active.clone());
+        let kinds_changed = self.composition.set_extensions(self.extensions.active.clone());
+        if kinds_changed {
+            self.extensions.forget_catalogues();
+        }
         for id in &installed.dropped {
             self.searchers.remove(id);
             self.deadlines.remove(id);
@@ -296,7 +296,7 @@ impl Ui {
             prefs.reflect_extensions(listing, problems);
             prefs.reflect_extension_access(bridge);
         });
-        installed.current_changed
+        installed.current_changed || kinds_changed
     }
 
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
@@ -332,7 +332,7 @@ impl Ui {
                     return;
                 };
                 let call = bridge_for_watch.call(&id_for_watch, Trigger::Background);
-                let deadline = Instant::now() + crate::extensions::QUERY_DEADLINE;
+                let deadline = crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE);
                 match extension.event("clipboard", &event, deadline, &call.services) {
                     // Only a search that lists this catalogue runs again: any other would run
                     // its package's `search` on this package's events.
@@ -373,6 +373,7 @@ impl Ui {
     /// extension asked for before.
     pub(crate) fn extension_access_changed(&mut self, notice: Notice, tx: &mut Tx) {
         if let Notice::Changed(id) = &notice {
+            self.resume_bound_row(id, tx);
             // Images refused before may be drawn now.
             self.thumbnails.retry_failed();
             // A grant changes what the catalogue may read even when no authority was lost, so
@@ -439,7 +440,7 @@ impl Ui {
         }
     }
 
-    fn registered_extension(&self, id: &str) -> Option<Arc<Extension>> {
+    pub(super) fn registered_extension(&self, id: &str) -> Option<Arc<Extension>> {
         self.extensions
             .registered
             .values()
@@ -503,7 +504,12 @@ impl Ui {
             );
         };
         let kind = crate::composition::row_kind(subject);
-        let Some(&field) = extension.provides.kinds.get(&(kind, action.clone())) else {
+        let Some(field) = extension
+            .provides
+            .kinds
+            .get(&(kind, action.clone()))
+            .map(|provision| provision.field)
+        else {
             return self.show_notice(
                 format!(
                     "{} provides no {} action called {action}.",
@@ -563,6 +569,28 @@ impl Ui {
         action: String,
         data: serde_json::Value,
     ) {
+        self.start_extension_action(extension, action, data, None);
+    }
+
+    /// Runs the action of the row `item` a shortcut chose with the panel hidden, which shows
+    /// the panel only for what the action has to say or opens, or for the consent it needs.
+    pub(super) fn run_bound_extension_action(
+        &mut self,
+        extension: String,
+        action: String,
+        data: serde_json::Value,
+        item: dupin_core::Item,
+    ) {
+        self.start_extension_action(extension, action, data, Some(item));
+    }
+
+    fn start_extension_action(
+        &mut self,
+        extension: String,
+        action: String,
+        data: serde_json::Value,
+        bound: Option<dupin_core::Item>,
+    ) {
         let Some(extension) = self.registered_extension(&extension) else {
             let anchor = self.session.anchor();
             self.form_answered(&anchor);
@@ -571,7 +599,7 @@ impl Ui {
         let anchor = self.session.anchor();
         let page = self.page_context(&extension);
         let bridge = self.extensions.bridge.clone();
-        let me = self.me.clone();
+        let acting = self.on_acted();
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
             let call = bridge.call(&extension.package, Trigger::Activation);
@@ -579,11 +607,11 @@ impl Ui {
                 &action,
                 &data,
                 &page,
-                Instant::now() + ACTION_DEADLINE,
+                crate::extensions::deadline_in(ACTION_DEADLINE),
                 &call.services,
             );
             let stale = !bridge.is_current(&extension.package, call.generation);
-            me.update(move |ui, tx| {
+            acting.acted(move |ui, tx| {
                 ui.form_answered(&anchor);
                 if stale {
                     ui.show_notice(
@@ -596,7 +624,7 @@ impl Ui {
                     let effects = ui.session.refresh();
                     ui.apply(effects, tx);
                 } else {
-                    ui.extension_acted(&extension, &anchor, result, tx);
+                    ui.extension_acted(&extension, &anchor, result, bound, tx);
                 }
             });
             drop(busy);
@@ -610,8 +638,23 @@ impl Ui {
         extension: &Extension,
         anchor: &Anchor,
         result: Result<Acted, RunError>,
+        bound: Option<dupin_core::Item>,
         tx: &mut Tx,
     ) {
+        // A shortcut's row refused for want of consent goes back to where shortcuts decide,
+        // which now shows the consent and holds the row until it is granted.
+        if let Some(item) = bound.as_ref()
+            && let Some(registered) = self.registered_extension(&extension.id)
+            && (!self
+                .extensions
+                .bridge
+                .pending(Some(&extension.package))
+                .is_empty()
+                || self.extensions.bridge.asked_while_off(&extension.package))
+        {
+            return self.run_bound_row(registered, item.clone(), tx);
+        }
+        let bound = bound.is_some();
         let name = &extension.name;
         let effect = match result {
             Ok(acted) => acted.effect,
@@ -623,8 +666,18 @@ impl Ui {
             }
         };
         if let Some(text) = effect.as_ref().and_then(ActionEffect::toast) {
-            self.timed_notice(text.to_owned(), tx);
+            if bound && !self.shown {
+                self.show_notice(text.to_owned(), tx);
+            } else {
+                self.timed_notice(text.to_owned(), tx);
+            }
         }
+        // What the action opens needs the panel, which a shortcut's action ran without.
+        let reveals = bound
+            && matches!(
+                effect,
+                Some(ActionEffect::Push { .. } | ActionEffect::Enter { .. })
+            );
         let navigated = match effect {
             None | Some(ActionEffect::Toast { .. }) => {
                 // A refused request may have left a consent row to show.
@@ -675,7 +728,12 @@ impl Ui {
             },
         };
         match navigated {
-            Navigated::Done(effects) => self.apply(effects, tx),
+            Navigated::Done(effects) => {
+                self.apply(effects, tx);
+                if reveals {
+                    self.show(tx);
+                }
+            }
             Navigated::Stale | Navigated::NoPage => {}
             Navigated::TooDeep => self.show_notice(
                 format!("{name} failed: it opened more views than Dupin keeps open; close one first"),
@@ -701,6 +759,10 @@ impl Ui {
                 .into_iter()
                 .find(|request| request.key().to_string() == key)
         };
+        // A refusal leaves nothing for a shortcut's held row to wait for.
+        if matches!(request, ExtensionRequest::Deny { .. }) {
+            self.drop_bound_row(&id);
+        }
         let outcome = match request {
             ExtensionRequest::Run { .. } | ExtensionRequest::Paste { .. } | ExtensionRequest::Kind { .. } => {
                 return;

@@ -460,8 +460,11 @@ impl Worker {
             Ok(legacy) => {
                 let (own, _) = self.read_usage();
                 let merged = History::merged([&own, &legacy], now_millis() / 1000);
-                if self.write_usage(&merged).is_ok() {
-                    let _ = std::fs::remove_file(&path);
+                match self.write_usage(&merged) {
+                    Ok(()) => {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    Err(error) => crate::log::warn(&format!("couldn't keep the old usage history: {error}")),
                 }
             }
             Err(error) => crate::log::warn(&format!(

@@ -164,7 +164,7 @@ fn title(path: &Path) -> String {
     name.strip_suffix(".app").map(str::to_owned).unwrap_or(name)
 }
 
-fn expand(path: &str) -> PathBuf {
+pub(crate) fn expand(path: &str) -> PathBuf {
     match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
         (Some(rest), Some(home)) => Path::new(&home).join(rest),
         _ => PathBuf::from(path),

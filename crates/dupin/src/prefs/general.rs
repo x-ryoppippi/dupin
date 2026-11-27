@@ -1,60 +1,108 @@
 use dupin_core::config::HotkeyTarget;
-use dupin_core::{DisplaySelection, InputSource, Position};
+use dupin_core::{DisplaySelection, InputSource, Position, Rows};
 use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
-use rune::{El, Shortcut, ShortcutError, Tx, col, row, text};
-use rune_kit::{Button, ButtonVariant, Kit, ShortcutRecorder, Switch, shortcut_error_message};
+use rune::{El, Shortcut, Tx, col, icon, row, text};
+use rune_kit::{Button, ButtonVariant, Kit, Switch};
+use rune_theme_opencode::icons::{CHEVRON_DOWN, CHEVRON_RIGHT};
 
 use super::Prefs;
-use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button};
+use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button};
+use super::shortcut::ShortcutKeycap;
 use crate::hotkey::LauncherShortcut;
 use crate::icons;
 
 const DISPLAY: &str = "display";
 const POSITION: &str = "position";
+const ROWS: &str = "rows";
 const INPUT_SOURCE: &str = "input-source";
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let rows = vec![
         hotkey_setting(s, k),
         selection_hotkey_setting(s, k),
         display_setting(s, k),
         position_setting(s, k),
+        rows_setting(s, k),
         input_source_setting(s, k),
         login_setting(s, k),
-        automation_setting(s, k),
-        telemetry_setting(s, k),
-        relaunch_setting(k),
     ];
-    let mut body = vec![card(k, hair, rows)];
+    let mut body = vec![card(k, rows)];
     if !s.config.bindings.is_empty() {
-        body.push(configured_hotkeys(s, k, hair));
+        body.push(configured_hotkeys(s, k));
+    }
+    body.push(advanced_disclosure(s, k));
+    if s.advanced {
+        body.push(card(
+            k,
+            vec![
+                automation_setting(s, k),
+                telemetry_setting(s, k),
+                relaunch_setting(k),
+            ],
+        ));
+        body.push(card(k, vec![configuration_setting(k)]));
     }
     body
 }
 
+/// The label that shows or hides the rows people rarely change.
+fn advanced_disclosure(s: &Prefs, k: &Kit) -> El {
+    let c = &k.c;
+    let glyph = if s.advanced { &CHEVRON_DOWN } else { &CHEVRON_RIGHT };
+    row()
+        .key("advanced")
+        .role("button")
+        .label("Advanced")
+        .expanded(s.advanced)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .self_start()
+        .h(24.0)
+        .ml(ROW_PX - 6.0)
+        .pl(6.0)
+        .pr(4.0)
+        .gap(2.0)
+        .center_y()
+        .radius(k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .on_press(|s: &mut Prefs| s.advanced = !s.advanced)
+        .child(text("Advanced").font(k.ty.body_medium).color(c.text_base))
+        .child(icon(glyph, 16.0).color(c.icon_muted))
+}
+
+/// config.toml's path, and buttons that open it and the folder holding it.
+fn configuration_setting(k: &Kit) -> El {
+    let path = crate::settings::path().map(|path| tilde(&path.display().to_string()));
+    let open = Button::new("Open file")
+        .variant(ButtonVariant::Ghost)
+        .on_press(|_: &mut Prefs| super::open_config_file())
+        .build(k)
+        .key("open-config");
+    let folder = Button::new("Open folder")
+        .variant(ButtonVariant::Ghost)
+        .on_press(|_: &mut Prefs| super::open_config_folder())
+        .build(k)
+        .key("open-config-folder");
+    setting(
+        k,
+        &icons::FILES,
+        "Configuration",
+        path.as_deref(),
+        row().gap(4.0).center_y().child(open).child(folder),
+    )
+}
+
 fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, label: &str, locked: bool) -> El {
     let i = kind as usize;
-    let shortcut_problem = s.shortcut_problems[i].clone();
-    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
-        shortcut_problem
-            .as_ref()
-            .filter(|_| *error == ShortcutError::Conflict)
-            .cloned()
-            .unwrap_or_else(|| shortcut_error_message(error, chord))
-    };
-    let recorder = ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
-        .label(label)
-        .width(180.0)
-        .on_change(move |s: &mut Prefs, next, _| s.change_hotkey(kind, next))
-        .error_message(refusal)
-        .disabled(locked)
-        .build(k);
-    if locked {
-        // Rune disables recorder input without applying the kit's usual disabled dimming.
-        recorder.layer_opacity(0.5)
-    } else {
-        recorder
-    }
+    ShortcutKeycap::new(key, label, &s.recorders[i])
+        .locked(locked)
+        .conflict(s.shortcut_problems[i].clone())
+        .build(
+            k,
+            move |s: &mut Prefs| &mut s.recorders[i],
+            move |s: &mut Prefs, next| s.change_hotkey(kind, next),
+        )
 }
 
 /// The panel hotkey's row, on General and in the welcome.
@@ -145,6 +193,7 @@ fn pick_display(s: &mut Prefs, tx: &mut Tx) {
         |s, id| {
             if let Some(value) = CHOICES.into_iter().find(|value| display_option(*value).0 == id) {
                 s.set(|config| config.display = value);
+                s.panel_screen = crate::ui::PanelScreen::current(value);
             }
         },
     );
@@ -179,28 +228,106 @@ fn position_setting(s: &Prefs, k: &Kit) -> El {
 }
 
 fn pick_position(s: &mut Prefs, tx: &mut Tx) {
-    let options = [(Position::Center, "center"), (Position::Top, "top")]
-        .map(|(p, id)| (id.to_owned(), position_title(p).to_owned()))
+    const POSITIONS: [Position; 3] = [Position::Center, Position::Top, Position::Bottom];
+    let options = POSITIONS
+        .map(|p| (position_id(p).to_owned(), position_title(p).to_owned()))
         .to_vec();
-    let selected = match s.config.position {
+    choose(tx, POSITION, options, position_id(s.config.position), |s, id| {
+        if let Some(position) = POSITIONS.into_iter().find(|p| position_id(*p) == id) {
+            s.set(|c| c.position = position);
+        }
+    });
+}
+
+/// The position's name in config.toml.
+fn position_id(position: Position) -> &'static str {
+    match position {
         Position::Center => "center",
         Position::Top => "top",
-    };
-    choose(tx, POSITION, options, selected, |s, id| {
-        s.set(|c| {
-            c.position = if id == "top" {
-                Position::Top
-            } else {
-                Position::Center
-            }
-        });
-    });
+        Position::Bottom => "bottom",
+    }
 }
 
 fn position_title(position: Position) -> &'static str {
     match position {
         Position::Center => "Center",
         Position::Top => "Top",
+        Position::Bottom => "Bottom",
+    }
+}
+
+/// The row count recommended for the panel's display, and how many rows the configured count
+/// shows there.
+fn row_fit(s: &Prefs) -> (u8, usize) {
+    let room = s
+        .panel_screen
+        .map(|screen| screen.list_room(s.config.theme.panel_width, s.config.position));
+    let row_height = f32::from(s.config.theme.row_height);
+    let fit = crate::view::list_fit(room, s.config.rows, row_height);
+    (fit.recommended, crate::view::visible_rows(fit.budget, row_height))
+}
+
+fn rows_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked(ROWS);
+    let (recommended, shown) = row_fit(s);
+    let detail = match s.config.rows {
+        Rows::Count(count) if shown < usize::from(count) => {
+            format!("This display fits {shown}. Recommended for this display: {recommended}")
+        }
+        _ => format!("Recommended for this display: {recommended}"),
+    };
+    let rows = menu_value(locked, k, ROWS, "Rows", &rows_title(s.config.rows), pick_rows);
+    let mut control = row().gap(8.0).center_y();
+    if s.config.rows != Rows::Count(recommended) {
+        control = control.child(
+            Button::new(format!("Use {recommended}"))
+                .variant(ButtonVariant::Ghost)
+                .disabled(locked)
+                .on_press(move |s: &mut Prefs| s.set(|c| c.rows = Rows::Count(recommended)))
+                .build(k)
+                .key("use-recommended-rows"),
+        );
+    }
+    setting_with_lock(
+        k,
+        &icons::PANEL,
+        "Rows",
+        Some(&detail),
+        control.child(rows),
+        s.lock_note(locked),
+    )
+}
+
+fn pick_rows(s: &mut Prefs, tx: &mut Tx) {
+    let (recommended, _) = row_fit(s);
+    let options = std::iter::once(("auto".to_owned(), rows_title(Rows::Auto)))
+        .chain((Rows::MIN..=Rows::MAX).map(|count| {
+            let title = rows_title(Rows::Count(count));
+            let title = if count == recommended {
+                format!("{title} (recommended)")
+            } else {
+                title
+            };
+            (count.to_string(), title)
+        }))
+        .collect();
+    let selected = match s.config.rows {
+        Rows::Auto => "auto".to_owned(),
+        Rows::Count(count) => count.to_string(),
+    };
+    choose(tx, ROWS, options, &selected, |s, id| {
+        let rows = match id.parse() {
+            Ok(count) => Rows::Count(count),
+            Err(_) => Rows::Auto,
+        };
+        s.set(|c| c.rows = rows);
+    });
+}
+
+fn rows_title(rows: Rows) -> String {
+    match rows {
+        Rows::Auto => "Auto".to_owned(),
+        Rows::Count(count) => count.to_string(),
     }
 }
 
@@ -422,7 +549,7 @@ fn relaunch_setting(k: &Kit) -> El {
     )
 }
 
-fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
+fn configured_hotkeys(s: &Prefs, k: &Kit) -> El {
     let rows = s
         .config
         .bindings
@@ -439,7 +566,7 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                     "Dupin command",
                     match query {
                         Some(query) => format!("{command} · {query}"),
-                        None => command.clone(),
+                        None => command.to_string(),
                     },
                 ),
             };
@@ -464,5 +591,5 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                 .font(k.ty.body_medium)
                 .color(k.c.text_base),
         )
-        .child(card(k, hair, rows))
+        .child(card(k, rows))
 }

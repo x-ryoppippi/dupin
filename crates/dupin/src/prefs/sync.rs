@@ -77,7 +77,7 @@ fn ago(at_ms: u64) -> String {
     }
 }
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let mut body = Vec::new();
     if let Some(problem) = &s.sync.problem {
         body.push(
@@ -93,7 +93,6 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     if let Some(words) = &s.sync.passphrase {
         body.push(card(
             k,
-            hair,
             vec![setting(
                 k,
                 &icons::SHIELD,
@@ -115,14 +114,14 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     let on = status.get("on").and_then(Value::as_bool) == Some(true);
     let leaving = status.get("leaving").and_then(Value::as_bool) == Some(true);
     if on || leaving {
-        body.extend(on_page(s, k, hair, status, leaving));
+        body.extend(on_page(s, k, status, leaving));
     } else {
-        body.extend(off_page(s, k, hair, status));
+        body.extend(off_page(s, k, status));
     }
     body
 }
 
-fn off_page(s: &Prefs, k: &Kit, hair: f32, status: &Value) -> Vec<El> {
+fn off_page(s: &Prefs, k: &Kit, status: &Value) -> Vec<El> {
     let folder = s
         .sync
         .folder
@@ -234,7 +233,7 @@ fn off_page(s: &Prefs, k: &Kit, hair: f32, status: &Value) -> Vec<El> {
         ),
     ];
     vec![
-        card(k, hair, rows),
+        card(k, rows),
         note(
             k,
             "Sync keeps your Macs' usage history in step through the folder, end-to-end encrypted: the folder's host sees no contents and no names. Settings, snippets and extensions follow.",
@@ -242,7 +241,7 @@ fn off_page(s: &Prefs, k: &Kit, hair: f32, status: &Value) -> Vec<El> {
     ]
 }
 
-fn on_page(s: &Prefs, k: &Kit, hair: f32, status: &Value, leaving: bool) -> Vec<El> {
+fn on_page(s: &Prefs, k: &Kit, status: &Value, leaving: bool) -> Vec<El> {
     let last = status.get("last").filter(|last| !last.is_null());
     let synced = last
         .and_then(|last| last.get("at"))
@@ -294,9 +293,9 @@ fn on_page(s: &Prefs, k: &Kit, hair: f32, status: &Value, leaving: bool) -> Vec<
                 .build(k),
         ));
     }
-    let mut body = vec![card(k, hair, rows)];
+    let mut body = vec![card(k, rows)];
     if !leaving {
-        body.push(card(k, hair, switches(s, k)));
+        body.push(card(k, switches(s, k)));
     }
 
     let devices: Vec<&Value> = last
@@ -332,7 +331,7 @@ fn on_page(s: &Prefs, k: &Kit, hair: f32, status: &Value, leaving: bool) -> Vec<
                 )
             })
             .collect();
-        body.push(card(k, hair, rows));
+        body.push(card(k, rows));
     }
     for line in problems(status) {
         body.push(note(k, &line));

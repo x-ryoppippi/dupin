@@ -1,14 +1,18 @@
 import type { Component } from 'svelte';
 import { render } from 'svelte/server';
 import DesignChoices from '../components/docs/DesignChoices.svelte';
+import LatencyFigure from '../components/docs/LatencyFigure.svelte';
 import LauncherLoop from '../components/docs/LauncherLoop.svelte';
 import PanelHandoff from '../components/docs/PanelHandoff.svelte';
+import Pipeline from '../components/docs/Pipeline.svelte';
 import WaysIn from '../components/docs/WaysIn.svelte';
 
 const components: Record<string, Component> = {
 	DesignChoices,
+	LatencyFigure,
 	LauncherLoop,
 	PanelHandoff,
+	Pipeline,
 	WaysIn,
 };
 

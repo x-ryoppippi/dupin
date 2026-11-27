@@ -10,6 +10,7 @@ mod general;
 mod keywords;
 mod permissions;
 mod search;
+mod shortcut;
 mod snippets;
 mod sync;
 mod updates;
@@ -23,17 +24,18 @@ use std::sync::Arc;
 use dupin_core::Config;
 use dupin_mac::privacy::{CalendarAccess, PermissionStatus};
 use rune::{AppHandle, Cx, El, Icon, ScrollSpec, Shortcut, ShortcutError, Tx, col, el, icon, row, text};
-use rune_kit::{Kit, ShortcutRecorderState};
+use rune_kit::Kit;
 
 use self::controls::{DESCRIPTION, ROW_PX};
 use self::general::LoginPreference;
+use self::shortcut::ShortcutState;
 use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
 use crate::ui::Ui;
 use crate::update::Updater;
 
 /// The window's first size, before AppKit restores the one the user left it at.
-pub const SIZE: (f32, f32) = (820.0, 640.0);
+pub const SIZE: (f32, f32) = (960.0, 640.0);
 /// The smallest window the sidebar's pages and footer links, and a page's rows, fit in.
 pub const MIN_SIZE: (f32, f32) = (760.0, 480.0);
 
@@ -53,6 +55,7 @@ enum Page {
     Search,
     Keywords,
     Snippets,
+    Snapshots,
     Appearance,
     Extensions,
     Permissions,
@@ -67,6 +70,7 @@ impl Page {
             Page::Search => "Search",
             Page::Keywords => "Keywords",
             Page::Snippets => "Snippets",
+            Page::Snapshots => "Snapshots",
             Page::Appearance => "Appearance",
             Page::Extensions => "Extensions",
             Page::Permissions => "Permissions",
@@ -82,6 +86,7 @@ impl Page {
             Page::Search => "page-search",
             Page::Keywords => "page-keywords",
             Page::Snippets => "page-snippets",
+            Page::Snapshots => "page-snapshots",
             Page::Appearance => "page-appearance",
             Page::Extensions => "page-extensions",
             Page::Permissions => "page-permissions",
@@ -96,6 +101,7 @@ impl Page {
             Page::Search => &icons::SEARCH,
             Page::Keywords => &icons::KEYBOARD,
             Page::Snippets => &icons::QUOTE,
+            Page::Snapshots => &icons::SNAPSHOT,
             Page::Appearance => &icons::SPARKLES,
             Page::Extensions => &icons::PUZZLE,
             Page::Permissions => &icons::SHIELD,
@@ -109,7 +115,9 @@ pub struct Prefs {
     config: Config,
     current: Rc<RefCell<Config>>,
     page: Page,
-    recorders: [ShortcutRecorderState; 2],
+    /// The page ⌘, returns to: the last one shown other than Snapshots, which has its own way in.
+    settings_page: Page,
+    recorders: [ShortcutState; 2],
     shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
@@ -122,6 +130,8 @@ pub struct Prefs {
     /// Each visible permission's status in row order, read while the page shows.
     permissions: Vec<PermissionStatus>,
     calendar_access: CalendarAccess,
+    /// Whether General shows its Advanced cards, kept while Dupin runs.
+    advanced: bool,
     /// The first-run welcome's step while it covers the pages.
     welcome: Option<welcome::Step>,
     pub(crate) hotkey_problem: Option<String>,
@@ -139,13 +149,20 @@ pub struct Prefs {
     /// Settings itself, which a change written on a worker thread reports back to.
     me: AppHandle<Prefs>,
     sync: sync::SyncPane,
+    /// The display the panel opens on, which the row count's recommendation is for.
+    panel_screen: Option<crate::ui::PanelScreen>,
+    pub(crate) snapshots: crate::snapshots::Snapshots,
 }
 
 impl Prefs {
     pub fn new(
         (current, locked_keys): (Rc<RefCell<Config>>, crate::settings::LockedKeys),
         binding: Arc<Binding>,
-        (panel, me): (AppHandle<Ui>, AppHandle<Prefs>),
+        (panel, me, running): (
+            AppHandle<Ui>,
+            AppHandle<Prefs>,
+            Arc<std::sync::atomic::AtomicUsize>,
+        ),
         updater: Updater,
         settings: Arc<crate::settings::Service>,
         welcome: bool,
@@ -154,7 +171,7 @@ impl Prefs {
         let config = current.borrow().clone();
         let recorders = LauncherShortcut::ALL.map(|kind| {
             let mut recorder =
-                ShortcutRecorderState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
+                ShortcutState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
             if binding.launch_problem(kind, recorder.shortcut()).is_some() {
                 recorder.mark_unregistered();
             }
@@ -166,11 +183,14 @@ impl Prefs {
             active_radius,
             keywords: keywords::Keywords::new(&config),
             snippets: snippets::Snippets::new(&config),
+            snapshots: crate::snapshots::Snapshots::new(panel.clone(), me.clone(), running),
             me,
             sync: sync::SyncPane::default(),
+            panel_screen: crate::ui::PanelScreen::current(config.display),
             config,
             current,
             page: Page::General,
+            settings_page: Page::General,
             recorders,
             shortcut_problems: [None, None],
             binding,
@@ -188,6 +208,7 @@ impl Prefs {
             login: LoginPreference::current(),
             permissions: Vec::new(),
             calendar_access,
+            advanced: false,
             welcome: welcome.then_some(welcome::Step::Hotkey),
         }
     }
@@ -204,10 +225,47 @@ impl Prefs {
     fn show(&mut self, page: Page) {
         self.welcome = None;
         self.page = page;
+        if page != Page::Snapshots {
+            self.settings_page = page;
+        }
         self.refresh_permissions();
         if page == Page::Sync {
             self.sync_ask(crate::control::SyncAction::Status {});
         }
+    }
+
+    /// The panel opened on another display.
+    pub fn reflect_panel_screen(&mut self, screen: Option<crate::ui::PanelScreen>) {
+        self.panel_screen = screen;
+    }
+
+    /// Opens Settings as ⌘, does: on the page last shown, unless that was Snapshots, which
+    /// ⇧⌘O opens instead, so Settings comes back to the settings page left before it.
+    pub fn open_settings(&mut self) {
+        if self.welcome.is_none() && self.page == Page::Snapshots {
+            self.show(self.settings_page);
+        }
+        self.me.open();
+    }
+
+    /// Shows the Snapshots page, opening Settings if it isn't.
+    pub fn open_snapshots(&mut self) {
+        self.show(Page::Snapshots);
+        self.me.open();
+    }
+
+    /// Closes Settings if it shows the Snapshots page, as `dupin snapshots close` asks.
+    pub fn close_snapshots(&mut self, call: crate::control::Call) {
+        self.snapshots.cancel_delete();
+        if self.welcome.is_none() && self.page == Page::Snapshots {
+            self.me.close();
+        }
+        call.finish(Ok(serde_json::Value::Null));
+    }
+
+    /// Keys no focused element took, which the Snapshots page uses while it shows.
+    pub fn key(&mut self, ev: &rune::KeyEvent, tx: &mut Tx) -> bool {
+        self.welcome.is_none() && self.page == Page::Snapshots && self.snapshots.key(ev, tx)
     }
 
     pub fn reflect_extensions(
@@ -247,7 +305,7 @@ impl Prefs {
             let i = kind as usize;
             let shortcut = crate::hotkey::parse(kind.accelerator(&config)).ok().flatten();
             if self.recorders[i].shortcut() != shortcut.as_ref() {
-                self.recorders[i] = ShortcutRecorderState::new(shortcut);
+                self.recorders[i] = ShortcutState::new(shortcut);
                 self.shortcut_problems[i] = None;
             }
         }
@@ -371,21 +429,71 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let k = rune_theme_opencode::kit(cx.system_dark());
     let hair = 1.0 / cx.env().scale;
     let rows = match (s.welcome, s.page) {
-        (Some(step), _) => welcome::page(s, k, hair, step),
-        (None, Page::General) => general::page(s, k, hair),
-        (None, Page::Search) => search::page(s, k, hair),
-        (None, Page::Keywords) => keywords::page(s, k, hair),
-        (None, Page::Snippets) => snippets::page(s, k, hair),
+        (Some(step), _) => welcome::page(s, k, step),
+        (None, Page::General) => general::page(s, k),
+        (None, Page::Search) => search::page(s, k),
+        (None, Page::Keywords) => keywords::page(s, k),
+        (None, Page::Snippets) => snippets::page(s, k),
+        (None, Page::Snapshots) => Vec::new(),
         (None, Page::Appearance) => appearance::page(s, k, cx.system_dark()),
         (None, Page::Extensions) => extensions::problem(s, k)
             .into_iter()
-            .chain(extensions::page(s, k, hair))
+            .chain(extensions::page(s, k))
             .collect(),
-        (None, Page::Permissions) => permissions::page(s, k, hair),
-        (None, Page::Sync) => sync::page(s, k, hair),
-        (None, Page::Updates) => updates::page(s, k, hair),
+        (None, Page::Permissions) => permissions::page(s, k),
+        (None, Page::Sync) => sync::page(s, k),
+        (None, Page::Updates) => updates::page(s, k),
     };
     let title = s.welcome.map_or(s.page.title(), welcome::Step::title);
+    // The Snapshots page scrolls its list and its detail apart, so it fills the body instead.
+    let snapshots = (s.welcome.is_none() && s.page == Page::Snapshots).then(|| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        crate::snapshots::page(&s.snapshots, k, now)
+    });
+    let body = col()
+        .key("page-body")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .px(GUTTER - ROW_PX)
+        .gap(12.0)
+        .children(
+            [
+                ("config-problem", s.config_problem.as_deref()),
+                ("hotkey-problem", s.hotkey_problem.as_deref()),
+            ]
+            .into_iter()
+            .filter_map(|(key, problem)| Some((key, problem?)))
+            .map(|(key, problem)| {
+                text(problem)
+                    .key(key)
+                    .w_full()
+                    .font(DESCRIPTION)
+                    .color(k.c.text_base)
+                    .wrap()
+            }),
+        )
+        .children(
+            crate::stored::problems()
+                .into_iter()
+                .enumerate()
+                .map(|(index, problem)| {
+                    text(problem)
+                        .key(format!("storage-problem-{index}"))
+                        .w_full()
+                        .font(DESCRIPTION)
+                        .color(k.c.text_base)
+                        .wrap()
+                }),
+        )
+        .children(rows);
+    let accessory = snapshots.is_some().then(|| s.snapshots.count(k)).flatten();
+    let body = match snapshots {
+        Some(page) => body.child(page.mb(GUTTER - ROW_PX)),
+        None => body.scroll(ScrollSpec { stick_bottom: false }),
+    };
     let panel = col()
         .key("panel")
         .role("main")
@@ -411,48 +519,10 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                         .role("heading")
                         .font(k.ty.body_medium)
                         .color(k.c.text_base),
-                ),
-        )
-        .child(
-            col()
-                .key("page-body")
-                .w_full()
-                .grow(1.0)
-                .min_h(0.0)
-                .scroll(ScrollSpec { stick_bottom: false })
-                .px(GUTTER - ROW_PX)
-                .gap(12.0)
-                .children(
-                    [
-                        ("config-problem", s.config_problem.as_deref()),
-                        ("hotkey-problem", s.hotkey_problem.as_deref()),
-                    ]
-                    .into_iter()
-                    .filter_map(|(key, problem)| Some((key, problem?)))
-                    .map(|(key, problem)| {
-                        text(problem)
-                            .key(key)
-                            .w_full()
-                            .font(DESCRIPTION)
-                            .color(k.c.text_base)
-                            .wrap()
-                    }),
                 )
-                .children(
-                    crate::stored::problems()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, problem)| {
-                            text(problem)
-                                .key(format!("storage-problem-{index}"))
-                                .w_full()
-                                .font(DESCRIPTION)
-                                .color(k.c.text_base)
-                                .wrap()
-                        }),
-                )
-                .children(rows),
+                .children(accessory.map(|count| row().grow(1.0).child(el().grow(1.0)).child(count))),
         )
+        .child(body)
         .children(s.welcome.map(|step| welcome::footer(k, step)));
     row()
         .key("prefs")
@@ -477,6 +547,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         Page::Search,
         Page::Keywords,
         Page::Snippets,
+        Page::Snapshots,
         Page::Appearance,
         Page::Extensions,
     ]
@@ -512,15 +583,6 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         }
         pages = pages.child(item);
     }
-    let config = footer_link(k, "open-config", "Open config.toml").on_press(|_: &mut Prefs| {
-        if let Some(path) = crate::settings::path()
-            && path.exists()
-        {
-            std::thread::spawn(move || dupin_mac::workspace::open(&path));
-        }
-    });
-    let folder = footer_link(k, "open-config-folder", "Open Config Folder")
-        .on_press(|_: &mut Prefs| open_config_folder());
     col()
         .key("sidebar")
         .role("navigation")
@@ -537,18 +599,21 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             footer_link(k, "show-welcome", "Show Welcome")
                 .on_press(|s: &mut Prefs| s.welcome = Some(welcome::Step::Hotkey)),
         )
-        .child(
-            footer_link(k, "open-snapshots", "Open Snapshots")
-                .on_press(|s: &mut Prefs| s.panel.update(crate::ui::Ui::show_snapshots)),
-        )
-        .child(config)
-        .child(folder)
         .children(crate::notices::path().map(|path| {
             footer_link(k, "open-acknowledgements", "Acknowledgements").on_press(move |_: &mut Prefs| {
                 std::thread::spawn(move || dupin_mac::workspace::open(path));
             })
         }))
         .children(s.updater.available().then(|| updates::footer(s, k)))
+}
+
+/// Open config.toml in its default editor, when there is one.
+fn open_config_file() {
+    if let Some(path) = crate::settings::path()
+        && path.exists()
+    {
+        std::thread::spawn(move || dupin_mac::workspace::open(&path));
+    }
 }
 
 /// Open the folder holding config.toml, `extensions/` and `shaders/` in Finder, making it
@@ -616,7 +681,7 @@ mod tests {
         Prefs::new(
             (current, Default::default()),
             binding,
-            (panel, prefs),
+            (panel, prefs, Default::default()),
             updater,
             settings,
             welcome,
@@ -638,6 +703,28 @@ mod tests {
             ("display", "Display", Role::ComboBox),
             ("system_automation", "System Command Automation", Role::Switch),
         ];
+        let advanced = |runtime: &mut rune::Runtime<Prefs>| {
+            runtime.frame(0.0);
+            let tree = runtime.accessibility_tree();
+            let shown = tree
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("System Command Automation"));
+            let (_, disclosure) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == Role::Button && node.label() == Some("Advanced"))
+                .expect("the Advanced disclosure");
+            assert_eq!(disclosure.is_expanded(), Some(shown));
+            shown
+        };
+        assert!(!advanced(&mut runtime), "Advanced starts collapsed");
+        let (x, y) = runtime
+            .find("advanced")
+            .expect("the Advanced disclosure is drawn");
+        runtime.pointer_down(x, y);
+        runtime.pointer_up(x, y);
+        assert!(advanced(&mut runtime));
 
         for locked in [false, true] {
             runtime.update(|s, _| {
@@ -746,7 +833,7 @@ mod tests {
                 [(
                     chord.to_string(),
                     HotkeyTarget::Dupin {
-                        command: "dictionary".into(),
+                        command: dupin_core::config::AliasTarget::Command("dictionary".into()).into(),
                         query: None,
                     }
                 )]
@@ -796,6 +883,89 @@ mod tests {
             assert!(dictionary(s).is_empty());
             assert_eq!(s.config.bindings.len(), 1, "the app binding stays");
         });
+
+        let press = |runtime: &mut rune::Runtime<Prefs>, key: &str| {
+            runtime.frame(0.0);
+            let (x, y) = runtime.find(key).unwrap_or_else(|| panic!("{key} is drawn"));
+            runtime.pointer_down(x, y);
+            runtime.pointer_up(x, y);
+            runtime.frame(0.0);
+        };
+        press(&mut runtime, "shortcut-dictionary");
+        assert!(runtime.state.keywords.shortcuts["dictionary"].is_recording());
+        runtime.physical_input(rune::PhysicalInput::Key {
+            key: rune::PhysicalKeyCode::KeyD,
+            mods: rune::Mods {
+                ctrl: true,
+                alt: true,
+                ..rune::Mods::default()
+            },
+            pressed: true,
+            repeat: false,
+            text: None,
+            consumed_mods: Default::default(),
+        });
+        runtime.frame(0.0);
+        assert!(!runtime.state.keywords.shortcuts["dictionary"].is_recording());
+        assert_eq!(dictionary(&runtime.state)[0].0, "ctrl+alt+d");
+        press(&mut runtime, "shortcut-dictionary-clear");
+        assert!(dictionary(&runtime.state).is_empty());
+        assert_eq!(runtime.state.keywords.shortcuts["dictionary"].shortcut(), None);
+    }
+
+    #[test]
+    fn system_commands_web_searches_and_apps_record_shortcuts_too() {
+        use dupin_core::config::{Address, HotkeyTarget};
+        use rune::accesskit::Role;
+
+        let config =
+            Config::parse("[bindings.\"alt+cmd+s\"]\ntarget = \"dupin\"\ncommand = \"system/sleep\"")
+                .unwrap();
+        let current = Rc::new(RefCell::new(config));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Keywords);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.frame(0.0);
+        let tree = runtime.accessibility_tree();
+        let recorder = |label: &str| {
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+        };
+        assert!(recorder("Run Sleep") && recorder("Run Lock Screen") && recorder("Run Restart Dupin"));
+        assert!(recorder("Open Search Google"));
+        runtime.update(|s, _| {
+            let bound = |s: &Prefs, address: &str| {
+                let address = Address::parse(address).unwrap();
+                s.config
+                    .bindings
+                    .iter()
+                    .find(|(_, target)| matches!(target, HotkeyTarget::Dupin { command, query: None } if *command == address))
+                    .map(|(chord, _)| chord.clone())
+            };
+            assert_eq!(bound(s, "system/sleep").as_deref(), Some("alt+cmd+s"));
+            let taken: Shortcut = "alt+cmd+s".parse().unwrap();
+            assert_eq!(
+                s.change_command_shortcut("system/lock-screen", Some(&taken)),
+                Err(ShortcutError::Conflict)
+            );
+            assert_eq!(
+                s.keywords.shortcut_problems["system/lock-screen"],
+                "⌥⌘S is assigned to the binding for system/sleep."
+            );
+            for (address, chord) in [
+                ("system/lock-screen", "ctrl+alt+cmd+l"),
+                ("web:g", "ctrl+alt+cmd+g"),
+                ("app:org.mozilla.firefox", "ctrl+alt+cmd+f"),
+            ] {
+                let chord: Shortcut = chord.parse().unwrap();
+                assert_eq!(s.change_command_shortcut(address, Some(&chord)), Ok(()));
+                assert_eq!(bound(s, address), Some(chord.to_string()), "{address}");
+            }
+            assert_eq!(s.change_command_shortcut("system/sleep", None), Ok(()));
+            assert_eq!(bound(s, "system/sleep"), None);
+        });
     }
 
     #[test]
@@ -820,6 +990,103 @@ mod tests {
         crate::stored::report(STORE, None);
         runtime.update(|_, _| {});
         assert!(!shown(&mut runtime));
+    }
+
+    #[test]
+    fn the_snapshots_page_lists_snapshots_beside_the_selected_one_and_keeps_its_keys() {
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        let escape = rune::KeyEvent {
+            key: rune::Key::Escape,
+            mods: Default::default(),
+        };
+        // Elsewhere in Settings the page's keys are left to the window.
+        assert!(!state.key(&escape, &mut Tx::default()));
+        state.show(Page::Snapshots);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.frame(0.0);
+        let has_label = |runtime: &rune::Runtime<Prefs>, label: &str| {
+            runtime
+                .accessibility_tree()
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(label) || node.value() == Some(label))
+        };
+        assert!(has_label(&runtime, "No snapshots yet"));
+
+        let snapshot = |id: &str, title: &str, saved_at| dupin_core::snapshots::Snapshot {
+            version: 1,
+            id: id.into(),
+            saved_at,
+            mode: "dictionary.lookup".into(),
+            explicit: true,
+            query: title.into(),
+            title: title.into(),
+            views: vec![dupin_core::View::Detail {
+                title: title.into(),
+                body: format!("The meaning of {title}"),
+            }],
+            state: None,
+        };
+        runtime.update(|s, tx| {
+            s.snapshots.seed(
+                vec![snapshot("new", "serendipity", 2), snapshot("old", "petrichor", 1)],
+                tx,
+            );
+        });
+        runtime.frame(0.0);
+        for label in [
+            "Search saved snapshots",
+            "serendipity",
+            "petrichor",
+            "The meaning of serendipity",
+        ] {
+            assert!(has_label(&runtime, label), "missing {label}");
+        }
+        assert!(has_label(&runtime, "2 of 100 saved"));
+        runtime.update(|s, tx| {
+            assert!(s.key(
+                &rune::KeyEvent {
+                    key: rune::Key::Down,
+                    mods: Default::default(),
+                },
+                tx
+            ));
+        });
+        runtime.frame(0.0);
+        assert!(has_label(&runtime, "The meaning of petrichor"));
+        assert!(!has_label(&runtime, "The meaning of serendipity"));
+    }
+
+    #[test]
+    fn settings_opened_after_snapshots_comes_back_to_the_settings_page_tab_reaches() {
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Keywords);
+        state.show(Page::Snapshots);
+        // ⌘, opens Settings itself; ⇧⌘O is the way to Snapshots.
+        state.open_settings();
+        assert!(state.page == Page::Keywords);
+        state.show(Page::General);
+        state.show(Page::Snapshots);
+        state.open_settings();
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.on_key = Some(Prefs::key);
+        runtime.frame(0.0);
+        runtime.key(rune::KeyEvent {
+            key: rune::Key::Tab,
+            mods: Default::default(),
+        });
+        runtime.frame(0.0);
+        let focused: Vec<_> = runtime
+            .elements()
+            .into_iter()
+            .filter(|element| element.focused)
+            .filter_map(|element| element.key)
+            .collect();
+        assert_eq!(focused, ["page-general"]);
     }
 
     #[test]
@@ -924,7 +1191,7 @@ mod tests {
         let listed = |package: &PackageId, title: &str, kind| Listed {
             package: package.clone(),
             title: title.into(),
-            keyword: title.to_lowercase(),
+            keyword: Some(title.to_lowercase()),
             icon: None,
             kind,
             registered: true,
@@ -1011,7 +1278,7 @@ mod tests {
             vec![crate::extensions::packages::Listed {
                 package: id.clone(),
                 title: "Weather".into(),
-                keyword: "wx".into(),
+                keyword: Some("wx".into()),
                 icon: None,
                 kind: crate::extensions::packages::Kind::User,
                 registered: true,

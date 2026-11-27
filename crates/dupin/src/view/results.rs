@@ -1,6 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use dupin_core::{Accessory, Item, RowState, View};
+use dupin_core::{Accessory, Item, RowState, Rows, View};
 use rune::tok::type_;
 use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Span, TextStyle, col, el, rich, row, text};
 
@@ -8,22 +8,61 @@ use crate::ui::{ICON_SIZE, Ui};
 
 use super::theme::ResolvedTheme;
 
-/// Rows shown before the list scrolls.
-const VISIBLE_ROWS: usize = 8;
-pub(super) const LIST_HEIGHT_BUDGET: f32 = 416.0;
-
-pub(super) fn visible_rows(row_height: f32) -> usize {
-    VISIBLE_ROWS
-        .min((LIST_HEIGHT_BUDGET / row_height).floor() as usize)
-        .max(1)
-}
+/// The result list's height before it scrolls when the panel knows no display, as in a
+/// headless run: eight rows of the default height. A display never leaves it less.
+pub const DEFAULT_LIST_BUDGET: f32 = 416.0;
+/// However tall the display, the list stops at sixteen default rows.
+const MAX_LIST_BUDGET: f32 = 2.0 * DEFAULT_LIST_BUDGET;
 pub(super) const LIST_PAD: f32 = 6.0;
+/// Between the list's end and the display's edge: the list's padding, its divider and a gap.
+const LIST_MARGIN: f32 = 2.0 * LIST_PAD + 1.0 + 24.0;
+
+/// The share of the room on the list's side of the field that a recommended row count fills,
+/// leaving the rest of the display around the panel in view.
+const RECOMMENDED_SHARE: f32 = 0.75;
+
+/// How the result list fits a display.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ListFit {
+    /// The height the list takes before it scrolls.
+    pub budget: f32,
+    /// The row count Settings recommends for the display.
+    pub recommended: u8,
+}
+
+/// How the result list fits the `room` a display leaves on its side of the query field, or
+/// `None` where the panel knows no display, for `rows` of `row_height` points.
+pub fn list_fit(room: Option<f32>, rows: Rows, row_height: f32) -> ListFit {
+    let space = room.map(|room| room - LIST_MARGIN);
+    let (fewest, most) = (f32::from(Rows::MIN), f32::from(Rows::MAX));
+    let recommended = (space.map_or(DEFAULT_LIST_BUDGET, |space| space * RECOMMENDED_SHARE) / row_height)
+        .floor()
+        .clamp(fewest, most);
+    let budget = match rows {
+        Rows::Auto => space.map_or(DEFAULT_LIST_BUDGET, |space| {
+            space.clamp(DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET)
+        }),
+        Rows::Count(count) => {
+            let fits = space.map_or(most, |space| (space / row_height).floor());
+            f32::from(count).min(fits).max(fewest) * row_height
+        }
+    };
+    ListFit {
+        budget,
+        recommended: recommended as u8,
+    }
+}
+
+/// Rows shown before the list scrolls.
+pub(crate) fn visible_rows(budget: f32, row_height: f32) -> usize {
+    ((budget / row_height).floor() as usize).max(1)
+}
 
 /// The height of a section's heading row.
 pub(super) const SECTION_H: f32 = 30.0;
 
-/// The height of a long list whose selected row shows its detail, as tall as a list of cards.
-const CARDS_MAX_H: f32 = 440.0;
+/// How much taller than the list of rows a list of cards grows.
+const CARDS_EXTRA_H: f32 = 24.0;
 
 /// How the result list lays out its rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +82,7 @@ fn layout(s: &Ui, items: &[Item]) -> Layout {
     let text_only = items.iter().all(|item| matches!(item.view, View::Text { .. }));
     let cards = !text_only || (0..items.len()).any(|index| s.session.detail(index).is_some());
     let headings = (0..items.len()).any(|index| s.session.section_start(index).is_some());
-    let long = items.len() > 2 * visible_rows(s.theme.row_height as f32);
+    let long = items.len() > 2 * visible_rows(s.list_budget, s.theme.row_height as f32);
     match (cards, headings) {
         (false, false) => Layout::Windowed,
         (false, true) => Layout::Sectioned,
@@ -67,7 +106,7 @@ pub fn wanted_rows(s: &Ui, in_view: std::ops::Range<usize>) -> Vec<usize> {
     if !matches!(layout(s, items), Layout::Windowed | Layout::WindowedCard) {
         return (0..items.len()).collect();
     }
-    let screen = visible_rows(s.theme.row_height as f32);
+    let screen = visible_rows(s.list_budget, s.theme.row_height as f32);
     let around = |range: std::ops::Range<usize>| {
         range.start.saturating_sub(screen)..range.end.saturating_add(screen).min(items.len())
     };
@@ -103,14 +142,14 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .growth(GrowthSpec::default())
             .no_scroll_anchor()
             .virtualize(s.theme.row_height as f32)
-            .on_visible_rows(Ui::rows_in_view)
-            .children(rows);
+            .on_visible_rows(rows_in_view(s, rows.len()))
+            .children(list_order(rows, s.grows_up()));
         return col().key("results").w_full().py(LIST_PAD).child(
             col()
                 .key("scroll")
                 .w_full()
-                .h(CARDS_MAX_H)
-                .scroll(ScrollSpec { stick_bottom: false })
+                .h(s.list_budget + CARDS_EXTRA_H)
+                .scroll(list_scroll(s))
                 .on_scroll_offset(report_offset(s))
                 .instant_changes()
                 .child(list),
@@ -135,14 +174,17 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
                 sectioned(s, index, row, t)
             })
             .collect::<Vec<_>>();
-        let content = col().key("content-rows").w_full().children(rows);
+        let content = col()
+            .key("content-rows")
+            .w_full()
+            .children(list_order(rows, s.grows_up()));
         return col().key("results").w_full().py(LIST_PAD).child(
             col()
                 .key("content-scroll")
                 .w_full()
                 .shrink()
-                .max_h(440.0)
-                .scroll(ScrollSpec { stick_bottom: false })
+                .max_h(s.list_budget + CARDS_EXTRA_H)
+                .scroll(list_scroll(s))
                 .on_scroll_offset(report_offset(s))
                 .child(content),
         );
@@ -168,61 +210,103 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
         .growth(GrowthSpec::default())
         .no_scroll_anchor();
     let (height, list) = if layout == Layout::Windowed {
-        let shown = items.len().min(visible_rows(row_height)) as f32;
+        let shown = items.len().min(visible_rows(s.list_budget, row_height)) as f32;
         (
             shown * row_height,
-            list.virtualize(row_height).on_visible_rows(Ui::rows_in_view),
+            list.virtualize(row_height)
+                .on_visible_rows(rows_in_view(s, rows.len())),
         )
     } else {
         let full = items.len() as f32 * row_height + headings as f32 * SECTION_H;
-        (full.min(visible_rows(row_height) as f32 * row_height), list)
+        (
+            full.min(visible_rows(s.list_budget, row_height) as f32 * row_height),
+            list,
+        )
     };
     col().key("results").w_full().py(LIST_PAD).child(
         col()
             .key("scroll")
             .w_full()
             .h(height)
-            .scroll(ScrollSpec { stick_bottom: false })
+            .scroll(list_scroll(s))
             .on_scroll_offset(report_offset(s))
             .instant_changes()
-            .child(list.children(rows)),
+            .child(list.children(list_order(rows, s.grows_up()))),
     )
 }
 
-fn report_offset(s: &Ui) -> impl Fn(rune::ScrollPos) + 'static {
-    let offset = s.list_offset.clone();
-    move |at| {
-        offset.set(at.offset[1]);
+/// The rows, first match first, in the order they stack from the list's top: a list that runs
+/// upwards from the field puts the first match at its bottom, next to the field.
+pub(super) fn list_order<T>(mut rows: Vec<T>, grows_up: bool) -> Vec<T> {
+    if grows_up {
+        rows.reverse();
+    }
+    rows
+}
+
+/// A list that runs upwards opens at its bottom, where the first match is, and stays there as
+/// its rows change.
+fn list_scroll(s: &Ui) -> ScrollSpec {
+    ScrollSpec {
+        stick_bottom: s.grows_up(),
     }
 }
 
-/// `result` under its section's heading when it starts one. The heading shares the row's key,
-/// so revealing the row reveals its heading too.
+/// The rows in view, as the windowed list reports them in its own order, by result index.
+fn rows_in_view(s: &Ui, len: usize) -> impl Fn(&mut Ui, std::ops::Range<usize>) -> bool + 'static {
+    let grows_up = s.grows_up();
+    move |s, shown| s.rows_in_view(result_range(shown, len, grows_up))
+}
+
+fn result_range(shown: std::ops::Range<usize>, len: usize, grows_up: bool) -> std::ops::Range<usize> {
+    if grows_up {
+        len.saturating_sub(shown.end)..len.saturating_sub(shown.start)
+    } else {
+        shown
+    }
+}
+
+/// Records how far the list is scrolled away from the field's end, where the first match is.
+fn report_offset(s: &Ui) -> impl Fn(rune::ScrollPos) + 'static {
+    let offset = s.list_offset.clone();
+    let grows_up = s.grows_up();
+    move |at| {
+        offset.set(if grows_up {
+            (at.max[1] - at.offset[1]).max(0.0)
+        } else {
+            at.offset[1]
+        });
+    }
+}
+
+/// `result` under its section's heading when it starts one, or over it in a list that runs
+/// upwards: read from the field outwards, a heading comes before its section either way. The
+/// heading shares the row's key, so revealing the row reveals its heading too.
 fn sectioned(s: &Ui, index: usize, result: El, t: &ResolvedTheme) -> El {
     let Some(section) = s.session.section_start(index) else {
         return result.key(row_key(&s.session.layout_key(index)));
     };
     let key = row_key(&s.session.layout_key(index));
-    col()
-        .key(key.clone())
+    let heading = row()
+        .key(format!("{key}-section"))
         .w_full()
+        .h(SECTION_H)
+        .px(LIST_PAD + 10.0)
+        .center_y()
+        .role("heading")
         .child(
-            row()
-                .key(format!("{key}-section"))
-                .w_full()
-                .h(SECTION_H)
-                .px(LIST_PAD + 10.0)
-                .pt(8.0)
-                .center_y()
-                .role("heading")
-                .child(
-                    text(section)
-                        .font(t.font(type_::SECTION))
-                        .color(t.text_secondary)
-                        .truncate(),
-                ),
-        )
-        .child(result.key(format!("{key}-row")))
+            text(section)
+                .font(t.font(type_::SECTION))
+                .color(t.text_secondary)
+                .truncate(),
+        );
+    let result = result.key(format!("{key}-row"));
+    let section = col().key(key).w_full();
+    if s.grows_up() {
+        section.child(result).child(heading.pb(8.0))
+    } else {
+        section.child(heading.pt(8.0)).child(result)
+    }
 }
 
 fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, accent: Color) -> El {
@@ -417,7 +501,10 @@ pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool, i
     }
     let slot = el().size(ICON_SIZE, ICON_SIZE);
     if let Some(dupin_core::Icon::Symbol(name)) = icon {
-        return Some(slot.pixels(&crate::symbols::symbol(name, crate::symbols::ROW, ink)));
+        return Some(match crate::symbols::symbol(name, crate::symbols::ROW, ink) {
+            Some(pixels) => slot.pixels(&pixels),
+            None => slot,
+        });
     }
     Some(match (icon, icon.and_then(|icon| s.icons.get(icon))) {
         // A picture keeps its own shape inside the icon's square, as Finder's thumbnails do.
@@ -543,14 +630,103 @@ pub fn row_key(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{LIST_HEIGHT_BUDGET, visible_rows};
+    use dupin_core::Rows;
+
+    use super::{DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET, list_fit, list_order, result_range, visible_rows};
+
+    #[test]
+    fn a_list_that_runs_upwards_puts_the_first_match_next_to_the_field() {
+        assert_eq!(list_order(vec![0, 1, 2], false), [0, 1, 2]);
+        assert_eq!(list_order(vec![0, 1, 2], true), [2, 1, 0]);
+    }
+
+    #[test]
+    fn rows_in_view_are_reported_by_result_index() {
+        // Ten results, the bottom four shown: the first four matches.
+        assert_eq!(result_range(6..10, 10, true), 0..4);
+        assert_eq!(result_range(0..3, 10, true), 7..10);
+        assert_eq!(result_range(6..10, 10, false), 6..10);
+        assert_eq!(result_range(0..0, 0, true), 0..0);
+    }
 
     #[test]
     fn themed_lists_keep_the_original_height_budget() {
-        assert_eq!(visible_rows(52.0), 8);
-        assert_eq!(visible_rows(44.0), 8);
-        for height in [52.0, 64.0, 72.0, 92.0, 100.0] {
-            assert!(visible_rows(height) as f32 * height <= LIST_HEIGHT_BUDGET);
+        assert_eq!(visible_rows(DEFAULT_LIST_BUDGET, 52.0), 8);
+        for height in [44.0, 52.0, 64.0, 72.0, 92.0, 100.0] {
+            let rows = visible_rows(DEFAULT_LIST_BUDGET, height);
+            assert!(rows as f32 * height <= DEFAULT_LIST_BUDGET);
+            assert!((rows + 1) as f32 * height > DEFAULT_LIST_BUDGET);
+        }
+        assert_eq!(visible_rows(DEFAULT_LIST_BUDGET, 1000.0), 1);
+    }
+
+    fn budget(room: Option<f32>, rows: Rows) -> f32 {
+        list_fit(room, rows, 52.0).budget
+    }
+
+    fn recommended(room: Option<f32>, row_height: f32) -> u8 {
+        list_fit(room, Rows::Auto, row_height).recommended
+    }
+
+    #[test]
+    fn more_room_shows_more_rows_up_to_a_limit() {
+        assert_eq!(budget(None, Rows::Auto), DEFAULT_LIST_BUDGET);
+        assert_eq!(budget(Some(0.0), Rows::Auto), DEFAULT_LIST_BUDGET);
+        assert_eq!(budget(Some(300.0), Rows::Auto), DEFAULT_LIST_BUDGET);
+        let roomy = budget(Some(700.0), Rows::Auto);
+        assert!(roomy > DEFAULT_LIST_BUDGET && roomy < 700.0);
+        assert!(visible_rows(roomy, 52.0) > visible_rows(DEFAULT_LIST_BUDGET, 52.0));
+        assert_eq!(budget(Some(5000.0), Rows::Auto), MAX_LIST_BUDGET);
+        assert_eq!(visible_rows(MAX_LIST_BUDGET, 52.0), 16);
+    }
+
+    #[test]
+    fn a_row_count_holds_where_it_fits_and_shrinks_to_the_display_where_it_does_not() {
+        // 52-point rows: 600 points of room leave 563 for rows, ten of them.
+        assert_eq!(budget(Some(600.0), Rows::Count(5)), 5.0 * 52.0);
+        assert_eq!(budget(Some(600.0), Rows::Count(10)), 10.0 * 52.0);
+        assert_eq!(budget(Some(600.0), Rows::Count(16)), 10.0 * 52.0);
+        assert_eq!(budget(Some(5000.0), Rows::Count(16)), 16.0 * 52.0);
+        // A display too short for the fewest rows still gets them.
+        assert_eq!(budget(Some(0.0), Rows::Count(8)), f32::from(Rows::MIN) * 52.0);
+        // Without a display, nothing shrinks it.
+        assert_eq!(budget(None, Rows::Count(16)), 16.0 * 52.0);
+        for count in [Rows::MIN, 9, Rows::MAX] {
+            let fit = list_fit(Some(5000.0), Rows::Count(count), 72.0);
+            assert_eq!(visible_rows(fit.budget, 72.0), usize::from(count));
+        }
+        assert_eq!(
+            visible_rows(list_fit(Some(600.0), Rows::Count(16), 72.0).budget, 72.0),
+            7
+        );
+    }
+
+    #[test]
+    fn the_recommendation_fills_three_quarters_of_the_room_in_whole_rows() {
+        // A 982-point MacBook Pro with the menu bar: 944 points visible. Centred, 403 of the
+        // 440 points under the field hold rows; three quarters of that is 302, five rows.
+        assert_eq!(recommended(Some(440.0), 52.0), 5);
+        // At the top the same display leaves 700 points: 663 for rows, nine of them.
+        assert_eq!(recommended(Some(700.0), 52.0), 9);
+        assert_eq!(recommended(Some(700.0), 72.0), 6);
+        assert_eq!(recommended(Some(700.0), 100.0), 4);
+        // A 1440-point display at the top: never more than a count may ask for.
+        assert_eq!(recommended(Some(1171.0), 52.0), Rows::MAX);
+        // Too short a display still recommends the fewest.
+        assert_eq!(recommended(Some(100.0), 52.0), Rows::MIN);
+        // Without a display, the default list's rows.
+        assert_eq!(recommended(None, 52.0), 8);
+        assert_eq!(recommended(None, 100.0), 4);
+        for room in [400.0, 700.0, 1000.0] {
+            for row_height in [52.0, 72.0, 100.0] {
+                let count = recommended(Some(room), row_height);
+                let fit = list_fit(Some(room), Rows::Count(count), row_height);
+                assert_eq!(
+                    visible_rows(fit.budget, row_height),
+                    usize::from(count),
+                    "the recommendation for {room} points of room fits it"
+                );
+            }
         }
     }
 }

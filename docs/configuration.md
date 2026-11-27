@@ -1,18 +1,22 @@
 # Configuration
 
-Dupin reads `~/.config/dupin/config.toml` (`$XDG_CONFIG_HOME/dupin/config.toml` when `XDG_CONFIG_HOME` is set). Every key is optional. Settings (⌘, in the panel) and `dupin config set` write changes back to it, and Dupin reloads the file while it runs.
+Dupin reads `~/.config/dupin/config.toml` (`$XDG_CONFIG_HOME/dupin/config.toml` when `XDG_CONFIG_HOME` is set). Every key is optional. Settings (⌘, in the panel) and `dupin config set` write changes back to it, and Dupin reloads the file while it runs. Settings → General → Advanced → Configuration opens the file or its folder.
 
 ```toml
 display = "mouse" # "mouse", "main", or "active"
-position = "center" # "center" or "top"
+position = "center" # "center", "top", or "bottom"
+rows = "auto" # "auto", or a count from 3 to 16
 input_source = "ascii" # "ascii", "keep", or an input source identifier
 ```
 
-| Key            | Default    | Values                                                                                                                    |
-| -------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `display`      | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display             |
-| `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top                                              |
-| `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source) |
+| Key            | Default    | Values                                                                                                                                                          |
+| -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `display`      | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display                                                   |
+| `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top; `"bottom"` near its bottom, with results above it. Settings → General → Position  |
+| `rows`         | `"auto"`   | `"auto"` fills the room the display leaves; a count from `3` to `16` shows that many rows before the list scrolls. See [Rows](#rows). Settings → General → Rows |
+| `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source)                                       |
+
+With `position = "bottom"` the panel is laid out as fzf and Telescope lay theirs out: the field sits as far above the bottom of the display as `"top"` puts it below the top, and the results run upwards from it, the best match next to the field. The panel's bottom edge stays put as the results change. <kbd>↑</kbd> moves to the row above, the next match, and <kbd>↓</kbd> back towards the field; the ⌘K actions and pickers follow the same order. Hints and notices sit next to the field, and footers, such as the folder picker's <kbd>↩</kbd> Choose folder line, at the top. Forms and cards keep reading top to bottom above the field. The panel doesn't animate its size in this position, so its edge and the field never slide.
 
 Each feature's keys are on its own page; see [Feature configuration](#feature-configuration).
 
@@ -58,6 +62,14 @@ Focused window (`display = "active"`) uses any existing Accessibility grant. If 
 Enabling Calendar search or Paste snippets, setting a Selection hotkey for the first time, or turning on an extension such as Window Management in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
 
 </details>
+
+## Rows
+
+With `rows = "auto"` the result list fills the room the display leaves on its side of the field, so a taller display shows more rows before the list scrolls: at least as many as fit in 416 points (eight rows at the default `row_height`), at most as many as fit in 832. A smaller `row_height` fits more rows into the same room.
+
+A count, such as `rows = 10`, shows that many rows on every display that has room for them. On a display that doesn't, the panel shows as many as fit there, never fewer than three, so the list doesn't run off the screen; the count comes back on a taller display. Each display is measured when the panel opens on it.
+
+Settings → General → Rows recommends a count for the display the panel opens on: three quarters of the room on the list's side of the field, in whole rows of the current `row_height`, from 3 to 16. The rest of the display stays in view around the panel. The recommendation follows `position` and `row_height`, and changes when the panel next opens on another display. **Use N** sets `rows` to it, N being the recommendation. Pick **Auto** from the menu to go back.
 
 ## Input source
 

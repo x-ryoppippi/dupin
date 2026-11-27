@@ -50,7 +50,7 @@
           name = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
         in
         lib.types.strMatching (
-          "storage|dictionary|calculator|snippets|calendar|query|clipboard:(read|write|watch|paste)|windows:(read|arrange)|rows:(text|url|file|app)"
+          "storage|dictionary|calculator|snippets|calendar|query|clipboard:(read|write|watch|paste)|windows:(read|arrange)|context:(frontmost|document)|apps:(read|control)|rows:(text|url|file|app)"
           + "|(files|exec|script):${name}|http:https://${host}(\\.${host})*(:[0-9]{1,5})?"
         );
       # The capability broker's declarative base. Dupin knows a package by `name` in its
@@ -245,13 +245,16 @@
             {
               hotkey = "alt+space";
               position = "top";
+              rows = 10;
               input_source = "ascii";
               file_limit = 100;
               aliases = { c = "calendar"; ff = "app:org.mozilla.firefox"; };
               bindings."cmd+shift+v" = { target = "dupin"; command = "clipboard"; };
-              advanced.kinds.file.actions = [
-                { title = "Open in Zed"; script = "open-in-zed"; }
-              ];
+              advanced.kinds.file = {
+                actions = [ { title = "Open in Zed"; script = "open-in-zed"; } ];
+                hide = [ "quick-look" ];
+                order = [ "reveal" ];
+              };
             }
           '';
           description = ''

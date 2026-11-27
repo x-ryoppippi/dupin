@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 /// The most actions one kind takes from config.toml.
 pub const MAX_KIND_ACTIONS: usize = 16;
+/// The most action IDs a kind's `hide` or `order` lists.
+const MAX_ARRANGED: usize = 32;
 const MAX_TITLE_BYTES: usize = 128;
 const MAX_TEMPLATE_BYTES: usize = 4096;
 
@@ -85,13 +87,24 @@ impl KindActions {
         *self == Self::default()
     }
 
-    fn each(&self) -> [(&'static str, &[KindAction], &'static [&'static str]); 4] {
+    /// Each kind's name, configuration and the placeholders its URL actions fill.
+    fn each(&self) -> [(&'static str, &KindConfig, &'static [&'static str]); 4] {
         [
-            ("text", &self.text.actions, &["{text}"]),
-            ("url", &self.url.actions, &["{url}"]),
-            ("file", &self.file.actions, &["{path}", "{name}"]),
-            ("app", &self.app.actions, &["{path}", "{name}"]),
+            ("text", &self.text, &["{text}"]),
+            ("url", &self.url, &["{url}"]),
+            ("file", &self.file, &["{path}", "{name}"]),
+            ("app", &self.app, &["{path}", "{name}"]),
         ]
+    }
+}
+
+/// The IDs of the kind `kind`'s own actions that `hide` and `order` may name; none for a kind
+/// that takes neither.
+fn native_actions(kind: &str) -> Option<&'static [&'static str]> {
+    match kind {
+        "file" => Some(&crate::kind::FILE_ACTIONS),
+        "app" => Some(&crate::kind::APP_ACTIONS),
+        _ => None,
     }
 }
 
@@ -100,11 +113,53 @@ impl KindActions {
 pub struct KindConfig {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<KindAction>,
+    /// Actions left out of the action screen, by native action ID or `<package>/<action>`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hide: Vec<String>,
+    /// Actions listed first in the action screen, in this order, named as `hide` names them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
 }
 
 impl KindConfig {
     fn is_empty(&self) -> bool {
-        self.actions.is_empty()
+        *self == Self::default()
+    }
+
+    fn check_arranged(&self, kind: &str) -> Result<(), String> {
+        let native = native_actions(kind);
+        for (field, names) in [("hide", &self.hide), ("order", &self.order)] {
+            if names.is_empty() {
+                continue;
+            }
+            let table = format!("advanced.kinds.{kind}.{field}");
+            let Some(native) = native else {
+                return Err(format!(
+                    "{table}: only `file` and `app` take `hide` and `order`; a {kind} row lists the actions of the extension that made it"
+                ));
+            };
+            if names.len() > MAX_ARRANGED {
+                return Err(format!(
+                    "{table} names {} actions; it takes at most {MAX_ARRANGED}",
+                    names.len()
+                ));
+            }
+            for (index, name) in names.iter().enumerate() {
+                if !native.contains(&name.as_str()) && contribution(name).is_none() {
+                    return Err(format!(
+                        "{table} names `{name}`, which isn't one of the {kind} kind's actions ({}) or a package's kind action, written `<package>/<action>`",
+                        native.join(", ")
+                    ));
+                }
+                if names[..index].contains(name) {
+                    return Err(format!("{table} names `{name}` more than once"));
+                }
+            }
+        }
+        if let Some(name) = self.hide.iter().find(|name| self.order.contains(name)) {
+            return Err(format!("advanced.kinds.{kind} both hides and orders `{name}`"));
+        }
+        Ok(())
     }
 }
 
@@ -167,7 +222,9 @@ impl TryFrom<AdvancedValues> for Advanced {
                 ));
             }
         }
-        for (kind, actions, placeholders) in values.kinds.each() {
+        for (kind, config, placeholders) in values.kinds.each() {
+            config.check_arranged(kind)?;
+            let actions = &config.actions;
             if actions.len() > MAX_KIND_ACTIONS {
                 return Err(format!(
                     "advanced.kinds.{kind}.actions has {} actions; a kind takes at most {MAX_KIND_ACTIONS}",
@@ -426,6 +483,79 @@ url = "https://web.archive.org/web/{url}"
         let many =
             "[[advanced.kinds.app.actions]]\ntitle = \"x\"\nscript = \"x\"\n".repeat(MAX_KIND_ACTIONS + 1);
         assert!(problem(&many).contains("a kind takes at most 16"));
+    }
+
+    #[test]
+    fn hide_and_order_name_native_actions_and_packages_kind_actions() {
+        let config = Config::parse(
+            r#"
+[advanced.kinds.file]
+hide = ["quick-look", "uploader/upload"]
+order = ["reveal", "open"]
+
+[advanced.kinds.app]
+order = ["quick-look"]
+"#,
+        )
+        .unwrap();
+        let kinds = &config.advanced.kinds;
+        assert_eq!(kinds.file.hide, ["quick-look", "uploader/upload"]);
+        assert_eq!(kinds.file.order, ["reveal", "open"]);
+        assert_eq!(kinds.app.order, ["quick-look"]);
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+        for id in crate::kind::FILE_ACTIONS {
+            Config::parse(&format!("[advanced.kinds.file]\nhide = [{id:?}]")).unwrap();
+        }
+        for id in crate::kind::APP_ACTIONS {
+            Config::parse(&format!("[advanced.kinds.app]\norder = [{id:?}]")).unwrap();
+        }
+    }
+
+    #[test]
+    fn hide_and_order_reject_what_no_kind_action_is() {
+        for (source, expected) in [
+            (
+                "[advanced.kinds.file]\nhide = [\"quicklook\"]",
+                "advanced.kinds.file.hide names `quicklook`, which isn't one of the file kind's actions (open, browse, open-with, reveal, quick-look, copy-name, rename, move-to, copy-to, duplicate, compress, trash) or a package's kind action, written `<package>/<action>`",
+            ),
+            (
+                "[advanced.kinds.app]\norder = [\"trash\"]",
+                "advanced.kinds.app.order names `trash`, which isn't one of the app kind's actions (open, reveal, quick-look)",
+            ),
+            (
+                "[advanced.kinds.file]\norder = [\"configured-file-0\"]",
+                "names `configured-file-0`, which isn't one of the file kind's actions",
+            ),
+            (
+                "[advanced.kinds.file]\norder = [\"reveal\", \"reveal\"]",
+                "advanced.kinds.file.order names `reveal` more than once",
+            ),
+            (
+                "[advanced.kinds.file]\nhide = [\"reveal\"]\norder = [\"reveal\"]",
+                "advanced.kinds.file both hides and orders `reveal`",
+            ),
+            (
+                "[advanced.kinds.text]\nhide = [\"copy\"]",
+                "advanced.kinds.text.hide: only `file` and `app` take `hide` and `order`",
+            ),
+            (
+                "[advanced.kinds.url]\norder = [\"open\"]",
+                "advanced.kinds.url.order: only `file` and `app` take `hide` and `order`",
+            ),
+            ("[advanced.kinds.file]\nshow = []", "unknown field `show`"),
+        ] {
+            let message = problem(source);
+            assert!(message.contains(expected), "{source:?}: {message}");
+        }
+        let many: Vec<_> = (0..=MAX_ARRANGED)
+            .map(|index| format!("\"p/a{index}\""))
+            .collect();
+        assert!(
+            problem(&format!("[advanced.kinds.file]\nhide = [{}]", many.join(", ")))
+                .contains("it takes at most 32")
+        );
     }
 
     #[test]

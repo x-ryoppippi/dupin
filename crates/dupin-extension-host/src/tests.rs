@@ -39,8 +39,24 @@ fn helper_command(entry: &str) -> std::io::Result<Command> {
 
 /// A host whose helper takes `delay` to start.
 fn slow_host(delay: &'static str) -> Host {
-    Host::new(Box::new(move || {
-        let helper = helper_command("tests::helper_entry")?;
+    slow_host_of(|| helper_command("tests::helper_entry"), delay)
+}
+
+/// A host whose helper, as `helper` starts it, takes `delay` to start.
+fn slow_host_of(
+    helper: impl Fn() -> std::io::Result<Command> + Send + Sync + 'static,
+    delay: &'static str,
+) -> Host {
+    Host::new(slow_launch(helper, delay))
+}
+
+/// Starts the helper as `helper` does, after `delay` spent asleep.
+fn slow_launch(
+    helper: impl Fn() -> std::io::Result<Command> + Send + Sync + 'static,
+    delay: &'static str,
+) -> Launcher {
+    Box::new(move || {
+        let helper = helper()?;
         let mut command = Command::new("/bin/sh");
         command
             .arg("-c")
@@ -51,7 +67,7 @@ fn slow_host(delay: &'static str) -> Host {
             .envs(helper.get_envs().filter_map(|(key, value)| Some((key, value?))))
             .current_dir("/");
         Ok(command)
-    }))
+    })
 }
 
 fn sources(files: &[(&str, &str)]) -> (tempfile::TempDir, Sources) {
@@ -120,6 +136,39 @@ fn pid_is_sandboxed(pid: u32) -> bool {
 }
 
 const ECHO: &str = "export function search(query) { return [{ title: `echo ${query}` }]; }";
+
+const ENVIRONMENT: dupin_js_runtime::Environment = dupin_js_runtime::Environment {
+    now: 1_767_225_600_000,
+    seed: 1,
+};
+
+#[test]
+fn a_replaying_host_holds_a_call_to_its_helpers_processor_time_not_the_wall_clock() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
+    // A second asleep before the helper starts uses next to no processor time: a wall-clock
+    // host gives up on the call, and a replaying host answers it.
+    let within = Duration::from_millis(300);
+    let wall = slow_host("1");
+    assert_eq!(failed(search(&wall, &echo, "a", within)).code, "host-starting");
+    let replaying = Host::replaying(
+        slow_launch(|| helper_command("tests::helper_entry"), "1"),
+        Some(ENVIRONMENT),
+    );
+    let before = replaying.now();
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(replaying.now(), before, "waiting isn't the helpers' work");
+    let answered = replaying.search(&echo, "a", 10, before + within, &|| false, &none());
+    assert_eq!(titles(&answered.unwrap()), ["echo a"]);
+
+    // A guest that never returns is still stopped once it has spent its limit, which then
+    // counts on the host's clock.
+    let busy = package("export function search() { for (;;) {} }");
+    let started = replaying.now();
+    let spun = replaying.search(&busy, "", 10, started + within, &|| false, &none());
+    assert_eq!(failed(spun).code, "deadline");
+    assert!(replaying.now() >= started + within, "the spin moved the clock");
+}
 
 #[test]
 fn a_fixed_environment_reaches_the_guest_through_the_helper() {
@@ -245,10 +294,56 @@ fn a_compile_neither_waits_for_a_running_search_nor_counts_the_helper_start_agai
     assert!(!running.is_finished(), "the search was still running");
     assert_eq!(failed(running.join().unwrap()).code, "deadline");
 
+    // A helper that takes a second to start is told the whole limit, which it would be given
+    // none of if the limit ran while it started.
     let (_folder, sources) = sources(&[(DEFAULT_ENTRY, ECHO)]);
-    slow_host("1")
-        .compile(&sources, Trust::Own, Duration::from_millis(100), &|| false)
-        .expect("the limit starts once the helper is ready");
+    let host = slow_host_of(
+        || {
+            let mut command = helper_command("tests::limit_helper_entry")?;
+            command.env(LIMIT_ENV, "1");
+            Ok(command)
+        },
+        "1",
+    );
+    let given = failed(host.compile(&sources, Trust::Own, Duration::from_millis(500), &|| false));
+    assert_eq!(given.code, "given", "{given:?}");
+    let given: u64 = given.message.parse().unwrap();
+    assert!(given > 0, "the limit starts once the helper is ready");
+}
+
+const LIMIT_ENV: &str = "DUPIN_EXTENSION_HOST_LIMIT";
+
+/// Not a test: a helper that fails its first call with the milliseconds it was given as the
+/// message, so a test reads the limit Dupin sent without depending on how long a compile takes.
+#[test]
+fn limit_helper_entry() {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::net::UnixStream;
+
+    use wire::{Answer, FromHelper, ToHelper};
+
+    if std::env::var_os(LIMIT_ENV).is_none() {
+        return;
+    }
+    // SAFETY: the host starts this process with the socket as standard input.
+    let mut socket = unsafe { UnixStream::from_raw_fd(0) };
+    let hello = FromHelper::Hello {
+        version: wire::VERSION,
+        engine: dupin_js_runtime::engine_version().into(),
+    };
+    wire::write(&mut socket, &hello, &[]).unwrap();
+    if let Ok(Some((ToHelper::Run { id, deadline_ms, .. }, _))) = wire::read::<ToHelper>(&mut socket) {
+        let answer = Answer::Failed {
+            diagnostic: Diagnostic::new("given", deadline_ms.to_string()),
+        };
+        let done = FromHelper::Done {
+            id,
+            answer,
+            answered: Vec::new(),
+        };
+        wire::write(&mut socket, &done, &[]).unwrap();
+    }
+    std::process::exit(0);
 }
 
 #[test]
@@ -374,7 +469,7 @@ fn compiled_bytecode_outlives_the_helper_that_ran_it() {
     let pid = host.helper_pid(&echo).unwrap();
     // SAFETY: `pid` is the helper this host started and still owns.
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
-    std::thread::sleep(Duration::from_millis(100));
+    wait_for_exit(pid);
     assert_eq!(
         titles(&search(&host, &echo, "again", Duration::from_secs(5)).unwrap()),
         ["echo again"]
@@ -887,6 +982,48 @@ fn a_native_call_the_engine_cant_interrupt_ends_by_its_deadline_and_the_helper_r
     assert_ne!(host.helper_pid(&echo), Some(first));
 }
 
+/// Waits until helper `pid`, a child of this process, has exited, and leaves it for its host to
+/// reap.
+fn wait_for_exit(pid: u32) {
+    let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    // SAFETY: `info` is the struct the call fills, and `WNOWAIT` leaves the child unreaped.
+    let status = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            info.as_mut_ptr(),
+            libc::WEXITED | libc::WNOWAIT,
+        )
+    };
+    let error = std::io::Error::last_os_error();
+    // Its host may have reaped it already, which it does only once it has exited.
+    assert!(
+        status == 0 || error.raw_os_error() == Some(libc::ECHILD),
+        "{error}"
+    );
+}
+
+/// Waits until helper `pid` has spent 50 ms of processor time from now: the guest is running.
+fn wait_until_running(pid: u32) {
+    let before = crate::host::processor_time(pid).unwrap();
+    while crate::host::processor_time(pid).unwrap() - before < Duration::from_millis(50) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Reads helper `pid`'s processor time until it can't, as once the helper is stopped, and gives
+/// the last reading, so a test can tell how long a helper it stopped ran.
+fn last_processor_time(pid: u32) -> std::thread::JoinHandle<Duration> {
+    std::thread::spawn(move || {
+        let mut last = Duration::ZERO;
+        while let Some(time) = crate::host::processor_time(pid) {
+            last = time;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        last
+    })
+}
+
 #[test]
 fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
     skip_inside_a_sandbox!();
@@ -897,18 +1034,20 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
     search(&host, &echo, "warm", Duration::from_secs(5)).unwrap();
     let pid = host.helper_pid(&echo).unwrap();
 
-    let cancel_after = |delay: Duration| {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let flag = cancelled.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(delay);
-            flag.store(true, Ordering::Relaxed);
-        });
-        move || cancelled.load(Ordering::Relaxed)
+    // Cancels once the helper has spent 50 ms of processor time on the call, so the cancel
+    // reaches a guest that is running, however long the call takes to start.
+    let cancel_once_running = || {
+        let before = crate::host::processor_time(pid).unwrap();
+        move || {
+            crate::host::processor_time(pid)
+                .is_none_or(|now| now.saturating_sub(before) >= Duration::from_millis(50))
+        }
     };
 
-    let is_cancelled = cancel_after(Duration::from_millis(50));
-    let started = Instant::now();
+    // Each cancel takes effect within a second of the helper's processor time, which a busy
+    // machine doesn't stretch as it does the wall clock.
+    let is_cancelled = cancel_once_running();
+    let before = crate::host::processor_time(pid).unwrap();
     let result = host.search(
         &busy,
         "",
@@ -918,19 +1057,17 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        started.elapsed()
-    );
+    let spent = crate::host::processor_time(pid).unwrap() - before;
+    assert!(spent < Duration::from_secs(1), "{spent:?}");
     assert_eq!(
         host.helper_pid(&echo),
         Some(pid),
         "an interruptible guest keeps the helper"
     );
 
-    let is_cancelled = cancel_after(Duration::from_millis(50));
-    let started = Instant::now();
+    let is_cancelled = cancel_once_running();
+    let before = crate::host::processor_time(pid).unwrap();
+    let ran = last_processor_time(pid);
     let result = host.search(
         &stuck,
         "",
@@ -940,11 +1077,8 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        started.elapsed()
-    );
+    let spent = ran.join().unwrap() - before;
+    assert!(spent < Duration::from_secs(1), "{spent:?}");
     assert_eq!(host.helper_pid(&echo), None);
 
     assert_eq!(
@@ -966,7 +1100,7 @@ fn a_helper_that_dies_becomes_a_failed_query_and_the_next_one_starts_another() {
         let host = host.clone();
         std::thread::spawn(move || search(&host, &busy, "", Duration::from_secs(10)))
     };
-    std::thread::sleep(Duration::from_millis(200));
+    wait_until_running(pid);
     // SAFETY: `pid` is the helper this host started and still owns.
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
     let diagnostic = failed(running.join().unwrap());
@@ -982,7 +1116,7 @@ fn a_helper_that_dies_becomes_a_failed_query_and_the_next_one_starts_another() {
     // A helper that dies between queries is replaced before the next one.
     // SAFETY: as above, for the replacement.
     assert_eq!(unsafe { libc::kill(restarted as i32, libc::SIGKILL) }, 0);
-    std::thread::sleep(Duration::from_millis(100));
+    wait_for_exit(restarted);
     assert_eq!(
         titles(&search(&host, &echo, "still", Duration::from_secs(5)).unwrap()),
         ["echo still"]

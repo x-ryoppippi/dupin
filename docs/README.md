@@ -10,8 +10,8 @@
 ## About
 
 - [Philosophy](./philosophy.md): why Dupin exists: built for searching, a launcher and nothing more, fast by rule, extensions agents can write
-- [FAQ](./faq.md): short answers on installing, privacy, extensions and how Dupin compares
 - [The name](./name.md): why Dupin, and the Mac launchers it descends from
+- [FAQ](./faq.md): short answers on installing, privacy, extensions and how Dupin compares
 
 ## Built-in features
 
@@ -50,6 +50,7 @@ Shipped with Dupin as extensions, each one yours to eject and change.
 - [Web searches](./features/web-searches.md)
 - [Maps](./features/maps.md)
 - [Window management](./features/window-management.md)
+- [Running apps](./features/running-apps.md)
 - [Processes](./features/processes.md)
 - [Ports](./features/ports.md)
 - [Coding agents](./features/coding-agents.md)
@@ -74,5 +75,6 @@ Drive Dupin from a terminal, a script or an AI agent.
 - [Extension capabilities](./extension-capabilities.md): the host side of the `files` and `exec` capabilities
 - [The `http` capability](./extension-http.md): the host service that will fetch for extensions, its scope checks and limits
 - [Sync design](./design/sync.md): syncing Dupin between Macs through an end-to-end encrypted synced folder
+- [Native kind actions: what moves](./design/native-kind-actions.md): which native actions can become bundled extensions, and the platform gaps in the way
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
 - [Releasing](./releasing.md): tagpr and CI

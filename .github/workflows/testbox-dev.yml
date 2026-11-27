@@ -16,7 +16,7 @@ defaults:
 
 jobs:
   dev:
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 240
     permissions:
       contents: read

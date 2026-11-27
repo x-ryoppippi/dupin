@@ -1,0 +1,119 @@
+{
+	"commit": "983024e86a199abf3bd923965c8243ee8fcfee56",
+	"script_sha256": "d0ff12f5b25ed06099fb2dc1251849fcedf936a634187f75a22790b6aaaa4553",
+	"cargo_lock_sha256": "95df031cf62fc55c739c1eda01a8b819847aab8f228f34a223f1a8597ac5347e",
+	"nix": "nix (Nix) 2.35.4",
+	"host": {
+		"name": "Darwin",
+		"os_version": "27.0",
+		"kernel_version": "27.0.0"
+	},
+	"cpus": 12,
+	"measurements": [
+		{
+			"edit": "dupin UI, function body",
+			"file": "crates/dupin/src/ui/keys.rs",
+			"checks": [
+				{
+					"check": "lint-and-test",
+					"seconds": 68.572813084,
+					"built": ["dupin-lint-and-test-0.1.0.drv"]
+				},
+				{
+					"check": "hawk",
+					"seconds": 15.81865675,
+					"built": ["dupin-hawk-0.1.0.drv"]
+				},
+				{
+					"check": "dupin",
+					"seconds": 144.602263417,
+					"built": ["dupin-0.1.0.drv", "dupin-third-party-notices.drv", "dupin-0.1.0.drv"]
+				}
+			]
+		},
+		{
+			"edit": "dupin-core session, function body",
+			"file": "crates/dupin-core/src/session/search.rs",
+			"checks": [
+				{
+					"check": "lint-and-test",
+					"seconds": 68.078013291,
+					"built": ["dupin-lint-and-test-0.1.0.drv"]
+				},
+				{
+					"check": "hawk",
+					"seconds": 15.86156225,
+					"built": ["dupin-hawk-0.1.0.drv"]
+				},
+				{
+					"check": "dupin",
+					"seconds": 144.562353959,
+					"built": ["dupin-0.1.0.drv", "dupin-third-party-notices.drv", "dupin-0.1.0.drv"]
+				}
+			]
+		},
+		{
+			"edit": "dupin-mac, function body",
+			"file": "crates/dupin-mac/src/apps.rs",
+			"checks": [
+				{
+					"check": "lint-and-test",
+					"seconds": 68.521727167,
+					"built": ["dupin-lint-and-test-0.1.0.drv"]
+				},
+				{
+					"check": "hawk",
+					"seconds": 15.974392833,
+					"built": ["dupin-hawk-0.1.0.drv"]
+				},
+				{
+					"check": "dupin",
+					"seconds": 144.328818958,
+					"built": ["dupin-third-party-notices.drv", "dupin-0.1.0.drv", "dupin-0.1.0.drv"]
+				}
+			]
+		},
+		{
+			"edit": "docs only",
+			"file": "docs/development.md",
+			"checks": [
+				{
+					"check": "lint-and-test",
+					"seconds": 0.06630225,
+					"built": []
+				},
+				{
+					"check": "hawk",
+					"seconds": 0.0652215,
+					"built": []
+				},
+				{
+					"check": "dupin",
+					"seconds": 0.064921708,
+					"built": []
+				}
+			]
+		},
+		{
+			"edit": "release version",
+			"file": "VERSION",
+			"checks": [
+				{
+					"check": "lint-and-test",
+					"seconds": 67.729686583,
+					"built": ["dupin-lint-and-test-9.9.9.drv"]
+				},
+				{
+					"check": "hawk",
+					"seconds": 15.81392825,
+					"built": ["dupin-hawk-9.9.9.drv"]
+				},
+				{
+					"check": "dupin",
+					"seconds": 144.547261458,
+					"built": ["dupin-third-party-notices.drv", "dupin-9.9.9.drv", "dupin-9.9.9.drv"]
+				}
+			]
+		}
+	]
+}

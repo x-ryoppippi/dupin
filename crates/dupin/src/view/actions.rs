@@ -5,7 +5,7 @@ use rune::{Color, El, ScrollSpec, col, row, text};
 use crate::ui::{ActionStage, ApplicationState, SEND_TO, Ui};
 
 use super::header::HEADER_H;
-use super::results::{LIST_HEIGHT_BUDGET, LIST_PAD, item_icon, visible_rows};
+use super::results::{LIST_PAD, item_icon, list_order, visible_rows};
 use super::theme::ResolvedTheme;
 
 pub(super) fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
@@ -101,66 +101,79 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                     list = list.child(
                         col()
                             .w_full()
-                            .max_h(LIST_HEIGHT_BUDGET)
-                            .scroll(ScrollSpec { stick_bottom: false })
-                            .children(apps.iter().enumerate().map(|(index, app)| {
-                                let on = index == *selected;
-                                let icon = item_icon(
-                                    s,
-                                    Some(&dupin_core::Icon::File(app.path.clone())),
-                                    true,
-                                    if on { t.selected_text } else { t.text },
-                                );
-                                row()
-                                    .key(format!("action-{index}"))
-                                    .w_full()
-                                    .h(44.0)
-                                    .px(12.0)
-                                    .gap(12.0)
-                                    .center_y()
-                                    .radius(8.0)
-                                    .fill(if on { accent } else { Color::TRANSPARENT })
-                                    .hover(if on { accent } else { t.hover })
-                                    .children(icon)
-                                    .child(
-                                        col()
-                                            .grow(1.0)
-                                            .min_w(0.0)
+                            .max_h(s.list_budget)
+                            .scroll(ScrollSpec {
+                                stick_bottom: s.grows_up(),
+                            })
+                            .children(list_order(
+                                apps.iter()
+                                    .enumerate()
+                                    .map(|(index, app)| {
+                                        let on = index == *selected;
+                                        let icon = item_icon(
+                                            s,
+                                            Some(&dupin_core::Icon::File(app.path.clone())),
+                                            true,
+                                            if on { t.selected_text } else { t.text },
+                                        );
+                                        row()
+                                            .key(format!("action-{index}"))
+                                            .w_full()
+                                            .h(44.0)
+                                            .px(12.0)
+                                            .gap(12.0)
+                                            .center_y()
+                                            .radius(8.0)
+                                            .fill(if on { accent } else { Color::TRANSPARENT })
+                                            .hover(if on { accent } else { t.hover })
+                                            .children(icon)
                                             .child(
-                                                text(&app.name)
-                                                    .font(t.font(type_::BODY))
-                                                    .color(if on { t.selected_text } else { t.text })
-                                                    .truncate(),
+                                                col()
+                                                    .grow(1.0)
+                                                    .min_w(0.0)
+                                                    .child(
+                                                        text(&app.name)
+                                                            .font(t.font(type_::BODY))
+                                                            .color(if on { t.selected_text } else { t.text })
+                                                            .truncate(),
+                                                    )
+                                                    .children(locations[index].as_deref().map(|location| {
+                                                        text(location)
+                                                            .font(t.font(type_::LABEL))
+                                                            .color(if on {
+                                                                t.selected_text
+                                                            } else {
+                                                                t.text_secondary
+                                                            })
+                                                            .truncate()
+                                                    })),
                                             )
-                                            .children(locations[index].as_deref().map(|location| {
-                                                text(location)
+                                            .child(
+                                                text(if app.default { "Default" } else { "" })
                                                     .font(t.font(type_::LABEL))
-                                                    .color(if on {
-                                                        t.selected_text
-                                                    } else {
-                                                        t.text_secondary
-                                                    })
-                                                    .truncate()
-                                            })),
-                                    )
-                                    .child(
-                                        text(if app.default { "Default" } else { "" })
-                                            .font(t.font(type_::LABEL))
-                                            .color(t.text_secondary),
-                                    )
-                                    .on_press_tx(move |s: &mut Ui, tx| s.pick_application(index, tx))
-                            })),
+                                                    .color(t.text_secondary),
+                                            )
+                                            .on_press_tx(move |s: &mut Ui, tx| s.pick_application(index, tx))
+                                    })
+                                    .collect(),
+                                s.grows_up(),
+                            )),
                     );
                 }
             }
             return list;
         }
         ActionStage::Receivers { actions, selected } => {
-            return action_options("receivers", row_height).children(actions.iter().enumerate().map(
-                |(index, action)| {
-                    action_row(&action.title, index, *selected, row_height, false, t, accent)
-                        .on_press_tx(move |s: &mut Ui, tx| s.pick_receiver(index, tx))
-                },
+            return action_options("receivers", s, row_height).children(list_order(
+                actions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, action)| {
+                        action_row(&action.title, index, *selected, row_height, false, t, accent)
+                            .on_press_tx(move |s: &mut Ui, tx| s.pick_receiver(index, tx))
+                    })
+                    .collect(),
+                s.grows_up(),
             ));
         }
         ActionStage::Confirm {
@@ -172,95 +185,97 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                 Some(dupin_core::Action::Trash(path)) => Some(path.to_string_lossy()),
                 _ => None,
             };
+            let prompt = std::iter::once(
+                col()
+                    .padding(16.0)
+                    .gap(6.0)
+                    .child(
+                        text(&confirmation.prompt)
+                            .font(t.font(type_::BODY))
+                            .color(t.text)
+                            .wrap(),
+                    )
+                    .children(path.as_deref().map(|path| {
+                        text(path)
+                            .font(t.font(type_::LABEL))
+                            .color(t.text_secondary)
+                            .wrap()
+                    })),
+            );
+            let buttons = ["Cancel", confirmation.button.as_str()]
+                .into_iter()
+                .enumerate()
+                .map(|(index, title)| {
+                    let on = index == *selected;
+                    let red = t.destructive;
+                    row()
+                        .key(format!("action-{index}"))
+                        .w_full()
+                        .h(44.0)
+                        .px(12.0)
+                        .center_y()
+                        .radius(8.0)
+                        .fill(if on {
+                            if index == 1 { red } else { accent }
+                        } else {
+                            Color::TRANSPARENT
+                        })
+                        .child(text(title).font(t.font(type_::BODY)).color(if on {
+                            t.selected_text
+                        } else if index == 1 {
+                            red
+                        } else {
+                            t.text
+                        }))
+                        .on_press_tx(move |s: &mut Ui, tx| s.select_confirmation(index, tx))
+                });
             return col()
                 .key("confirmation")
                 .w_full()
                 .py(LIST_PAD)
-                .child(
-                    col()
-                        .padding(16.0)
-                        .gap(6.0)
-                        .child(
-                            text(&confirmation.prompt)
-                                .font(t.font(type_::BODY))
-                                .color(t.text)
-                                .wrap(),
-                        )
-                        .children(path.as_deref().map(|path| {
-                            text(path)
-                                .font(t.font(type_::LABEL))
-                                .color(t.text_secondary)
-                                .wrap()
-                        })),
-                )
-                .children(
-                    ["Cancel", confirmation.button.as_str()]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, title)| {
-                            let on = index == *selected;
-                            let red = t.destructive;
-                            row()
-                                .key(format!("action-{index}"))
-                                .w_full()
-                                .h(44.0)
-                                .px(12.0)
-                                .center_y()
-                                .radius(8.0)
-                                .fill(if on {
-                                    if index == 1 { red } else { accent }
-                                } else {
-                                    Color::TRANSPARENT
-                                })
-                                .child(text(title).font(t.font(type_::BODY)).color(if on {
-                                    t.selected_text
-                                } else if index == 1 {
-                                    red
-                                } else {
-                                    t.text
-                                }))
-                                .on_press_tx(move |s: &mut Ui, tx| s.select_confirmation(index, tx))
-                        }),
-                );
+                .children(list_order(prompt.chain(buttons).collect(), s.grows_up()));
         }
         ActionStage::List => {}
     }
-    action_options("actions", row_height)
-        .children(screen.item.actions.iter().enumerate().map(|(index, action)| {
-            let key = screen.key.clone();
-            let id = action.id.clone();
-            action_row(
-                &action.title,
-                index,
-                screen.selected,
-                row_height,
-                action.confirmation().is_some(),
-                t,
-                accent,
-            )
-            .on_press_tx(move |s: &mut Ui, tx| s.pick_action(&key, &id, tx))
-        }))
-        .children((!screen.item.payload.is_empty()).then(|| {
-            action_row(
-                SEND_TO,
-                screen.item.actions.len(),
-                screen.selected,
-                row_height,
-                false,
-                t,
-                accent,
-            )
-            .on_press_tx(Ui::show_receivers)
-        }))
+    let actions = screen.item.actions.iter().enumerate().map(|(index, action)| {
+        let key = screen.key.clone();
+        let id = action.id.clone();
+        action_row(
+            &action.title,
+            index,
+            screen.selected,
+            row_height,
+            action.confirmation().is_some(),
+            t,
+            accent,
+        )
+        .on_press_tx(move |s: &mut Ui, tx| s.pick_action(&key, &id, tx))
+    });
+    let send_to = (!screen.item.payload.is_empty()).then(|| {
+        action_row(
+            SEND_TO,
+            screen.item.actions.len(),
+            screen.selected,
+            row_height,
+            false,
+            t,
+            accent,
+        )
+        .on_press_tx(Ui::show_receivers)
+    });
+    action_options("actions", s, row_height)
+        .children(list_order(actions.chain(send_to).collect(), s.grows_up()))
 }
 
-fn action_options(key: &str, row_height: f32) -> El {
+fn action_options(key: &str, s: &Ui, row_height: f32) -> El {
     col()
         .key(key)
         .w_full()
         .py(LIST_PAD)
-        .max_h(row_height * visible_rows(row_height) as f32 + 2.0 * LIST_PAD)
-        .scroll(ScrollSpec { stick_bottom: false })
+        .max_h(row_height * visible_rows(s.list_budget, row_height) as f32 + 2.0 * LIST_PAD)
+        .scroll(ScrollSpec {
+            stick_bottom: s.grows_up(),
+        })
 }
 
 fn action_row(

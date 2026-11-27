@@ -2,13 +2,11 @@ use std::sync::Mutex;
 
 use super::*;
 
-/// Answers requests by operation after `delay`, and records each request and whether its call
-/// had ended by the time the answer was ready.
+/// Answers requests by operation after `delay`, and records each request.
 #[derive(Default)]
 struct Fixture {
     delay: Duration,
     seen: Mutex<Vec<(String, serde_json::Value)>>,
-    late: AtomicUsize,
 }
 
 impl Services for Fixture {
@@ -18,14 +16,11 @@ impl Services for Fixture {
         op: &str,
         args: &[u8],
         _deadline: Instant,
-        cancelled: &AtomicBool,
+        _cancelled: &AtomicBool,
     ) -> Vec<u8> {
         let args: serde_json::Value = serde_json::from_slice(args).unwrap();
         self.seen.lock().unwrap().push((op.into(), args.clone()));
         std::thread::sleep(self.delay);
-        if cancelled.load(Ordering::Relaxed) {
-            self.late.fetch_add(1, Ordering::Relaxed);
-        }
         let reply = match op {
             "storage.get" => {
                 serde_json::json!({ "ok": { "id": args["id"], "createdAt": 0, "data": format!("stored {}", args["id"]), "blobs": [] } })
@@ -113,7 +108,14 @@ fn a_catalogue_reaches_host_services_as_a_search_does() {
 #[test]
 fn a_finished_request_reaches_the_guest_at_once() {
     skip_inside_a_sandbox!();
-    let host = host();
+    // Checks that come after the deadline, so a reply that waited for one never reaches the
+    // guest in time, however busy the machine is.
+    let within = Duration::from_secs(5);
+    let host = Host::ticking(
+        Box::new(|| helper_command("tests::helper_entry")),
+        None,
+        2 * within,
+    );
     let package = package(
         r#"import { storage } from 'dupin';
            export async function search(query) {
@@ -122,26 +124,18 @@ fn a_finished_request_reaches_the_guest_at_once() {
            }"#,
     );
     let fixture = Arc::new(Fixture::default());
-    let run = || {
-        host.search(
+    let rows = host
+        .search(
             &package,
             "count",
             10,
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + within,
             &|| false,
             &services(&fixture),
         )
-        .unwrap()
-    };
-    run();
-    let started = Instant::now();
-    assert_eq!(titles(&run()), ["done"]);
-    // Waiting out the host's 5 ms check for each reply would take a quarter of a second.
-    assert!(
-        started.elapsed() < Duration::from_millis(150),
-        "{:?}",
-        started.elapsed()
-    );
+        .unwrap();
+    assert_eq!(titles(&rows), ["done"]);
+    assert_eq!(fixture.seen.lock().unwrap().len(), 100);
 }
 
 #[test]
@@ -205,39 +199,36 @@ fn a_service_slower_than_the_call_has_its_late_reply_dropped() {
     skip_inside_a_sandbox!();
     let host = host();
     let package = package(
-        "import { storage } from 'dupin'; export async function search() { return [{ title: (await storage.get('x')).data }]; }",
+        "import { storage } from 'dupin'; export async function search(query) { await storage.get(query); return [{ title: query }]; }",
     );
-    let fixture = Arc::new(Fixture {
-        delay: Duration::from_millis(400),
-        ..Fixture::default()
-    });
-    let started = Instant::now();
-    let result = host.search(
-        &package,
-        "",
-        10,
-        Instant::now() + Duration::from_millis(100),
-        &|| false,
-        &services(&fixture),
+    let outlived = Arc::new(Outlived::default());
+    let services: Arc<dyn Services> = outlived.clone();
+    let search = |query: &str, within: Duration| {
+        host.search(&package, query, 10, Instant::now() + within, &|| false, &services)
+    };
+    // Started first, so the short deadline below is the guest's, not the helper's start.
+    assert_eq!(
+        titles(&search("quick", Duration::from_secs(5)).unwrap()),
+        ["quick"]
     );
+
+    // `Outlived` answers only once the run has ended, so the call can end only by its deadline.
+    let result = search("hold", Duration::from_millis(100));
     assert_eq!(failed(result).code, "deadline");
-    assert!(started.elapsed() < Duration::from_millis(400));
-    std::thread::sleep(Duration::from_millis(500));
-    assert_eq!(fixture.late.load(Ordering::Relaxed), 1, "the call had ended");
+    let (late, _) = outlived
+        .answered_late
+        .wait_timeout_while(outlived.late.lock().unwrap(), Duration::from_secs(10), |late| {
+            late.is_empty()
+        })
+        .unwrap();
+    assert!(matches!(&late[..], [(_, true)]), "the call had ended");
+    drop(late);
 
     // The helper that gave up on the request still answers the next call.
-    let quick = Arc::new(Fixture::default());
-    let rows = host
-        .search(
-            &package,
-            "",
-            10,
-            Instant::now() + Duration::from_secs(5),
-            &|| false,
-            &services(&quick),
-        )
-        .unwrap();
-    assert_eq!(titles(&rows), ["stored \"x\""]);
+    assert_eq!(
+        titles(&search("quick", Duration::from_secs(5)).unwrap()),
+        ["quick"]
+    );
 }
 
 #[test]

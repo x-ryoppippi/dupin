@@ -4,7 +4,6 @@
 	"private": true,
 	"dupin": {
 		"title": "Calculator",
-		"keyword": "calc",
 		"icon": "sf:plus.forwardslash.minus",
 		"main": "main.ts",
 		"capabilities": {

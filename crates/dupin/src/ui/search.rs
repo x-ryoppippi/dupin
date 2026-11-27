@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use dupin_core::{CommandId, Delivery, Page, Provider, Searcher};
 use rune::{AppHandle, ImageCache, Tx, Waker};
@@ -26,7 +26,18 @@ impl Ui {
                 self.session.pending(&origin, generation)
             });
             if self.session.results() == dupin_core::session::Results::Done {
-                crate::latency::results_done(&self.session, &|origin, item| self.row_package(origin, item));
+                let row = |origin: &CommandId, item: &dupin_core::Item| self.row_package(origin, item);
+                let extension = |id: &str| {
+                    self.extension_package(id)
+                        .map(|package| package.as_str().to_owned())
+                };
+                crate::latency::results_done(
+                    &self.session,
+                    crate::latency::Packages {
+                        row: &row,
+                        extension: &extension,
+                    },
+                );
                 if !self.session.command().private_results {
                     crate::trace::results_done(&self.query.text, self.session.items().len());
                 }
@@ -114,11 +125,13 @@ impl Ui {
         self.deadlines.clear();
     }
 
-    /// In a headless run, waits for every search still running to answer and hands over what
-    /// it delivers, so the frame shows the answer to the keys before it rather than whatever
-    /// came back in the time a script left. A search that outlasts its own deadline is left
-    /// for that deadline to expire.
-    fn settle_headless(&mut self, clock: f64, tx: &mut Tx) -> bool {
+    /// In a headless run, waits for every search and extension action still running to answer
+    /// and hands over what each delivers, so the frame shows the answer to the keys before it
+    /// rather than whatever came back in the time a script left, or in the time a busy machine
+    /// let it run. What bounds each there is what runs it: a guest stops at its deadline in the
+    /// processor time its replaying host counts, and native providers answer from the scratch
+    /// home.
+    fn settle_headless(&mut self, tx: &mut Tx) -> bool {
         let Some(delivered) = headless_deliveries() else {
             return false;
         };
@@ -127,29 +140,24 @@ impl Ui {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut changed = false;
-        while let Ok((origin, delivery, sent)) = delivered.try_recv() {
-            changed |= self.deliver(origin, delivery, sent, tx);
+        while let Ok(handed) = delivered.try_recv() {
+            changed |= self.take_handed(handed, tx);
         }
-        let started = Instant::now();
-        loop {
-            let Some(due) = self
+        while self.headless_acting > 0
+            || self
                 .deadlines
                 .iter()
-                .filter(|(id, (generation, _))| self.session.pending(id, *generation))
-                .map(|(_, (_, due))| *due)
-                .max_by(f64::total_cmp)
-            else {
-                return changed;
-            };
-            let left = Duration::from_secs_f64((due - clock).max(0.0)).saturating_sub(started.elapsed());
-            match delivered.recv_timeout(left) {
-                Ok((origin, delivery, sent)) => changed |= self.deliver(origin, delivery, sent, tx),
-                Err(_) => return changed,
+                .any(|(id, (generation, _))| self.session.pending(id, *generation))
+        {
+            match delivered.recv() {
+                Ok(handed) => changed |= self.take_handed(handed, tx),
+                Err(_) => break,
             }
         }
+        changed
     }
 
-    /// Hands over what headless searches delivered while no frame waited for them.
+    /// Hands over what headless searches and actions delivered while no frame waited for them.
     fn take_headless_deliveries(&mut self, tx: &mut Tx) {
         let Some(delivered) = headless_deliveries() else {
             return;
@@ -158,13 +166,33 @@ impl Ui {
             .1
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while let Ok((origin, delivery, sent)) = delivered.try_recv() {
-            self.deliver(origin, delivery, sent, tx);
+        while let Ok(handed) = delivered.try_recv() {
+            self.take_handed(handed, tx);
         }
     }
 
+    fn take_handed(&mut self, handed: Handed, tx: &mut Tx) -> bool {
+        match handed {
+            Handed::Delivered(origin, delivery, sent) => self.deliver(origin, *delivery, sent, tx),
+            Handed::Acted(acted) => {
+                self.headless_acting -= 1;
+                acted(self, tx);
+                true
+            }
+        }
+    }
+
+    /// Carries out on the UI what an action running on another thread with `me` returns, once
+    /// it does: in a headless run through the frame that waits for it, as a search's answer is.
+    pub(super) fn on_acted(&mut self) -> Acting {
+        if headless_deliveries().is_some() {
+            self.headless_acting += 1;
+        }
+        Acting(Some(self.me.clone()))
+    }
+
     pub(super) fn poll_searches(&mut self, clock: f64, tx: &mut Tx) -> bool {
-        let mut changed = self.settle_headless(clock, tx);
+        let mut changed = self.settle_headless(tx);
         let due = take_due(&mut self.deadlines, clock);
         for (id, generation) in due {
             if self.session.pending(&id, generation) {
@@ -287,7 +315,7 @@ pub(super) fn spawn_searcher(me: AppHandle<Ui>, origin: CommandId, provider: Arc
                 .0
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .send((origin, d, sent));
+                .send(Handed::Delivered(origin, Box::new(d), sent));
             me.update(|s, tx| s.take_headless_deliveries(tx));
             return;
         }
@@ -298,10 +326,47 @@ pub(super) fn spawn_searcher(me: AppHandle<Ui>, origin: CommandId, provider: Arc
     })
 }
 
-type Delivered = (CommandId, Delivery, Instant);
-type Deliveries = (Mutex<mpsc::Sender<Delivered>>, Mutex<mpsc::Receiver<Delivered>>);
+/// What a search or an action running on another thread hands the UI.
+enum Handed {
+    Delivered(CommandId, Box<Delivery>, Instant),
+    Acted(Acted),
+}
 
-/// Where a headless run's searches deliver, which a frame can wait on from the UI thread while
+type Acted = Box<dyn FnOnce(&mut Ui, &mut Tx) + Send>;
+
+type Deliveries = (Mutex<mpsc::Sender<Handed>>, Mutex<mpsc::Receiver<Handed>>);
+
+/// Where an action that [`Ui::on_acted`] counted hands its result; dropped without one, as by
+/// a thread that panicked, it hands over nothing, so no frame waits for it.
+#[must_use]
+pub(super) struct Acting(Option<AppHandle<Ui>>);
+
+impl Acting {
+    pub(super) fn acted(mut self, acted: impl FnOnce(&mut Ui, &mut Tx) + Send + 'static) {
+        self.hand(Box::new(acted));
+    }
+
+    fn hand(&mut self, acted: Acted) {
+        let Some(me) = self.0.take() else { return };
+        let Some(delivered) = headless_deliveries() else {
+            return me.update(acted);
+        };
+        let _ = delivered
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .send(Handed::Acted(acted));
+        me.update(|s, tx| s.take_headless_deliveries(tx));
+    }
+}
+
+impl Drop for Acting {
+    fn drop(&mut self) {
+        self.hand(Box::new(|_, _| {}));
+    }
+}
+
+/// Where a headless run's searches and actions deliver, which a frame can wait on from the UI thread while
 /// an update it queued couldn't be run until that frame ends. None with a window.
 fn headless_deliveries() -> Option<&'static Deliveries> {
     static CHANNEL: OnceLock<Deliveries> = OnceLock::new();

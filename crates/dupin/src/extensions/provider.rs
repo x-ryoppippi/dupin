@@ -139,6 +139,25 @@ pub fn answer(
     Ok(batches)
 }
 
+/// The row whose ID is `row` in `extension`'s catalogue, as its keyword lists it; none when
+/// the package lists no such row.
+pub fn catalogue_row(
+    extension: &Arc<Extension>,
+    row: &str,
+    deadline: Instant,
+    call: &Call,
+) -> Result<Option<Item>, RunError> {
+    if !extension.check(deadline)?.items {
+        return Ok(None);
+    }
+    let id = extension.entry_id(row);
+    let batches = extension.catalogue("", usize::MAX, deadline, call, Role::Keyword, Some(extension))?;
+    Ok(batches
+        .into_iter()
+        .flat_map(|batch| batch.items)
+        .find(|item| item.id == id))
+}
+
 /// What `search` computes for what is typed in the main search, for the built-in `extension`
 /// answers there.
 fn main_answer(
@@ -426,10 +445,7 @@ fn kinds() -> &'static Kinds {
 /// The action `subject`'s kind runs first, under the ID and title the row gives it.
 fn kind_action(kinds: &Kinds, subject: &Subject, id: String, title: &str) -> ItemAction {
     let mut action = kinds
-        .resolve(subject, title)
-        .actions
-        .into_iter()
-        .next()
+        .primary(subject, title)
         .expect("the text and URL kinds offer an action for their own subjects");
     action.id = id;
     title.clone_into(&mut action.title);
@@ -510,7 +526,7 @@ fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool
     let mut configured = Vec::new();
     let mut configure = |subject: Subject, done: &mut bool| {
         if !std::mem::replace(done, true) {
-            configured.extend(kinds.configured(&subject, Producer::Extension));
+            configured.extend(kinds.configured(&subject, &title, Producer::Extension));
         }
     };
     let (mut texts, mut urls) = (false, false);
@@ -686,7 +702,7 @@ impl Provider for ExtensionProvider {
         } else {
             self.role
         };
-        let deadline = Instant::now() + QUERY_DEADLINE;
+        let deadline = crate::extensions::deadline_in(QUERY_DEADLINE);
         let id = &self.extension.package;
         // A main search the package may not see runs nothing, and asks nothing while typing.
         let seen = if role == Role::MainSearch {
@@ -1090,7 +1106,7 @@ mod tests {
         let root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
         let extension = super::super::load_folder(&root).unwrap();
-        assert_eq!(extension.keyword, "wc");
+        assert_eq!(extension.keyword.as_deref(), Some("wc"));
         let rows = search(&ExtensionProvider::new(extension), "two words");
         assert_eq!(rows.len(), 1);
         assert_eq!(

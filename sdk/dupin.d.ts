@@ -553,12 +553,26 @@ declare module 'dupin' {
 		filters?: Record<string, { stage: 'matcher' | 'sorter' }>;
 		/** Each one an export of `actions`, receiving the field it names, which `capabilities.rows` declares. */
 		kinds?: {
-			text?: Record<string, { field: 'text' }>;
-			url?: Record<string, { field: 'url' }>;
-			file?: Record<string, { field: 'name' | 'path' }>;
-			app?: Record<string, { field: 'name' | 'path' }>;
+			text?: Record<string, KindActionDeclaration<'text'>>;
+			url?: Record<string, KindActionDeclaration<'url'>>;
+			file?: Record<string, KindActionDeclaration<'name' | 'path'>>;
+			app?: Record<string, KindActionDeclaration<'name' | 'path'> & { when?: 'running' }>;
 		};
 	}
+
+	/**
+	 * One kind action. With `default`, Dupin composes it onto every row of its kind, after the
+	 * actions config.toml adds, in the order of their names, while the package runs; config.toml
+	 * hides or moves it with `hide` and `order`, naming it `<package>/<action>`. `confirm` asks before it
+	 * runs and `when: 'running'` offers an app action only while the app runs, wherever it is
+	 * composed; Dupin checks that as the action screen opens.
+	 */
+	export type KindActionDeclaration<Field extends string> = {
+		field: Field;
+		/** What the action screen calls it when Dupin composes it, up to 128 bytes. */
+		title?: string;
+		confirm?: boolean;
+	} & ({ default?: false } | { default: true; title: string });
 
 	export type PreferenceDeclaration = { title: string } & (
 		| { type: 'checkbox'; default: boolean }
@@ -624,6 +638,11 @@ declare module 'dupin' {
 		 * file its focused window showed. Neither needs an action the user chose.
 		 */
 		context?: ('frontmost' | 'document')[];
+		/**
+		 * `read` lists the apps that run now; `control` hides, quits and force quits one, from an
+		 * action the user chose. Neither needs macOS access.
+		 */
+		apps?: ('read' | 'control')[];
 		/**
 		 * The fields of each kind of row Dupin's own sources find that the package's filters and
 		 * kind actions may receive. Another extension's rows never reach them.
@@ -1035,5 +1054,44 @@ declare module 'dupin' {
 		 * that access for this. Needs `document`.
 		 */
 		document(): Promise<FrontDocument | null>;
+	};
+
+	/** An app that runs now with a place in the Dock. */
+	export interface RunningApp {
+		readonly name: string;
+		readonly bundleId?: string | null;
+		readonly pid: number;
+		/** The app bundle's absolute path, where macOS reports one. */
+		readonly path?: string | null;
+		/** In front of every other app. */
+		readonly active: boolean;
+		readonly hidden: boolean;
+	}
+
+	/** An app named by its process, or by its bundle's absolute path, as an app row's `path` is. */
+	export type AppTarget = { pid: number } | { path: string };
+
+	/** What hiding or quitting did: `done` is hidden, or ended within 2 seconds. */
+	export interface AppOutcome {
+		readonly app: RunningApp;
+		readonly done: boolean;
+	}
+
+	/**
+	 * `apps` capability: the regular apps that run now, never agents, background processes or
+	 * Dupin itself. A request reaches only an app `running()` lists, and resolves to `null` when
+	 * none matches. Quitting asks the app as the Dock's Quit does, and an app asking to save or
+	 * refusing isn't `done`; `forceQuit` stops it as the Force Quit window does. None needs
+	 * Automation or any other macOS access.
+	 */
+	export const apps: {
+		/** Needs `read`; may run while the user types. */
+		running(): Promise<RunningApp[]>;
+		/** Needs `control`, and an action the user chose. */
+		hide(app: AppTarget): Promise<AppOutcome | null>;
+		/** Needs `control`, and an action the user chose. */
+		quit(app: AppTarget): Promise<AppOutcome | null>;
+		/** Needs `control`, and an action the user chose. */
+		forceQuit(app: AppTarget): Promise<AppOutcome | null>;
 	};
 }

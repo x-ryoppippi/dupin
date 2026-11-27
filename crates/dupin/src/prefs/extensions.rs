@@ -15,8 +15,8 @@ use super::controls::{DESCRIPTION, ROW_PX, card, note, setting, setting_with_loc
 use crate::extensions::packages::{Kind, Listed};
 use crate::icons;
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let mut rows = vec![card(k, hair, vec![folder_setting(s, k)])];
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
+    let mut rows = vec![card(k, vec![folder_setting(s, k)])];
     rows.extend(skipped(s, k));
     let Some(bridge) = &s.access else {
         return rows;
@@ -26,7 +26,6 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         rows.push(heading(k, "waiting", "Waiting for you"));
         rows.push(card(
             k,
-            hair,
             pending
                 .iter()
                 .enumerate()
@@ -43,10 +42,9 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             &format!(
                 "{} ({}{})",
                 extension.title,
-                if extension.built_in {
-                    "a built-in command"
-                } else {
-                    &extension.keyword
+                match &extension.keyword {
+                    Some(keyword) if !extension.built_in => keyword,
+                    _ => "a built-in command",
                 },
                 if extension.main_search {
                     ", in the main search"
@@ -55,7 +53,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
                 }
             ),
         ));
-        rows.push(card(k, hair, package_rows(bridge, k, index, extension)));
+        rows.push(card(k, package_rows(bridge, k, index, extension)));
     }
     for problem in bridge.problems() {
         rows.push(note(k, &problem));
@@ -326,8 +324,7 @@ fn status(extension: &Listed, enabled: bool, runs: bool) -> String {
         Kind::Modified => "Replaces a bundled extension of the same name, without its grants",
         Kind::User => "From the extensions folder",
     };
-    let keyword = &extension.keyword;
-    if extension.built_in {
+    let Some(keyword) = extension.keyword.as_deref().filter(|_| !extension.built_in) else {
         return match (runs, extension.registered, enabled) {
             (false, ..) => format!("{origin}. Off, so its built-in command isn't available."),
             (true, false, _) => format!("{origin}. Not answering: its built-in command is off in Settings."),
@@ -338,7 +335,7 @@ fn status(extension: &Listed, enabled: bool, runs: bool) -> String {
                 "{origin}. Answers its built-in command; it can use nothing below until you turn it on."
             ),
         };
-    }
+    };
     match (runs, extension.registered, enabled) {
         (false, ..) => format!("{origin}. Off."),
         (true, false, _) => format!("{origin}. Not answering: another command already uses {keyword}."),
@@ -370,7 +367,7 @@ fn glyph(scope: &Scope) -> &'static Icon {
         Scope::Calculator => &icons::CALCULATOR,
         Scope::Snippets => &icons::QUOTE,
         Scope::Calendar { .. } => &icons::CALENDAR,
-        Scope::Windows { .. } | Scope::Context { .. } => &icons::PANEL,
+        Scope::Windows { .. } | Scope::Context { .. } | Scope::Apps { .. } => &icons::PANEL,
         Scope::Rows { .. } | Scope::Query => &icons::SEARCH,
     }
 }
@@ -554,7 +551,7 @@ mod tests {
         let listed = |registered| Listed {
             package: PackageId::new("help").unwrap(),
             title: "Help".into(),
-            keyword: "help".into(),
+            keyword: Some("help".into()),
             icon: None,
             kind: Kind::User,
             registered,
@@ -649,7 +646,7 @@ mod tests {
         let listed = |kind, registered| Listed {
             package: PackageId::new("bundled:calendar").unwrap(),
             title: "Calendar".into(),
-            keyword: "cal".into(),
+            keyword: Some("cal".into()),
             icon: None,
             kind,
             registered,

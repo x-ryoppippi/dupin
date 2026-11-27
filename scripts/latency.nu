@@ -13,11 +13,68 @@
 # of the Latency comment workflow's comment; it never fails on a regression. See
 # docs/development.md, "Keypress latency".
 
-use latency/measure.nu [measure-all stage-names]
+use latency/measure.nu [measure-all resolve stage-names]
 use main-build.nu find-main-artifact
 
 def main []: nothing -> nothing {
     help main
+}
+
+# The implementations of `features` to measure, `implementation` alone when it is given, grouped
+# by the display each simulates. Each is resolved against its whole feature before the grouping,
+# since one may extend an implementation that another display's group, or no group, holds.
+export def display-groups [features: record, implementation?: string]: nothing -> list<record> {
+    let chosen = $features
+    | items {|feature, implementations|
+        $implementations
+        | columns
+        | where {|label| $implementation == null or $label == $implementation }
+        | each {|label|
+            let setup = resolve $implementations $label
+            {feature: $feature, label: $label, display: ($setup.display? | default ""), setup: $setup}
+        }
+    }
+    | flatten
+    $chosen | get display | uniq | each {|display|
+        let features = $chosen
+        | where display == $display
+        | group-by feature
+        | items {|feature, group| {$feature: ($group | each {|it| {$it.label: $it.setup} } | into record)} }
+        | into record
+        {display: $display, features: $features}
+    }
+}
+
+# `measure-all` once for each display the implementations simulate, with
+# `DUPIN_HEADLESS_DISPLAY` set to it; an implementation's `display` (`<width>x<height>` points of
+# usable area) sizes the panel's list as such a display would, and one without it gets the
+# panel's default. An implementation inherits it through `extends`. The rest of the measurement
+# is measure.nu's, unchanged, so what a recorded baseline means stays the same.
+def measure-displays [
+    catalogue: record
+    bin: path
+    settings: record
+    --only: string
+    --implementation: string
+]: nothing -> list<record> {
+    let measured = display-groups $catalogue.features $implementation | each {|group|
+        let display = $group.display
+        let features = $group.features
+        let scenarios = $catalogue.scenarios | where {|scenario|
+            ($scenario.feature in ($features | columns)) and ($only == null or ($scenario.id | str contains $only))
+        }
+        if ($scenarios | is-empty) {
+            return []
+        }
+        let simulated = if $display == "" { {} } else { {DUPIN_HEADLESS_DISPLAY: $display} }
+        with-env $simulated {
+            measure-all {features: $features, scenarios: $scenarios} $bin $settings --implementation $implementation
+        }
+    } | flatten
+    if ($measured | is-empty) {
+        error make {msg: "no scenario matches"}
+    }
+    $measured
 }
 
 # Measure every scenario with every implementation its feature declares.
@@ -46,7 +103,7 @@ def "main run" [
         fps: $fps
     }
     let results = (
-        measure-all (open scripts/latency/scenarios.toml) $bin $settings
+        measure-displays (open scripts/latency/scenarios.toml) $bin $settings
         --only $only --implementation $implementation
     )
     let report = {

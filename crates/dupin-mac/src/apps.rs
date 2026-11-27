@@ -19,6 +19,18 @@ pub type AppsWatcher = crate::watcher::PathWatcher;
 /// How deep to look for bundles below a root: `/Applications/Utilities/X.app` is depth 2.
 const MAX_DEPTH: usize = 2;
 
+/// Apps people launch that macOS keeps outside the app folders. Named one by one: the folders
+/// they are in also hold dozens of agents and helpers that are not for launching.
+const SYSTEM_BUNDLES: &[&str] = &[
+    "/System/Library/CoreServices/Finder.app",
+    "/System/Library/CoreServices/Applications/Archive Utility.app",
+    "/System/Library/CoreServices/Applications/Directory Utility.app",
+    "/System/Library/CoreServices/Applications/Feedback Assistant.app",
+    "/System/Library/CoreServices/Applications/Keychain Access.app",
+    "/System/Library/CoreServices/Applications/Ticket Viewer.app",
+    "/System/Library/CoreServices/Applications/Wireless Diagnostics.app",
+];
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct App {
     /// The name Finder shows: localized, without `.app`.
@@ -35,6 +47,8 @@ struct App {
 
 pub struct AppsProvider {
     roots: Vec<PathBuf>,
+    /// Bundles listed alongside the ones in `roots`, when they exist.
+    bundles: Vec<PathBuf>,
     index: Mutex<Option<(u64, Vec<App>)>>,
     revision: AtomicU64,
     /// Each bundle's names, kept while its modification time stays the same: reading them
@@ -48,7 +62,7 @@ type Names = (String, Vec<String>);
 
 impl AppsProvider {
     /// `/Applications`, `/System/Applications` and `~/Applications`, with their subfolders
-    /// (`Utilities` among them).
+    /// (`Utilities` among them), and [`SYSTEM_BUNDLES`].
     pub fn standard(rows: Rows) -> Self {
         let mut roots = vec![
             PathBuf::from("/Applications"),
@@ -57,7 +71,10 @@ impl AppsProvider {
         if let Some(home) = std::env::var_os("HOME") {
             roots.push(Path::new(&home).join("Applications"));
         }
-        Self::with_roots(roots, rows)
+        AppsProvider {
+            bundles: SYSTEM_BUNDLES.iter().map(PathBuf::from).collect(),
+            ..Self::with_roots(roots, rows)
+        }
     }
 
     /// The bundles in `roots` and their subfolders only.
@@ -65,6 +82,7 @@ impl AppsProvider {
         AppsProvider {
             rows,
             roots,
+            bundles: Vec::new(),
             index: Mutex::new(None),
             revision: AtomicU64::new(0),
             names: Mutex::new(HashMap::new()),
@@ -134,7 +152,7 @@ impl AppsProvider {
         {
             return apps.clone();
         }
-        let apps: Vec<App> = scan(&self.roots)
+        let apps: Vec<App> = scan(&self.roots, &self.bundles)
             .into_iter()
             .map(|app| {
                 let (display, extra) = self.names_of(&app.icon);
@@ -284,16 +302,40 @@ fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
         .collect()
 }
 
-/// Every `.app` under `roots`, one entry per name: the first root wins, so an app in
-/// `/Applications` hides a same-named copy further down the list.
-fn scan(roots: &[PathBuf]) -> Vec<App> {
-    let mut apps = Vec::new();
-    for root in roots {
-        walk(root, 0, &mut apps);
+/// Every `.app` under `roots`, then each of `bundles` that exists, one entry per bundle on
+/// disk: paths that resolve to the same bundle count once. Distinct bundles stay apart even
+/// when they share a name or a bundle identifier, since hiding one would leave it unreachable;
+/// the folder in each row's subtitle tells them apart.
+///
+/// Of the paths reaching one bundle, the one in the earliest root is kept (`bundles` come after
+/// every root), and there the bundle itself over a link to it. The kept path is the row's ID,
+/// which the usage history and `app:` aliases (through Launch Services) are keyed by.
+fn scan(roots: &[PathBuf], bundles: &[PathBuf]) -> Vec<App> {
+    let mut found = Vec::new();
+    for (root_index, root) in roots.iter().enumerate() {
+        walk(root, 0, root_index, &mut found);
     }
-    let mut seen = std::collections::HashSet::new();
-    apps.retain(|a: &App| seen.insert(a.name.clone()));
-    apps
+    for path in bundles.iter().filter(|path| path.is_dir()) {
+        if let Some(app) = found_bundle(path.clone(), path.is_symlink()) {
+            found.push((roots.len(), path.is_symlink(), app));
+        }
+    }
+    let real = |app: &App| fs::canonicalize(&app.path).unwrap_or_else(|_| app.path.clone());
+    let reals: Vec<PathBuf> = found.iter().map(|(.., app)| real(app)).collect();
+    let mut kept: HashMap<&Path, (usize, bool, usize)> = HashMap::new();
+    for (index, ((root, linked, _), real)) in found.iter().zip(&reals).enumerate() {
+        let candidate = (*root, *linked, index);
+        kept.entry(real.as_path())
+            .and_modify(|best| *best = (*best).min(candidate))
+            .or_insert(candidate);
+    }
+    let kept: std::collections::HashSet<usize> = kept.into_values().map(|(.., index)| index).collect();
+    found
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| kept.contains(index))
+        .map(|(_, (.., app))| app)
+        .collect()
 }
 
 fn app_subfolders(roots: &[PathBuf]) -> Vec<PathBuf> {
@@ -311,7 +353,9 @@ fn is_bundle(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "app")
 }
 
-fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
+/// Each bundle found, with the index of the root it is under and whether its entry is a
+/// symlink.
+fn walk(dir: &Path, depth: usize, root: usize, out: &mut Vec<(usize, bool, App)>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
@@ -324,23 +368,28 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
             continue;
         }
         if is_bundle(&path) {
-            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                let icon = if kind.is_symlink() {
-                    fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
-                } else {
-                    path.clone()
-                };
-                out.push(App {
-                    name: name.to_owned(),
-                    aliases: Vec::new(),
-                    path,
-                    icon,
-                });
+            if let Some(app) = found_bundle(path, kind.is_symlink()) {
+                out.push((root, kind.is_symlink(), app));
             }
         } else if depth + 1 < MAX_DEPTH {
-            walk(&path, depth + 1, out);
+            walk(&path, depth + 1, root, out);
         }
     }
+}
+
+fn found_bundle(path: PathBuf, linked: bool) -> Option<App> {
+    let name = path.file_stem()?.to_str()?.to_owned();
+    let icon = if linked {
+        fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
+    } else {
+        path.clone()
+    };
+    Some(App {
+        name,
+        aliases: Vec::new(),
+        path,
+        icon,
+    })
 }
 
 #[cfg(test)]
@@ -386,7 +435,7 @@ mod tests {
             "Xcode.app/Contents/Applications/Instruments.app",
             "NotAnApp",
         ]);
-        let names: Vec<_> = scan(std::slice::from_ref(&root))
+        let names: Vec<_> = scan(std::slice::from_ref(&root), &[])
             .into_iter()
             .map(|a| a.name)
             .collect();
@@ -403,11 +452,127 @@ mod tests {
         let apps_dir = root.join("Apps");
         fs::create_dir_all(&apps_dir).unwrap();
         std::os::unix::fs::symlink(root.join("Real/Linked.app"), apps_dir.join("Linked.app")).unwrap();
-        let apps = scan(std::slice::from_ref(&apps_dir));
+        let apps = scan(std::slice::from_ref(&apps_dir), &[]);
         assert_eq!(apps[0].path, apps_dir.join("Linked.app"));
         assert_eq!(
             apps[0].icon,
             fs::canonicalize(root.join("Real/Linked.app")).unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A bundle at `root/path` with `bundle_id` in its `Info.plist`.
+    fn bundle(root: &Path, path: &str, bundle_id: &str) -> PathBuf {
+        let bundle = root.join(path);
+        fs::create_dir_all(bundle.join("Contents")).unwrap();
+        fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
+                 <key>CFBundleIdentifier</key><string>{bundle_id}</string></dict></plist>\n"
+            ),
+        )
+        .unwrap();
+        bundle
+    }
+
+    fn paths(apps: &[App]) -> Vec<PathBuf> {
+        apps.iter().map(|app| app.path.clone()).collect()
+    }
+
+    #[test]
+    fn same_named_bundles_in_two_folders_both_stay() {
+        let root = tree(&[]);
+        let system = bundle(&root, "Applications/Foo.app", "com.example.foo");
+        let user = bundle(&root, "Home/Applications/Foo.app", "com.example.foo-setapp");
+        let apps = scan(&[root.join("Applications"), root.join("Home/Applications")], &[]);
+        assert_eq!(paths(&apps), [system, user]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_bundle_reached_through_a_symlink_counts_once_under_the_bundles_own_path() {
+        let root = tree(&[]);
+        let apps_dir = root.join("Applications");
+        let real = bundle(&apps_dir, "Real.app", "com.example.real");
+        std::os::unix::fs::symlink(&real, apps_dir.join("Another Name.app")).unwrap();
+        let elsewhere = root.join("Elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&real, elsewhere.join("Real.app")).unwrap();
+        let apps = scan(&[apps_dir.clone(), elsewhere.clone()], &[]);
+        assert_eq!(
+            paths(&apps),
+            [real],
+            "the bundle over a link beside it, the earlier root over a later one"
+        );
+
+        let apps = scan(&[elsewhere.clone(), apps_dir], &[]);
+        assert_eq!(
+            paths(&apps),
+            [elsewhere.join("Real.app")],
+            "the earlier root keeps the path its history was recorded under"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn distinct_bundles_shown_by_one_name_are_both_found() {
+        let root = tree(&[]);
+        let launcher = bundle(&root, "Siri.app", "com.apple.siri.launcher");
+        let campo = bundle(&root, "Siri AI.app", "com.apple.campo");
+        let apps: Vec<App> = scan(std::slice::from_ref(&root), &[])
+            .into_iter()
+            .map(|app| app.with_names("Siri", Vec::new()))
+            .collect();
+        let found = rank(&apps, "siri", 10);
+        let mut ids: Vec<_> = found.iter().map(|item| item.id.clone()).collect();
+        ids.sort();
+        let mut expected = [campo, launcher].map(|path| path.to_string_lossy().into_owned());
+        expected.sort();
+        assert_eq!(ids, expected);
+        assert!(found.iter().all(|item| item.display_title() == "Siri"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn two_installed_copies_of_one_bundle_id_are_both_found() {
+        let root = tree(&[]);
+        let current = bundle(&root, "Applications/Foo.app", "com.example.foo");
+        let old = bundle(&root, "Home/Applications/Foo.app", "com.example.foo");
+        let renamed = bundle(&root, "Applications/Utilities/Foo 2.app", "com.example.foo");
+        let apps = scan(&[root.join("Applications"), root.join("Home/Applications")], &[]);
+        assert_eq!(paths(&apps), [current, renamed, old]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn listed_bundles_outside_the_roots_are_found_but_not_the_rest_of_their_folder() {
+        let root = tree(&[]);
+        let calendar = bundle(&root, "Applications/Calendar.app", "com.apple.iCal");
+        let finder = bundle(&root, "CoreServices/Finder.app", "com.apple.finder");
+        bundle(&root, "CoreServices/Dock.app", "com.apple.dock");
+        let archive = bundle(
+            &root,
+            "CoreServices/Applications/Archive Utility.app",
+            "com.apple.archiveutility",
+        );
+        let missing = root.join("CoreServices/Applications/Gone.app");
+        let apps = scan(
+            &[root.join("Applications")],
+            &[finder.clone(), archive.clone(), missing, calendar.clone()],
+        );
+        assert_eq!(
+            paths(&apps),
+            [calendar, finder.clone(), archive],
+            "listed bundles follow the roots' and a bundle a root already has counts once"
+        );
+
+        let found = rank(&apps, "finder", 10);
+        assert_eq!(found[0].id, finder.to_string_lossy());
+        assert_eq!(found[0].display_title(), "Finder");
+        assert_eq!(
+            text_subtitle(&found[0]),
+            root.join("CoreServices").to_string_lossy()
         );
         fs::remove_dir_all(root).unwrap();
     }

@@ -11,7 +11,7 @@ use dupin_extension_bridge::{
     Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, PackageStorage, Scope, Trigger,
 };
 use dupin_extension_http::{HttpConfig, HttpService, Limits};
-use dupin_host_services::{calendar, clipboard, context, dictionary, exec, windows};
+use dupin_host_services::{apps, calendar, clipboard, context, dictionary, exec, windows};
 use dupin_mac::privacy::CalendarAccess;
 use serde_json::Value;
 
@@ -44,12 +44,21 @@ pub fn shared_storage() -> Option<Arc<dupin_storage::Storage>> {
             // release build ignores the variable.
             let storage = match std::env::var_os(DEBUG_KEY_FILE_ENV).filter(|_| cfg!(debug_assertions)) {
                 Some(path) => dupin_storage::Storage::new(root, dupin_storage::FileKey::new(path)),
+                // A recording must neither read nor add the Keychain's data key.
+                None if crate::recording::active() => {
+                    dupin_storage::Storage::new(root, dupin_storage::MemoryKey::random())
+                }
                 None => dupin_storage::Storage::new(root, dupin_mac::keychain::KeychainKey),
             };
-            Some(Arc::new(match dupin_mac::machine::platform_uuid() {
+            let storage = match dupin_mac::machine::platform_uuid() {
                 Some(uuid) => storage.with_hardware_id(uuid.as_bytes()),
                 None => storage,
-            }))
+            };
+            // A recording shows the clipboard fixture's history, as a headless run does.
+            if crate::recording::active() {
+                crate::clipboard::seed_fixture(&storage);
+            }
+            Some(Arc::new(storage))
         })
         .clone()
 }
@@ -138,10 +147,14 @@ pub fn open(platform: Platform) -> Bridge {
                 "extension storage needs XDG_DATA_HOME or HOME",
             )),
         },
-        clipboard: Box::new(Pasteboard {
-            settings: platform.clipboard,
-            service: OnceLock::new(),
-        }),
+        // A recording never watches the real pasteboard, whose copies are the user's.
+        clipboard: match crate::recording::active() {
+            true => Box::new(services::Unavailable("a recording has no clipboard to watch")),
+            false => Box::new(Pasteboard {
+                settings: platform.clipboard,
+                service: OnceLock::new(),
+            }),
+        },
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
             dupin_mac::SystemDictionary::default(),
         ))),
@@ -156,6 +169,13 @@ pub fn open(platform: Platform) -> Bridge {
         context: Box::new(Context(context::Service::new(
             dupin_mac::window_management::Context(platform.front),
         ))),
+        // A recording never lists the apps running on the Mac that records it.
+        apps: match crate::recording::active() {
+            true => Box::new(services::Unavailable("a recording lists no running apps")),
+            false => Box::new(RunningApps(apps::Service::new(
+                dupin_mac::running_apps::RunningApps,
+            ))),
+        },
     };
     let bridge = match base_path() {
         Some(base) => Bridge::open(&base, Box::new(super::grants::Shared), services),
@@ -358,6 +378,22 @@ impl services::Windows for Windows {
     }
 }
 
+struct RunningApps(apps::Service<dupin_mac::running_apps::RunningApps>);
+
+impl services::Apps for RunningApps {
+    fn running(&self) -> Result<Value, Failure> {
+        encoded(self.0.running())
+    }
+
+    fn hide(&self, target: &apps::Target) -> Result<Value, Failure> {
+        encoded(self.0.hide(target))
+    }
+
+    fn quit(&self, target: &apps::Target, force: bool) -> Result<Value, Failure> {
+        encoded(self.0.quit(target, force))
+    }
+}
+
 struct Context(context::Service<dupin_mac::window_management::Context>);
 
 impl services::Context for Context {
@@ -401,7 +437,6 @@ impl services::Exec for Programs {
 #[cfg(test)]
 mod tests {
     use std::os::unix::process::ExitStatusExt;
-    use std::time::Instant;
 
     use dupin_js_runtime::{ActionEffect, PageContext};
     use serde_json::json;
@@ -446,7 +481,7 @@ mod tests {
                     name,
                     &data,
                     &PageContext::default(),
-                    Instant::now() + ACTION_DEADLINE,
+                    crate::extensions::deadline_in(ACTION_DEADLINE),
                     &call.services,
                 )
                 .unwrap();

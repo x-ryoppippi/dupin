@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-use headless-config.nu [scenario-env panel-height headless]
+use headless-config.nu [scenario-env panel-height headless headless-in]
 
 export const MANIFEST = path self docs-images/images.toml
 export const GLASS = path self ../docs/images/glass.json
@@ -14,8 +14,14 @@ const CLIP_SCALE = 1.25
 export const CLIP_FPS = 10
 # Clips render this many points tall, more than the panel ever is, and are cut to it.
 const CLIP_HEIGHT = 720
+# A window image's content is measured this many points tall, more than any page grows to.
+const MEASURE_HEIGHT = 4000
 # Room below the panel for the captions, so they never cover a row.
 export const CAPTION_SPACE = 60
+# How tall the website's home demo frame is, in points, for a width of 680. A home clip is at
+# least this tall, so a backdrop shader, which draws only inside the panel, never leaves the
+# frame short of it.
+const HOME_FRAME_HEIGHT = 578
 # How a clip's steps are paced, in seconds.
 const CLIP_START = 0.6
 const CLIP_TYPING = 0.12
@@ -329,16 +335,21 @@ def render-scenario [
         ...$window
     ]
     let tree = $tmp | path join $"(image-id $image | str replace --all / -).json"
-    with-env $environment { headless $bin ...$script --theme dark --tree $tree }
+    headless-in $environment $bin ...$script --theme dark --tree $tree
     let size = if $image.window? == null {
         $"680x(open $tree | panel-height)"
     } else {
-        $"($image.width)x(open $tree | content-height)"
+        # Measured again at the image's width, where text wraps as it will in the image, and far
+        # taller than any page, so nothing scrolls out of the measurement.
+        let tall = $tmp | path join $"(image-id $image | str replace --all / -)-tall.json"
+        headless-in $environment $bin ...$script --theme dark --tree $tall --size $"($image.width)x($MEASURE_HEIGHT)"
+        $"($image.width)x([(open $tree | get viewport.1) (open $tall | content-height)] | math max | math ceil)"
     }
     image-paths $image | zip (image-themes $image) | each {|pair|
-        with-env $environment {
-            headless $bin ...$script --theme $pair.1 --snap $pair.0 --scale ($SCALE | into string) --size $size
-        }
+        (
+            headless-in $environment $bin ...$script --theme $pair.1 --snap $pair.0
+            --scale ($SCALE | into string) --size $size
+        )
         $pair.0
     }
 }
@@ -371,18 +382,17 @@ def render-clip [
     let captions = if ($clip.captions? | default true) { $timeline.captions } else { null }
     image-themes $clip | each {|theme|
         let frames = $tmp | path join $"($name)-($theme)-frames"
-        with-env $environment {
-            (
-                headless $bin ...$run --theme $theme --size $"680x($CLIP_HEIGHT)"
-                --scale ($scale | into string) --fps ($CLIP_FPS | into string) --out $frames
-            )
-        }
+        (
+            headless-in $environment $bin ...$run --theme $theme --size $"680x($CLIP_HEIGHT)"
+            --scale ($scale | into string) --fps ($CLIP_FPS | into string) --out $frames
+        )
         let pngs = glob ($frames | path join frame_*.png) | sort
         let out = theme-path $clip $theme
         let video = if ($clip.video? | default false) {
             {poster: (poster-path $clip $theme), background: ($clip.background? | default "#000000")}
         }
-        finish-clip $pngs $captions $out ($tmp | path join $"($name)-captions") $scale $video
+        let min_height = if $clip.page == home { $HOME_FRAME_HEIGHT * $scale | math round }
+        finish-clip $pngs $captions $out ($tmp | path join $"($name)-captions") $scale $video $min_height
         [$out] | append ($video | get --optional poster | default [])
     } | flatten
 }
@@ -398,6 +408,7 @@ def finish-clip [
     folder: path
     scale: number
     video?: record
+    min_height?: number
 ]: nothing -> nothing {
     let bottom = ^magick ...$pngs -background none -layers merge -format "%@" info: | parse "{w}x{h}+{x}+{y}" | first | ($in.h | into int) + ($in.y | into int)
     let width = ^magick identify -format "%w" ($pngs | first) | into int
@@ -407,7 +418,10 @@ def finish-clip [
         $CAPTION_SPACE * $scale | math round
     }
     # H.264 takes only even sides.
-    let height = ($bottom + $space + 1) // 2 * 2
+    let height = ([
+        ($bottom + $space + 1)
+        ($min_height | default 0)
+    ] | math max) // 2 * 2
     ^magick mogrify -gravity north -background none -crop $"($width)x($bottom)+0+0" +repage -extent $"($width)x($height)" ...$pngs
     if $captions != null {
         caption $pngs $captions $folder $scale
@@ -427,18 +441,20 @@ def finish-clip [
 # Encodes `pngs` over `video.background` as an H.264 MP4 at `out`, which every browser plays and
 # which takes a fraction of an animated WebP's bytes when a backdrop shader changes every pixel of
 # every frame, and saves the last frame as `video.poster`.
+# `-tune grain` keeps the dither a smooth gradient is drawn with, which `animation` smooths away
+# and leaves as bands.
 export def encode-video [pngs: list<string>, out: path, video: record]: nothing -> nothing {
     ^magick mogrify -background $video.background -flatten ...$pngs
     let frames = $pngs | first | path dirname | path join "frame_*.png"
     let result = (
         ^ffmpeg -loglevel error -y -framerate ($CLIP_FPS | into string) -pattern_type glob -i $frames
-        -c:v libx264 -crf 26 -preset veryslow -tune animation -pix_fmt yuv420p -movflags +faststart -an $out
+        -c:v libx264 -crf 22 -preset veryslow -tune grain -pix_fmt yuv420p -movflags +faststart -an $out
         | complete
     )
     if $result.exit_code != 0 {
         error make {msg: $"ffmpeg failed for ($out):\n($result.stderr)"}
     }
-    ^magick ($pngs | last) -quality 85 $video.poster
+    ^magick ($pngs | last) -quality 95 -define webp:sns-strength=0 -define webp:filter-strength=0 $video.poster
 }
 
 # An extension's fixture played through `dupin ext render --record`, up to `step` or its last
@@ -635,7 +651,7 @@ export def key-caption [step: record]: nothing -> string {
 # `scenario`, the manifest's documents and history, and an entry's own `config`.
 #
 # Each runs in a home of its own, with its configuration in ~/.config/dupin, so the paths Settings
-# shows are the same on every Mac and in every run.
+# shows are the same on every Mac and in every run. The record is the run's whole environment.
 export def scratch-environment [
     scenario: path
     image: record
@@ -671,6 +687,7 @@ export def scratch-environment [
     } | merge $fixtures | merge {
         HOME: $home
         XDG_CONFIG_HOME: $config
+        PATH: "/usr/bin:/bin"
         TMPDIR: ($tmp | path join tmp)
         LANG: en_GB.UTF-8
         LC_ALL: en_GB.UTF-8
@@ -681,11 +698,17 @@ export def scratch-environment [
     $environment
 }
 
-# How tall a window must be to show all of its content, in points: the lowest edge of any laid
-# out element, with the window's own margin below it.
+# How tall a window must be to show all of its content, in points, from a tree laid out
+# `MEASURE_HEIGHT` tall: the lowest edge of any element in the top half, with a gap and the
+# window's own margin below it. What reaches the bottom half is pinned to the window's bottom
+# edge (a sidebar, its footer, a page's scroll view), not content.
 def content-height []: record -> int {
-    let bottom = $in.elements | where rect? != null | each {|element| $element.rect.1 + $element.rect.3 } | math max
-    $bottom + 16 | math ceil
+    let bottom = $in.elements
+    | where rect? != null
+    | each {|element| $element.rect.1 + $element.rect.3 }
+    | where $it < $MEASURE_HEIGHT / 2
+    | math max
+    $bottom + 24 | math ceil
 }
 
 # A usage history in which the home opened `recent`, the first most often, each an hour before

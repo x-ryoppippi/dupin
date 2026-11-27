@@ -31,11 +31,12 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{
-    Backdrop, CommandId, Config, DisplaySelection, History, InputSource, Position, Searcher, Session,
+    Backdrop, CommandId, Config, DisplaySelection, History, InputSource, Position, Rows, Searcher, Session,
 };
 use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer, window::DisplayNotice};
 use rune::{AppHandle, Image, ImageCache, TextEdit, Tx};
 
+pub use self::lifecycle::PanelScreen;
 use crate::scripts::catalog::Catalog;
 
 pub use action_screen::{ActionStage, ApplicationState, SEND_TO};
@@ -72,7 +73,6 @@ enum PendingPaste {
 pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
-    pub snapshots: AppHandle<crate::snapshots::Snapshots>,
     pub scripts: AppHandle<crate::scripts::output::Output>,
 }
 
@@ -80,6 +80,8 @@ type BoundAgainst = (
     std::collections::BTreeMap<String, dupin_core::config::HotkeyTarget>,
     Vec<String>,
     bool,
+    bool,
+    Vec<String>,
 );
 
 pub struct Configuration {
@@ -122,9 +124,12 @@ pub struct Ui {
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
     bindings_applied: bool,
-    /// The bindings, commands and whether the extensions had loaded when the shortcuts were
-    /// last applied, since a `target = "dupin"` binding registers once its command is there.
+    /// The bindings, commands, whether the extensions had loaded, System Command Automation
+    /// and the web searches bindings name that answer, when the shortcuts were last applied,
+    /// since a `target = "dupin"` binding registers once what it addresses is there.
     bound_against: Option<BoundAgainst>,
+    /// The row a shortcut chose that waits for its package's consent, to run once granted.
+    bound_waiting: Option<hotkeys::Waiting>,
     pub icons: HashMap<dupin_core::Icon, Image>,
     /// The images extension rows name, made off the panel's thread.
     pub(crate) thumbnails: thumbnails::Thumbnails,
@@ -132,6 +137,12 @@ pub struct Ui {
     visible_rows: std::ops::Range<usize>,
     /// How far down the result list is scrolled, as it last drew.
     pub(crate) list_offset: Rc<Cell<f32>>,
+    /// The height the result list takes before it scrolls, from the display the panel last
+    /// opened on and the configured rows.
+    pub list_budget: f32,
+    /// The display the panel last opened on, if it knows one.
+    screen: Option<lifecycle::PanelScreen>,
+    rows: Rows,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -156,6 +167,9 @@ pub struct Ui {
     pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
     pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
+    /// Extension actions a headless run's frames wait for, which haven't handed over their
+    /// results yet.
+    headless_acting: usize,
     extensions: Extensions,
     calendar_access: dupin_mac::privacy::CalendarAccess,
     _apps_watcher: Option<AppsWatcher>,
@@ -181,7 +195,6 @@ pub struct Ui {
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
-    snapshots: AppHandle<crate::snapshots::Snapshots>,
     script_output: AppHandle<crate::scripts::output::Output>,
     script_output_after_close: Option<crate::scripts::runner::RunId>,
 }
@@ -199,10 +212,10 @@ impl Ui {
         let Windows {
             panel: me,
             prefs,
-            snapshots,
             scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
+        let screen = PanelScreen::current(config.display);
         let composition = crate::composition::Composition::native(dupin_mac::kinds::native());
         composition.apply(&config.advanced);
         let kinds = composition.kinds().clone();
@@ -291,7 +304,7 @@ impl Ui {
             .map(|(id, provider)| (id.clone(), spawn_searcher(me.clone(), id, provider)))
             .collect();
         let sources = registration.session.command_ids();
-        snapshots.update(move |s, _| s.set_sources(sources));
+        prefs.update(move |prefs, _| prefs.snapshots.set_sources(sources));
         me.update(|s, tx| s.refresh_default(tx));
         let mut query = TextEdit::new("");
         query.focused = true;
@@ -317,6 +330,7 @@ impl Ui {
             acknowledged_config: config.clone(),
             bindings_applied: false,
             bound_against: None,
+            bound_waiting: None,
             session: registration.session,
             query,
             config_problem: None,
@@ -328,6 +342,14 @@ impl Ui {
             thumbnails: thumbnails::Thumbnails::new(),
             visible_rows: 0..0,
             list_offset: Rc::default(),
+            list_budget: crate::view::list_fit(
+                screen.map(|screen| screen.list_room(config.theme.panel_width, config.position)),
+                config.rows,
+                f32::from(config.theme.row_height),
+            )
+            .budget,
+            screen,
+            rows: config.rows,
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
@@ -347,6 +369,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
+            headless_acting: 0,
             extensions: Extensions::new(bridge, registration.ports),
             calendar_access,
             _apps_watcher: apps_watcher,
@@ -380,13 +403,18 @@ impl Ui {
             quick_look,
             me,
             prefs,
-            snapshots,
         };
         ui.watch_extensions(config.extensions);
         ui
     }
 
+    /// Whether the panel's lists run upwards from the field, the best match next to it.
+    pub(crate) fn grows_up(&self) -> bool {
+        self.position.grows_up()
+    }
+
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        crate::extensions::play_headless_copies(clock);
         self.poll_picker(clock, tx);
         let notice_expired = self.notices.expire(clock);
         self.poll_searches(clock, tx) || notice_expired

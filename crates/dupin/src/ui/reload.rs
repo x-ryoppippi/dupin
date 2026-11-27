@@ -20,7 +20,8 @@ impl Ui {
         // The extensions' commands joined the registry just now.
         crate::hotkey::mark_shortcuts(config, &mut registration.registry);
         let sources = registration.registry.ids();
-        self.snapshots.update(move |s, _| s.set_sources(sources));
+        self.prefs
+            .update(move |prefs, _| prefs.snapshots.set_sources(sources));
         let effects = self
             .session
             .set_commands(registration.registry)
@@ -30,6 +31,8 @@ impl Ui {
             config.bindings.clone(),
             self.session.command_ids(),
             self.extensions.settled(),
+            config.system_automation,
+            self.bound_web_searches(config),
         );
         if self.bound_against.as_ref() != Some(&bound) {
             self.bound_against = Some(bound);
@@ -46,6 +49,8 @@ impl Ui {
             self.apply(effects, tx);
         }
         self.position = config.position;
+        self.rows = config.rows;
+        self.fit_list();
         self.display = config.display;
         if self.display != DisplaySelection::Active {
             self.display_notice = None;

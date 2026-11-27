@@ -241,6 +241,10 @@ pub struct Replies {
     /// shapes. Left out, reading them fails as `unavailable`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<ContextReply>,
+    /// The apps that run, in the apps service's shapes, and which of them refuse a plain quit.
+    /// Left out, listing or quitting them fails as `unavailable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apps: Option<AppsReply>,
     /// Your decision on each declared scope, named as grant files name it, such as
     /// `http:https://api.github.com` or `clipboard:read`. A scope left out is allowed.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -323,6 +327,18 @@ pub struct ContextReply {
     pub frontmost: Value,
     /// `{ path }`, or `null` (as left out) for none.
     pub document: Value,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AppsReply {
+    /// `[{ name, bundleId?, pid, path?, active?, hidden? }]`. Hiding one marks it hidden, and
+    /// quitting one leaves it out from then on.
+    pub running: Value,
+    /// The PIDs of the apps that stay after a plain quit, as one asking to save does; only a
+    /// forced quit ends them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub refuse: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

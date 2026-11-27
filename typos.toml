@@ -14,6 +14,7 @@ licence = "licence"
 licences = "licences"
 maximise = "maximise"
 normalised = "normalised"
+realise = "realise"
 sanitised = "sanitised"
 
 [files]

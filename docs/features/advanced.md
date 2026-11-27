@@ -1,6 +1,6 @@
 # Advanced composition
 
-`[advanced]` in `config.toml` changes how Dupin's searches are put together: which matcher and sorter a source uses, what the main search also searches, and which actions every row of a kind gets. This composition follows the model of Shougo Matsushita's [ddu.vim](https://github.com/Shougo/ddu.vim).
+`[advanced]` in `config.toml` changes how Dupin's searches are put together: which matcher and sorter a source uses, what the main search also searches, and which actions every row of a kind gets, in what order. This composition follows the model of Shougo Matsushita's [ddu.vim](https://github.com/Shougo/ddu.vim).
 
 ## Open it
 
@@ -11,23 +11,25 @@ Edit the `[advanced]` table in `config.toml`; Settings → Search shows what it 
 - In Settings → Search, the composition `[advanced]` sets, read-only.
 - Rows matched and ordered by the matcher and sorter you chose.
 - In the main search, results from the sources you appended, below the apps.
-- In the action screen, the actions you added to a kind, after the kind's own.
+- In the action screen, the actions you added to a kind, after the kind's own, then the ones a package that is on adds by default.
+- In the action screen, a kind's actions in the order you set, without the ones you hid.
 
 ## What you can do
 
-| Key / action                                                         | What it does                                                                      |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| <kbd>→</kbd> at the end of the input, <kbd>⌘K</kbd> or <kbd>⌃K</kbd> | Opens the action screen, which lists the actions you added to the row's kind.     |
-| A `script` action                                                    | Runs the [script command](./scripts.md) with the row's value as its one argument. |
-| A `url` action                                                       | Opens the URL with the row's value filled in.                                     |
-| An `extension` action                                                | Runs the extension's kind action on the row's value, once you allow it.           |
-| <kbd>↩</kbd>, <kbd>⌘↩</kbd>, **Send to…**                            | Unchanged: they do what the row's kind always does.                               |
+| Key / action                                                         | What it does                                                                                        |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| <kbd>→</kbd> at the end of the input, <kbd>⌘K</kbd> or <kbd>⌃K</kbd> | Opens the action screen, which lists the actions you added to the row's kind, in the order you set. |
+| A `script` action                                                    | Runs the [script command](./scripts.md) with the row's value as its one argument.                   |
+| A `url` action                                                       | Opens the URL with the row's value filled in.                                                       |
+| An `extension` action                                                | Runs the extension's kind action on the row's value, once you allow it.                             |
+| <kbd>↩</kbd>, <kbd>⌘↩</kbd>, <kbd>⌘Y</kbd>, **Send to…**             | Unchanged: they do what the row's kind always does, even when you hid the action they run.          |
 
 Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 
 ## Notes
 
 - A table changes only the parts it names; without one, Dupin behaves as it does with an empty file.
+- Hiding an action only takes it out of the action screen; see [Hide and order](#hide-and-order).
 - An invalid `[advanced]` makes `config.toml` invalid; see [Problems](#problems).
 - With the [Home Manager module](../configuration.md#nix), write it under `settings.advanced`, which locks the whole table in Settings.
 
@@ -48,13 +50,18 @@ matcher = "builtin.prefix"
 [[advanced.kinds.url.actions]]
 title = "Open in the Wayback Machine"
 url = "https://web.archive.org/web/{url}"
+
+[advanced.kinds.file]
+hide = ["quick-look"]
+order = ["reveal"]
 ```
 
-| Table                               | Changes                                                         |
-| ----------------------------------- | --------------------------------------------------------------- |
-| `[advanced.sources.<source>]`       | A source's [matcher and sorter](#sources).                      |
-| `[advanced.commands.default]`       | What [the main search](#the-main-search) searches besides apps. |
-| `[[advanced.kinds.<kind>.actions]]` | [Actions](#kind-actions) added to every row of a kind.          |
+| Table                               | Changes                                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| `[advanced.sources.<source>]`       | A source's [matcher and sorter](#sources).                                            |
+| `[advanced.commands.default]`       | What [the main search](#the-main-search) searches besides apps.                       |
+| `[[advanced.kinds.<kind>.actions]]` | [Actions](#kind-actions) added to every row of a kind.                                |
+| `[advanced.kinds.<kind>]`           | Which of a kind's actions the action screen [hides and lists first](#hide-and-order). |
 
 <details>
 <summary>How composition works, and a fuller example</summary>
@@ -156,9 +163,62 @@ Dupin finds the script when the action runs. The script's output mode decides wh
 
 </details>
 
+## Hide and order
+
+`[advanced.kinds.file]` and `[advanced.kinds.app]` take `hide` and `order`, lists of action IDs. `hide` leaves actions out of the action screen. `order` lists actions first, in its order; every other action follows in its usual place.
+
+```toml
+[advanced.kinds.file]
+hide = ["quick-look", "compress"]
+order = ["reveal", "open"]
+```
+
+| Key     | Takes                                                     | Does                                                                           |
+| ------- | --------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `hide`  | Action IDs of the kind, or `<package>/<action>`, up to 32 | Leaves them out of the action screen. Their keys still run them.               |
+| `order` | The same                                                  | Lists them first, in this order, then the rest as usual, Send to… always last. |
+
+<details>
+<summary>Every action ID</summary>
+
+The IDs are stable: they name the same action in every release.
+
+| Kind   | ID           | Action                                     |
+| ------ | ------------ | ------------------------------------------ |
+| `file` | `open`       | Open, which <kbd>↩</kbd> runs              |
+| `file` | `browse`     | Browse, on folders only                    |
+| `file` | `open-with`  | Open with…                                 |
+| `file` | `reveal`     | Reveal in Finder, which <kbd>⌘↩</kbd> runs |
+| `file` | `quick-look` | Quick Look, which <kbd>⌘Y</kbd> runs       |
+| `file` | `copy-name`  | Copy name                                  |
+| `file` | `rename`     | Rename…                                    |
+| `file` | `move-to`    | Move to…                                   |
+| `file` | `copy-to`    | Copy to…                                   |
+| `file` | `duplicate`  | Duplicate                                  |
+| `file` | `compress`   | Compress                                   |
+| `file` | `trash`      | Move to Trash                              |
+| `app`  | `open`       | Open, which <kbd>↩</kbd> runs              |
+| `app`  | `reveal`     | Reveal in Finder, which <kbd>⌘↩</kbd> runs |
+| `app`  | `quick-look` | Quick Look, which <kbd>⌘Y</kbd> runs       |
+
+A file row lists them in this order by default. `rename` to `compress` appear only on a name that is valid UTF-8, and `browse` only on a folder; naming one a row lacks changes nothing on that row.
+
+</details>
+
+<details>
+<summary>Keys, composed actions and the other kinds</summary>
+
+Hiding an action never turns it off. <kbd>↩</kbd> and <kbd>⌘↩</kbd> still run `open` and `reveal`, and <kbd>⌘Y</kbd> still runs `quick-look`, so you can keep a key you use without its row. A hidden action that asks you to confirm first is shown for that prompt only.
+
+A [package's kind action](#extensions), whether you add it in `actions` or the package adds it [by default](#default-kind-actions), is named `<package>/<action>`, as `extension` names it; one no package composes on the kind changes nothing. A `script` or `url` action has no ID: it keeps its place among the actions you added, after any you list in `order`. Remove it from `actions` to hide it.
+
+`text` and `url` take neither key: an extension's row lists the extension's own actions, and Dupin's only `text` and `url` actions are the ones <kbd>↩</kbd> runs.
+
+</details>
+
 ## Extensions
 
-An extension can provide filters and kind actions, declared in the `provides` object of its [manifest](./extension-manifest.md). Nothing is composed until `config.toml` names one as `<package>/<name>`:
+An extension can provide filters and kind actions, declared in the `provides` object of its [manifest](./extension-manifest.md). Nothing is composed until `config.toml` names one as `<package>/<name>`, except a kind action the package declares `default`, which joins every row of its kind while the package is on ([Default kind actions](#default-kind-actions)):
 
 ```toml
 [advanced.sources.apps]
@@ -204,6 +264,15 @@ export const filters = {
 | `provides.filters.<name>`      | `stage`: `matcher` or `sorter`           | `matcher` or `sorter` of `apps` or `folder`       | `rows:app` or `rows:file` with `title`; `query` for a matcher |
 | `provides.kinds.<kind>.<name>` | `field`: `text`, `url`, `name` or `path` | `extension = "<package>/<name>"` on a kind action | `rows:<kind>` with that field                                 |
 
+A kind action may also declare `title`, `default`, `confirm` and, on an app action, `when`:
+
+| Key       | Means                                                                                                                             |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `title`   | What the action screen calls it when Dupin composes it by default: one line of up to 128 bytes. `default` needs one.              |
+| `default` | `true` composes it onto every row of its kind while the package is on.                                                            |
+| `confirm` | `true` asks before it runs, as Move to Trash does, wherever it is composed: “Force Quit “Safari”?”, with the title as the button. |
+| `when`    | `"running"` offers an app action only while the app runs, wherever it is composed.                                                |
+
 A matcher returns `{ index, score?, positions? }` for each candidate it finds, and a sorter every index once, in its order. `dupin.d.ts` declares `Provides`, `Filters`, `FilterInput`, `FilterMatch` and `KindActionData`.
 
 </details>
@@ -226,6 +295,25 @@ A kind action is an `actions` export. It appears only on rows Dupin's own source
 
 </details>
 
+### Default kind actions
+
+A package's `default` kind actions follow the ones `[[advanced.kinds.<kind>.actions]]` adds, each package's in the order of their names. They are named `<package>/<action>`, so [`hide` and `order`](#hide-and-order) hide and move them as they do the kind's own actions:
+
+```toml
+[advanced.kinds.app]
+hide = ["running-apps/quit_forcibly"]
+order = ["open", "running-apps/quit"]
+```
+
+Naming one in `[[advanced.kinds.<kind>.actions]]` adds it under your own title instead, in that place, and Dupin doesn't add it again.
+
+<details>
+<summary>When they show</summary>
+
+Default actions show only on rows Dupin's own sources found, as every package's kind action does, and only while the package is on: turning it off takes them away. An action declared `when = "running"` is checked as the action screen opens, against the apps running then, so typing never waits for it: the action screen of an app that isn't running doesn't list it.
+
+</details>
+
 ## Problems
 
 A mistake in `[advanced]` makes `config.toml` invalid, with the problem named: at launch Dupin uses the defaults, and during a reload it keeps the last valid configuration.
@@ -233,6 +321,6 @@ A mistake in `[advanced]` makes `config.toml` invalid, with the problem named: a
 <details>
 <summary>What counts as a problem</summary>
 
-A key Dupin doesn't read, a source, matcher or sorter it doesn't have, a stage a source doesn't take, a script name with a `/`, a URL template outside these rules, or a package's filter or action not written `<package>/<name>` makes `config.toml` invalid. During a reload Dupin keeps the last valid configuration, its composition included. A missing script is reported when its action runs.
+A key Dupin doesn't read, a source, matcher or sorter it doesn't have, a stage a source doesn't take, a script name with a `/`, a URL template outside these rules, or a package's filter or action not written `<package>/<name>` makes `config.toml` invalid. So does a `hide` or `order` that names an ID the kind doesn't have, names one twice, or that both lists name, or one on `text` or `url`. During a reload Dupin keeps the last valid configuration, its composition included. A missing script is reported when its action runs.
 
 </details>

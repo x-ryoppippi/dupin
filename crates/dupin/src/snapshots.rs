@@ -1,13 +1,21 @@
 mod store;
 
 use dupin_core::snapshots::Snapshot;
-use rune::{AppHandle, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, row, text, text_input};
+use rune::{AppHandle, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, row, text, text_input};
+use rune_kit::Kit;
 use store::Store;
 
+use crate::prefs::Prefs;
+
+/// How wide the list of saved snapshots is, beside the selected one.
+const LIST_WIDTH: f32 = 260.0;
+
+/// The saved snapshots, as Settings' Snapshots page lists them, and the writer that saves and
+/// deletes them.
 pub struct Snapshots {
-    me: AppHandle<Self>,
     loaded: bool,
-    sources: Vec<String>,
+    /// The commands a snapshot can be opened in the panel with, once the panel has said.
+    sources: Option<Vec<String>>,
     entries: Vec<Snapshot>,
     filtered: Vec<usize>,
     search: Vec<String>,
@@ -16,6 +24,8 @@ pub struct Snapshots {
     query: TextEdit,
     selected: Option<String>,
     pending_delete: Option<String>,
+    /// The snapshot whose content Copy last put on the clipboard.
+    copied: Option<String>,
     problem: Option<String>,
     panel: AppHandle<crate::ui::Ui>,
     running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -24,26 +34,24 @@ pub struct Snapshots {
 impl Snapshots {
     pub fn new(
         panel: AppHandle<crate::ui::Ui>,
-        me: AppHandle<Self>,
+        prefs: AppHandle<Prefs>,
         running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) -> Self {
         let (writer, rx) = std::sync::mpsc::channel();
-        let handle = me.clone();
         std::thread::Builder::new()
             .name("dupin-snapshots".into())
             .spawn(move || {
                 let mut cache = std::collections::HashMap::new();
                 write_requests(store::shared(), rx, |store, result| {
-                    publish(store, &me, result, &mut cache)
+                    publish(store, &prefs, result, &mut cache)
                 });
             })
             .expect("spawn snapshot writer");
         let mut query = TextEdit::new("");
         query.focused = true;
         Self {
-            me: handle,
             loaded: false,
-            sources: Vec::new(),
+            sources: None,
             entries: Vec::new(),
             filtered: Vec::new(),
             search: Vec::new(),
@@ -52,6 +60,7 @@ impl Snapshots {
             query,
             selected: None,
             pending_delete: None,
+            copied: None,
             problem: None,
             panel,
             running,
@@ -60,7 +69,14 @@ impl Snapshots {
 
     pub fn set_sources(&mut self, sources: Vec<String>) {
         listing().sources.clone_from(&sources);
-        self.sources = sources;
+        self.sources = Some(sources);
+    }
+
+    /// Whether the command `mode` is still there to open a snapshot it saved, as far as is known.
+    fn available(&self, mode: &str) -> bool {
+        self.sources
+            .as_ref()
+            .is_none_or(|sources| sources.iter().any(|source| source == mode))
     }
 
     pub fn control(&self, call: crate::control::Call) {
@@ -113,7 +129,7 @@ impl Snapshots {
         call.finish(Ok(serde_json::Value::Null));
     }
 
-    /// Clears the search, as opening the window does, and selects the snapshot `id`, if any.
+    /// Clears the search, as opening the page does, and selects the snapshot `id`, if any.
     pub fn reveal(&mut self, id: Option<&str>, tx: &mut Tx) {
         self.query = TextEdit::new("");
         self.query.focused = true;
@@ -124,14 +140,8 @@ impl Snapshots {
         self.filter(tx);
     }
 
-    pub fn show(&self) {
-        self.me.open();
-    }
-
-    pub fn control_close(&mut self, call: crate::control::Call) {
+    pub fn cancel_delete(&mut self) {
         self.pending_delete = None;
-        self.me.close();
-        call.finish(Ok(serde_json::Value::Null));
     }
 
     /// Narrow the list to the query, keeping the selection when it still matches, and scroll to
@@ -199,7 +209,7 @@ impl Snapshots {
     /// Runs the search the snapshot `id` saved again, if its command is still available.
     pub fn resume_id(&mut self, id: &str) {
         if let Some(saved) = self.entries.iter().find(|s| s.id == id).cloned() {
-            if !self.sources.contains(&saved.mode) {
+            if !self.available(&saved.mode) {
                 self.report("The source command is unavailable. Saved content remains readable.".into());
                 return;
             }
@@ -207,10 +217,20 @@ impl Snapshots {
         }
     }
 
-    pub fn closed(&mut self, _: &mut Tx) {
-        self.panel.update(crate::ui::Ui::resume_restart);
+    /// Puts the selected snapshot's saved content on the clipboard, as plain text.
+    fn copy(&mut self, tx: &mut Tx) {
+        let Some(saved) = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.entries.iter().find(|s| s.id == id))
+        else {
+            return;
+        };
+        tx.copy(plain_text(&saved.views));
+        self.copied = Some(saved.id.clone());
     }
 
+    /// The page's keys; it leaves the others, ⌘W among them, to the window.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         match ev.key {
             Key::Command('f') => tx.focus("snapshot-search", false),
@@ -220,9 +240,7 @@ impl Snapshots {
                 self.query.focused = true;
                 self.filter(tx);
             }
-            Key::Escape => tx.close_window(),
             Key::Command('r') => self.resume(),
-            Key::Command('w') => tx.close_window(),
             Key::Down | Key::Up => {
                 let entries: Vec<_> = self.filtered.iter().map(|&i| &self.entries[i]).collect();
                 if entries.is_empty() {
@@ -235,239 +253,341 @@ impl Snapshots {
                     _ => 0,
                 };
                 self.selected = Some(entries[next].id.clone());
+                self.pending_delete = None;
                 tx.scroll_into_view(format!("snapshot-{}", entries[next].id));
             }
             _ => return false,
         }
         true
     }
+
+    /// Lists `entries` as if the writer had just read them from storage.
+    #[cfg(test)]
+    pub(crate) fn seed(&mut self, entries: Vec<Snapshot>, tx: &mut Tx) {
+        self.loaded = true;
+        self.search = entries.iter().map(Snapshot::search_text).collect();
+        self.entries = entries;
+        self.filter(tx);
+    }
+
+    /// How many snapshots are saved, of how many storage keeps, for the page's title band.
+    pub fn count(&self, k: &Kit) -> Option<El> {
+        self.loaded.then(|| {
+            text(format!(
+                "{} of {} saved",
+                self.entries.len(),
+                dupin_core::snapshots::MAX_ENTRIES
+            ))
+            .key("snapshot-count")
+            .font(k.ty.small)
+            .color(k.c.text_muted)
+        })
+    }
 }
 
-pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
-    let k = rune_theme_opencode::kit(cx.system_dark());
+/// What a snapshot holds, as the page names it.
+fn kind(saved: &Snapshot) -> &'static str {
+    if saved.mode == crate::features::calculator::CALCULATOR
+        || matches!(saved.views.first(), Some(dupin_core::View::Pair { .. }))
+    {
+        "Calculation"
+    } else if saved.mode.starts_with("extension.") || saved.mode.starts_with("extension-search.") {
+        "Extension view"
+    } else {
+        "Search"
+    }
+}
+
+/// Settings' Snapshots page: a search over the saved snapshots and their list on the left, the
+/// selected one's saved content and actions on the right.
+pub fn page(s: &Snapshots, k: &Kit, now: u64) -> El {
+    let c = &k.c;
     let mut list = col()
-        .w(240.0)
-        .h_full()
-        .gap(4.0)
+        .key("snapshot-list")
+        .role("list")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .gap(2.0)
         .scroll(ScrollSpec { stick_bottom: false });
-    let mut count = 0;
     for saved in s.filtered.iter().map(|&i| &s.entries[i]) {
-        count += 1;
         let id = saved.id.clone();
         let selected = s.selected.as_ref() == Some(&id);
         list = list.child(
             col()
-                .gap(4.0)
+                .key(format!("snapshot-{id}"))
+                .role("listitem")
+                .label(&saved.title)
+                .focusable(true)
+                .focus_selected(selected)
+                .focus_ring(2.0, 0.0, c.border_focus)
+                .w_full()
+                .px(10.0)
+                .py(8.0)
+                .gap(2.0)
+                .radius(k.radius.sm)
+                .hover(c.hover)
+                .press(c.pressed)
+                .fill(if selected { c.layer_02 } else { c.bg_base })
+                .on_press(move |p: &mut Prefs| {
+                    p.snapshots.open(&id);
+                })
                 .child(
                     text(&saved.title)
                         .font(k.ty.ui_medium)
-                        .color(k.c.text_base)
-                        .wrap(),
+                        .color(c.text_base)
+                        .truncate(),
                 )
                 .child(
-                    text(format!(
-                        "{} · {} · {}",
-                        source_name(&saved.mode),
-                        saved.query,
-                        saved_date(saved.saved_at)
-                    ))
-                    .font(k.ty.small)
-                    .color(k.c.text_muted)
-                    .wrap(),
-                )
-                .key(format!("snapshot-{id}"))
-                .label(&saved.title)
-                .padding(10.0)
-                .focus_selected(selected)
-                .hover(k.c.hover)
-                .fill(if selected { k.c.layer_02 } else { k.c.bg_base })
-                .on_press(move |s: &mut Snapshots| {
-                    s.open(&id);
-                }),
+                    row()
+                        .w_full()
+                        .gap(8.0)
+                        .child(text(kind(saved)).font(k.ty.small).color(c.text_muted).truncate())
+                        .child(el().grow(1.0))
+                        .child(
+                            text(saved_ago(now, saved.saved_at))
+                                .font(k.ty.small)
+                                .color(c.text_muted),
+                        ),
+                ),
         );
     }
-    if count == 0 {
+    if s.filtered.is_empty() && !s.query.text.is_empty() {
         list = list.child(
-            text(if s.archive_problem.as_deref().is_some() {
-                "Saved snapshots are unavailable until their encrypted storage can be opened."
-            } else {
-                if s.query.text.is_empty() {
-                    "No snapshots yet. Save a settled search with ⌘⇧S."
-                } else {
-                    "No matches for this search."
-                }
-            })
-            .wrap()
-            .color(k.c.text_muted),
-        );
-    }
-    let mut detail = col()
-        .grow(1.0)
-        .min_w(0.0)
-        .gap(12.0)
-        .scroll(ScrollSpec { stick_bottom: false });
-    if let Some(saved) = s
-        .selected
-        .as_deref()
-        .and_then(|id| s.entries.iter().find(|saved| saved.id == id))
-    {
-        let id = saved.id.clone();
-        let pending_delete = s.pending_delete.as_deref() == Some(id.as_str());
-        let delete_id = id.clone();
-        detail = detail
-            .child(
-                text("Historical snapshot · saved content")
-                    .font(k.ty.small)
-                    .color(k.c.text_muted),
-            )
-            .child(
-                text(&saved.title)
-                    .font(rune::TextStyle {
-                        size: 22.0,
-                        ..k.ty.ui_medium
-                    })
-                    .color(k.c.text_base)
-                    .wrap(),
-            )
-            .child(
-                text(format!(
-                    "{} · {} · Saved {}",
-                    source_name(&saved.mode),
-                    saved.query,
-                    saved_date(saved.saved_at)
-                ))
+            text("No matches for this search.")
+                .px(10.0)
+                .py(8.0)
                 .font(k.ty.small)
-                .color(k.c.text_muted)
-                .wrap(),
-            )
-            .child(
-                row()
-                    .gap(20.0)
-                    .child(
-                        button("Run again (⌘R)", k)
-                            .disabled(!s.sources.contains(&saved.mode))
-                            .color(k.c.text_base)
-                            .focusable(true)
-                            .on_press(|s: &mut Snapshots| s.resume()),
-                    )
-                    .child(
-                        button("Delete…", k)
-                            .color(k.c.text_base)
-                            .focusable(true)
-                            .on_press(move |s: &mut Snapshots| s.pending_delete = Some(delete_id.clone())),
-                    ),
-            )
-            .children((!s.sources.contains(&saved.mode)).then(|| {
-                text("Source unavailable. Saved content remains readable.")
-                    .font(k.ty.small)
-                    .color(k.c.text_muted)
-            }))
-            .children(pending_delete.then(|| {
-                col()
-                    .gap(8.0)
-                    .child(
-                        text("Delete this saved snapshot? This cannot be undone.")
-                            .wrap()
-                            .color(k.c.text_base),
-                    )
-                    .child(
-                        row()
-                            .gap(20.0)
-                            .child(
-                                button("Cancel", k)
-                                    .focusable(true)
-                                    .color(k.c.text_base)
-                                    .on_press(|s: &mut Snapshots| s.pending_delete = None),
-                            )
-                            .child(
-                                button("Delete snapshot", k)
-                                    .focusable(true)
-                                    .color(k.c.text_base)
-                                    .on_press(move |s: &mut Snapshots| s.delete(&id)),
-                            ),
-                    )
-            }))
-            .children(saved.views.iter().map(|view| {
-                let card = col().gap(6.0).padding(12.0).fill(k.c.layer_02);
-                match view {
-                    dupin_core::View::Text { title, subtitle } => card
-                        .child(
-                            text(title)
-                                .font(k.ty.ui_medium)
-                                .color(k.c.text_base)
-                                .wrap()
-                                .selectable(true),
-                        )
-                        .child(
-                            text(subtitle)
-                                .font(k.ty.small)
-                                .color(k.c.text_muted)
-                                .wrap()
-                                .selectable(true),
-                        ),
-                    dupin_core::View::Detail { title, body } => card
-                        .child(
-                            text(title)
-                                .font(k.ty.body_medium)
-                                .color(k.c.text_base)
-                                .wrap()
-                                .selectable(true),
-                        )
-                        .child(
-                            text(body)
-                                .font(k.ty.body)
-                                .color(k.c.text_base)
-                                .wrap()
-                                .selectable(true),
-                        ),
-                    dupin_core::View::Pair { source, result } => card
-                        .child(
-                            text(format!("{source} →"))
-                                .font(k.ty.small)
-                                .color(k.c.text_muted)
-                                .wrap()
-                                .selectable(true),
-                        )
-                        .child(
-                            text(result)
-                                .font(k.ty.body_medium)
-                                .color(k.c.text_base)
-                                .wrap()
-                                .selectable(true),
-                        ),
-                }
-            }));
-    } else {
-        detail = detail.child(
-            text("Select a snapshot to read its saved content.")
-                .color(k.c.text_muted)
+                .color(c.text_muted)
                 .wrap(),
         );
     }
-    col()
-        .w_full()
+    let left = col()
+        .key("snapshot-sidebar")
+        .w(LIST_WIDTH)
         .h_full()
-        .padding(24.0)
-        .gap(16.0)
-        .fill(k.c.bg_base)
+        .gap(8.0)
         .child(
-            text_input(&s.query, k.ty.body_medium)
+            text_input(&s.query, k.ty.ui)
                 .key("snapshot-search")
                 .label("Search saved snapshots")
                 .single_line()
-                .placeholder("Search titles and saved content", k.c.text_muted)
-                .color(k.c.text_base)
-                .on_edit(|s: &mut Snapshots| &mut s.query)
-                .on_input_change(Snapshots::filter)
-                .on_input_key(Snapshots::key),
+                .placeholder("Search snapshots", c.text_muted)
+                .color(c.text_base)
+                .px(8.0)
+                .py(6.0)
+                .radius(k.radius.sm)
+                .fill(c.layer_02)
+                .on_edit(|p: &mut Prefs| &mut p.snapshots.query)
+                .on_input_change(|p: &mut Prefs, tx: &mut Tx| p.snapshots.filter(tx))
+                .on_input_key(|p: &mut Prefs, ev: &KeyEvent, tx: &mut Tx| p.snapshots.key(ev, tx)),
         )
-        .children(
-            s.archive_problem
-                .as_deref()
-                .or(s.problem.as_deref())
-                .map(|p| text(p).color(k.c.text_base).wrap()),
+        .child(list);
+    row()
+        .key("snapshots")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .gap(20.0)
+        .child(left)
+        .child(detail(s, k))
+}
+
+fn detail(s: &Snapshots, k: &Kit) -> El {
+    let c = &k.c;
+    let mut detail = col()
+        .key("snapshot-detail")
+        .grow(1.0)
+        .min_w(0.0)
+        .h_full()
+        .gap(12.0)
+        .scroll(ScrollSpec { stick_bottom: false });
+    let problem = s.archive_problem.as_deref().or(s.problem.as_deref());
+    detail = detail.children(problem.map(|p| text(p).key("snapshot-problem").color(c.text_base).wrap()));
+    let Some(saved) = s
+        .selected
+        .as_deref()
+        .and_then(|id| s.entries.iter().find(|saved| saved.id == id))
+    else {
+        let (title, hint) = if s.archive_problem.is_some() {
+            (
+                "Snapshots are unavailable",
+                "Saved snapshots stay unreadable until their encrypted storage can be opened.",
+            )
+        } else if s.entries.is_empty() {
+            (
+                "No snapshots yet",
+                "Save a settled calculation, search or extension view with ⇧⌘S in the launcher.",
+            )
+        } else {
+            ("", "Select a snapshot.")
+        };
+        return detail.child(
+            col()
+                .key("snapshot-empty")
+                .w_full()
+                .grow(1.0)
+                .center()
+                .gap(6.0)
+                .children((!title.is_empty()).then(|| text(title).font(k.ty.body_medium).color(c.text_base)))
+                .child(text(hint).font(k.ty.small).color(c.text_muted).wrap()),
+        );
+    };
+    let id = saved.id.clone();
+    let available = s.available(&saved.mode);
+    let pending_delete = s.pending_delete.as_deref() == Some(id.as_str());
+    let delete_id = id.clone();
+    detail
+        .child(
+            text("Historical snapshot · saved content")
+                .font(k.ty.small)
+                .color(c.text_muted),
         )
-        .child(row().grow(1.0).min_h(0.0).gap(24.0).child(list).child(detail))
+        .child(
+            text(&saved.title)
+                .font(rune::TextStyle {
+                    size: 20.0,
+                    ..k.ty.ui_medium
+                })
+                .color(c.text_base)
+                .wrap()
+                .selectable(true),
+        )
+        .child(
+            text(format!(
+                "{} · {} · {} · Saved {}",
+                kind(saved),
+                source_name(&saved.mode),
+                saved.query,
+                saved_date(saved.saved_at)
+            ))
+            .font(k.ty.small)
+            .color(c.text_muted)
+            .wrap(),
+        )
+        .child(
+            row()
+                .gap(8.0)
+                .center_y()
+                .child(
+                    button("Open in Panel", rune_kit::ButtonVariant::Submit, !available, k)
+                        .on_press(|p: &mut Prefs| p.snapshots.resume()),
+                )
+                .child(
+                    button("Copy", rune_kit::ButtonVariant::Neutral, false, k)
+                        .on_press_tx(|p: &mut Prefs, tx: &mut Tx| p.snapshots.copy(tx)),
+                )
+                .child(
+                    button("Delete…", rune_kit::ButtonVariant::Neutral, false, k)
+                        .on_press(move |p: &mut Prefs| p.snapshots.pending_delete = Some(delete_id.clone())),
+                )
+                .children((s.copied.as_deref() == Some(id.as_str())).then(|| {
+                    text("Copied")
+                        .key("snapshot-copied")
+                        .font(k.ty.small)
+                        .color(c.text_muted)
+                })),
+        )
+        .children((!available).then(|| {
+            text("Source unavailable. Saved content remains readable.")
+                .font(k.ty.small)
+                .color(c.text_muted)
+        }))
+        .children(pending_delete.then(|| {
+            col()
+                .gap(8.0)
+                .child(
+                    text("Delete this saved snapshot? This cannot be undone.")
+                        .wrap()
+                        .color(c.text_base),
+                )
+                .child(
+                    row()
+                        .gap(8.0)
+                        .child(
+                            button("Cancel", rune_kit::ButtonVariant::Neutral, false, k)
+                                .on_press(|p: &mut Prefs| p.snapshots.pending_delete = None),
+                        )
+                        .child(
+                            button("Delete snapshot", rune_kit::ButtonVariant::Neutral, false, k)
+                                .on_press(move |p: &mut Prefs| p.snapshots.delete(&id)),
+                        ),
+                )
+        }))
+        .children(saved_views(&saved.views, k))
+}
+
+/// A snapshot's saved views as cards, as they were shown when it was saved.
+fn saved_views<'a>(views: &'a [dupin_core::View], k: &'a Kit) -> impl Iterator<Item = El> + 'a {
+    views.iter().map(|view| {
+        let card = col()
+            .w_full()
+            .gap(6.0)
+            .padding(12.0)
+            .radius(k.radius.sm)
+            .fill(k.c.layer_02);
+        match view {
+            dupin_core::View::Text { title, subtitle } => card
+                .child(
+                    text(title)
+                        .font(k.ty.ui_medium)
+                        .color(k.c.text_base)
+                        .wrap()
+                        .selectable(true),
+                )
+                .child(
+                    text(subtitle)
+                        .font(k.ty.small)
+                        .color(k.c.text_muted)
+                        .wrap()
+                        .selectable(true),
+                ),
+            dupin_core::View::Detail { title, body } => card
+                .child(
+                    text(title)
+                        .font(k.ty.body_medium)
+                        .color(k.c.text_base)
+                        .wrap()
+                        .selectable(true),
+                )
+                .child(
+                    text(body)
+                        .font(k.ty.body)
+                        .color(k.c.text_base)
+                        .wrap()
+                        .selectable(true),
+                ),
+            dupin_core::View::Pair { source, result } => card
+                .child(
+                    text(format!("{source} →"))
+                        .font(k.ty.small)
+                        .color(k.c.text_muted)
+                        .wrap()
+                        .selectable(true),
+                )
+                .child(
+                    text(result)
+                        .font(k.ty.body_medium)
+                        .color(k.c.text_base)
+                        .wrap()
+                        .selectable(true),
+                ),
+        }
+    })
+}
+
+/// A snapshot's saved views as plain text, one paragraph each, for the clipboard.
+fn plain_text(views: &[dupin_core::View]) -> String {
+    views
+        .iter()
+        .map(|view| match view {
+            dupin_core::View::Text { title, subtitle } if subtitle.is_empty() => title.clone(),
+            dupin_core::View::Text { title, subtitle } => format!("{title}\n{subtitle}"),
+            dupin_core::View::Detail { title, body } => format!("{title}\n{body}"),
+            dupin_core::View::Pair { source, result } => format!("{source} → {result}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 enum Request {
@@ -477,7 +597,7 @@ enum Request {
 
 fn publish(
     store: &Store,
-    me: &AppHandle<Snapshots>,
+    prefs: &AppHandle<Prefs>,
     result: Option<Result<Option<String>, String>>,
     cache: &mut std::collections::HashMap<String, String>,
 ) {
@@ -500,7 +620,8 @@ fn publish(
         .collect();
     let problem = store.problem().map(str::to_owned);
     listing().list(&entries);
-    me.update(move |s, tx| {
+    prefs.update(move |prefs, tx| {
+        let s = &mut prefs.snapshots;
         s.loaded = true;
         s.entries = entries;
         s.search = search;
@@ -557,7 +678,7 @@ fn summaries(entries: &[Snapshot], problem: Option<String>, budget: usize) -> cr
     list
 }
 
-/// What the Snapshots window shows of one snapshot: its metadata and visible views, never its
+/// What the Snapshots page shows of one snapshot: its metadata and visible views, never its
 /// resume state. Views that would not fit in `budget` bytes are left out and counted.
 fn content(entry: &Snapshot, budget: usize) -> serde_json::Value {
     let mut value = serde_json::json!({
@@ -589,8 +710,8 @@ fn content(entry: &Snapshot, budget: usize) -> serde_json::Value {
 }
 
 /// What the `snap` keyword lists: each saved snapshot's metadata, newest first, as the
-/// window last loaded it, and the commands a snapshot may resume. Only the metadata the
-/// window's own list shows is kept here, never saved content.
+/// Snapshots page last loaded it, and the commands a snapshot may resume. Only the metadata the
+/// page's own list shows is kept here, never saved content.
 pub struct Listing {
     entries: Option<Vec<crate::control::SnapshotSummary>>,
     pub sources: Vec<String>,
@@ -601,13 +722,13 @@ impl Listing {
         self.entries = Some(summaries(saved, None, usize::MAX).entries);
     }
 
-    /// The saved snapshots, as [`read_listing`] or the Snapshots window last left them.
+    /// The saved snapshots, as [`read_listing`] or the Snapshots page last left them.
     pub fn entries(&self) -> &[crate::control::SnapshotSummary] {
         self.entries.as_deref().unwrap_or_default()
     }
 }
 
-/// Reads the saved snapshots' metadata from the store if the Snapshots window hasn't yet. It
+/// Reads the saved snapshots' metadata from the store if the Snapshots page hasn't yet. It
 /// takes the store's lock and the listing's one after the other, never together, since the
 /// writer takes them in the other order.
 pub fn read_listing() {
@@ -629,6 +750,7 @@ pub fn listing() -> std::sync::MutexGuard<'static, Listing> {
 pub fn source_name(mode: &str) -> &str {
     match mode {
         "apps.search" => "Applications",
+        "calculator.evaluate" => "Calculator",
         "files.names" => "Files",
         "files.contents" => "File contents",
         "dictionary.lookup" => "Dictionary",
@@ -638,15 +760,22 @@ pub fn source_name(mode: &str) -> &str {
     }
 }
 
-fn button(label: &str, k: &rune_kit::Kit) -> El {
+fn button(label: &str, variant: rune_kit::ButtonVariant, disabled: bool, k: &Kit) -> El {
     rune_kit::Button::new(label)
-        .variant(if label.starts_with("Run again") {
-            rune_kit::ButtonVariant::Submit
-        } else {
-            rune_kit::ButtonVariant::Neutral
-        })
+        .variant(variant)
+        .disabled(disabled)
         .build(k)
         .key(label)
+}
+
+/// How long before `now` the Unix second `then` was, as the page's list says it: relative within
+/// a week, else the day.
+pub fn saved_ago(now: u64, then: u64) -> String {
+    match now.saturating_sub(then) {
+        0..60 => "Just now".into(),
+        elapsed @ 60..604_800 => dupin_core::ago_ms(elapsed * 1000, 0),
+        _ => saved_date(then).split(' ').next().unwrap_or_default().to_owned(),
+    }
 }
 
 pub fn saved_date(seconds: u64) -> String {
@@ -689,16 +818,6 @@ fn write_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn snapshot_handle() -> AppHandle<Snapshots> {
-        rune::App::new(rune::AppSpec::new(
-            "snapshots",
-            (900.0, 600.0),
-            || unreachable!(),
-            view,
-        ))
-        .handle()
-    }
 
     fn saved(id: &str, saved_at: u64) -> Snapshot {
         Snapshot {
@@ -814,9 +933,8 @@ mod tests {
         .handle();
         let (writer, received) = std::sync::mpsc::channel();
         let mut s = Snapshots {
-            me: snapshot_handle(),
             loaded: false,
-            sources: vec![],
+            sources: None,
             entries: vec![saved("other", 2), saved("saved", 1)],
             filtered: vec![0, 1],
             search: vec!["query".into(), "query".into()],
@@ -825,6 +943,7 @@ mod tests {
             query: TextEdit::new("query"),
             selected: Some("other".into()),
             pending_delete: Some("other".into()),
+            copied: None,
             problem: None,
             panel,
             running: Default::default(),
@@ -904,103 +1023,7 @@ mod tests {
         assert!(s.query.text.is_empty());
         assert!(s.pending_delete.is_none());
 
-        let (call, reply) = request(Command::SnapshotsClose {});
-        s.control_close(call);
-        assert_eq!(reply.recv().unwrap().result.unwrap(), serde_json::Value::Null);
-        assert_eq!(s.selected.as_deref(), Some("saved"));
         assert!(received.try_recv().is_err());
-    }
-
-    #[test]
-    #[ignore = "offscreen screenshot, run explicitly"]
-    fn render_saved_content() {
-        let panel = rune::App::new(rune::AppSpec::new(
-            "panel",
-            (1.0, 1.0),
-            || unreachable!(),
-            crate::view::view,
-        ))
-        .handle();
-        let (writer, received) = std::sync::mpsc::channel();
-        let saved = Snapshot {
-            version: 1,
-            id: "fixture".into(),
-            saved_at: 1795392000,
-            mode: "apps.search".into(),
-            explicit: false,
-            query: "2 + 2".into(),
-            title: "A saved calculation".into(),
-            views: vec![
-                dupin_core::View::Pair {
-                    source: "2 + 2".into(),
-                    result: "4".into(),
-                },
-                dupin_core::View::Detail {
-                    title: "Historical content".into(),
-                    body: "Saved results remain readable without reopening an application.".into(),
-                },
-                dupin_core::View::Text {
-                    title: "Serendipity · 偶然の発見".into(),
-                    subtitle: "A saved definition".into(),
-                },
-            ],
-            state: None,
-        };
-        let search = vec![saved.search_text()];
-        let state = Snapshots {
-            me: snapshot_handle(),
-            loaded: true,
-            sources: vec!["apps.search".into()],
-            entries: vec![saved],
-            filtered: vec![0],
-            search,
-            writer,
-            archive_problem: None,
-            query: TextEdit::new(""),
-            selected: Some("fixture".into()),
-            pending_delete: None,
-            problem: None,
-            panel,
-            running: Default::default(),
-        };
-        let app = rune::App::new(rune::AppSpec::new(
-            "Snapshots",
-            (900.0, 600.0),
-            || unreachable!(),
-            view,
-        ))
-        .init(move || state);
-        let script = std::env::temp_dir().join(format!("dupin-snapshot-keys-{}.json", std::process::id()));
-        std::fs::write(
-            &script,
-            r#"{"events":[
-            {"t":0.1,"type":"click","key":"snapshot-search"},
-            {"t":0.2,"type":"type","text":"2"},
-            {"t":0.4,"type":"key","name":"Backspace","cmd":true},
-            {"t":0.6,"type":"click","key":"Delete…"},
-            {"t":0.8,"type":"click","key":"Cancel"}
-        ]}"#,
-        )
-        .unwrap();
-        rune::tooling::run_windows_with_args(
-            Default::default(),
-            [
-                "render",
-                "--snap",
-                "/tmp/dupin-snapshots-after.png",
-                "--theme",
-                "dark",
-                "--script",
-                script.to_str().unwrap(),
-            ]
-            .map(str::to_owned),
-            move |_| [rune::WindowSpec::from_app("snapshots", app)],
-        );
-        assert!(
-            received.try_recv().is_err(),
-            "search editing and cancellation must not write or delete"
-        );
-        std::fs::remove_file(script).unwrap();
     }
 
     #[test]
@@ -1111,6 +1134,44 @@ mod tests {
     }
 
     #[test]
+    fn the_page_names_each_kind_says_when_and_copies_plain_text() {
+        let mut calculation = saved("sum", 1);
+        calculation.views = vec![dupin_core::View::Pair {
+            source: "2 + 2".into(),
+            result: "4".into(),
+        }];
+        let mut extension = saved("words", 1);
+        extension.mode = "extension.word-count".into();
+        assert_eq!(kind(&calculation), "Calculation");
+        assert_eq!(kind(&extension), "Extension view");
+        assert_eq!(kind(&saved("apps", 1)), "Search");
+
+        let now = 1_795_746_000;
+        assert_eq!(saved_ago(now, now - 5), "Just now");
+        assert_eq!(saved_ago(now, now - 3 * 60), "3 min ago");
+        assert_eq!(saved_ago(now, now - 2 * 86_400), "2 d ago");
+        assert_eq!(saved_ago(now, 1_795_082_400), "2026-11-19");
+
+        assert_eq!(
+            plain_text(&[
+                dupin_core::View::Pair {
+                    source: "2 + 2".into(),
+                    result: "4".into(),
+                },
+                dupin_core::View::Text {
+                    title: "Title".into(),
+                    subtitle: String::new(),
+                },
+                dupin_core::View::Detail {
+                    title: "Word".into(),
+                    body: "Meaning".into(),
+                },
+            ]),
+            "2 + 2 → 4\n\nTitle\n\nWord\nMeaning"
+        );
+    }
+
+    #[test]
     fn unavailable_writer_releases_pending_work() {
         let running = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let (send, receive) = std::sync::mpsc::channel();
@@ -1131,9 +1192,8 @@ mod tests {
         .handle();
         let (writer, received) = std::sync::mpsc::channel();
         let mut s = Snapshots {
-            me: snapshot_handle(),
             loaded: true,
-            sources: vec![],
+            sources: None,
             entries: vec![],
             filtered: vec![],
             search: vec![],
@@ -1142,6 +1202,7 @@ mod tests {
             query: TextEdit::new("query"),
             selected: Some("saved".into()),
             pending_delete: Some("saved".into()),
+            copied: None,
             problem: None,
             panel,
             running: Default::default(),

@@ -22,7 +22,7 @@ jobs:
   # The flake only targets aarch64-darwin, so even these evaluate on macOS.
   check:
     # Apple silicon (M4); Dupin targets nothing else. Labels: docs.blacksmith.sh, "Instance Types".
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,16 +31,20 @@ jobs:
 
       - uses: ./.github/actions/setup-nix-cache
 
-      # Every flake check except the Rust builds below, so a new quick check lands here.
+      # Every flake check except those that need the Rust builds, which build runs, so a new
+      # quick check lands here.
       - run: |
           read -ra checks <<<"$(nix eval --raw .#checks.aarch64-darwin --apply '
             checks: toString (map (name: ".#checks.aarch64-darwin." + name)
-              (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" ])))')"
+              (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" "bundled-extension-scopes" ])))')"
           nix build --no-link "${checks[@]}"
 
-  # A pull request that only touches website/ or telemetry/ cannot change the app, so build and
-  # e2e skip; skipped jobs still satisfy required checks, which paths-ignore would not. The
-  # collector's ping schema is the exception: dupin-telemetry's test holds it to the Rust type.
+  # A pull request that only touches prose (docs/, experiments/, the top-level Markdown files) or
+  # website/ cannot change the app or the collector: no Nix build reads them (package.nix's
+  # filesets name what the Rust builds see) and neither do CI's scripts, so the Rust jobs and
+  # telemetry skip. telemetry/ alone skips the Rust jobs, except the collector's ping schema,
+  # which dupin-telemetry's test holds to the Rust type. Skipped jobs still satisfy required
+  # checks, which paths-ignore would not. Any other path, CI's own files included, runs both.
   changes:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -50,36 +54,46 @@ jobs:
       actions: read
     outputs:
       app: ${{ steps.diff.outputs.app }}
+      telemetry: ${{ steps.diff.outputs.telemetry }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-nix-cache
       - id: diff
-        name: Decide whether the app could have changed
+        name: Decide whether the app or the collector could have changed
         shell: nix shell --inputs-from . nixpkgs#nushell --command nu {0}
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          let app = if $env.EVENT != 'pull_request' {
-            true
-          } else {
-            # A rename counts by both paths, so moving a file into website/ still builds.
+          let paths = if $env.EVENT == 'pull_request' {
+            # A rename counts by both paths, so moving a file into docs/ still builds.
             (gh api --paginate $"repos/($env.GITHUB_REPOSITORY)/pulls/($env.PR)/files"
               --jq '.[] | .filename, (.previous_filename // empty)')
             | lines
-            | any {|path|
-              let web = ($path | str starts-with 'website/') or ($path | str starts-with 'telemetry/')
-              (not $web) or ($path == 'telemetry/src/v1/ping-schema.gen.ts')
-            }
           }
-          $"app=($app)\n" | save --append $env.GITHUB_OUTPUT
+          def prose []: string -> bool {
+            let path = $in
+            let prose_dir = ['website/' 'docs/' 'experiments/'] | any {|dir| $path | str starts-with $dir }
+            let top_markdown = ($path | str ends-with '.md') and not ($path | str contains '/')
+            $prose_dir or $top_markdown
+          }
+          def collector []: string -> bool {
+            let path = $in
+            ($path | str starts-with 'telemetry/') and $path != 'telemetry/src/v1/ping-schema.gen.ts'
+          }
+          # Anything but a pull request (a push to main, a dispatch) runs everything.
+          let app = $paths == null or ($paths | any {|path| not (($path | prose) or ($path | collector)) })
+          let telemetry = $paths == null or ($paths | any {|path| not ($path | prose) })
+          $"app=($app)\ntelemetry=($telemetry)\n" | save --append $env.GITHUB_OUTPUT
 
   # The collector Worker in telemetry/: its tests, type check and build, which need no Mac.
   telemetry:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    needs: changes
+    if: needs.changes.outputs.telemetry == 'true'
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +108,7 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -103,8 +117,11 @@ jobs:
 
       - uses: ./.github/actions/setup-nix-cache
 
-      # Clippy, tests, Hawk's analysis toolchain and the release app bundle.
-      - run: nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.hawk .#checks.aarch64-darwin.dupin
+      # Clippy, tests, Hawk's analysis toolchain, the release app bundle and the scopes its
+      # bundled extensions declare.
+      - run: >-
+          nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.hawk
+          .#checks.aarch64-darwin.dupin .#checks.aarch64-darwin.bundled-extension-scopes
 
       # The bundle is already in the store. tar keeps its executable bits, which
       # upload-artifact drops.
@@ -149,7 +166,7 @@ jobs:
   extension-host:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -184,7 +201,7 @@ jobs:
   search-quality:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -220,28 +237,14 @@ jobs:
           nu --no-config-file scripts/search-quality.nu report "$RUNNER_TEMP/search-quality/results.json"
           --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
 
-  # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
-  # a required check, so e2e runs whenever the app could have changed and fails itself when the
-  # build, the extension host tests, the latency parity check or the search-quality benchmark
-  # did.
-  e2e:
-    needs: [changes, build, extension-host, latency, search-quality]
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
-    runs-on: blacksmith-6vcpu-macos-latest
+  # Drives the built app. It needs only build's Dupin.app, so it runs beside latency, the longest
+  # job, instead of after it.
+  e2e-tests:
+    needs: [changes, build]
+    if: needs.changes.outputs.app == 'true'
+    runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 20
     steps:
-      - name: Require the build, the extension host tests, latency parity and search quality
-        if: >-
-          needs.build.result != 'success' || needs.extension-host.result != 'success' ||
-          needs.latency.result != 'success' || needs.search-quality.result != 'success'
-        env:
-          BUILD: ${{ needs.build.result }}
-          EXTENSION_HOST: ${{ needs.extension-host.result }}
-          LATENCY: ${{ needs.latency.result }}
-          SEARCH_QUALITY: ${{ needs.search-quality.result }}
-        run: |
-          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY, search-quality: $SEARCH_QUALITY"
-          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -249,3 +252,28 @@ jobs:
       - uses: ./.github/actions/e2e
         with:
           artifact: Dupin.app
+
+  # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
+  # a required check, so e2e runs whenever the app could have changed and fails itself unless the
+  # build, the extension host tests, the latency parity check, the search-quality benchmark and
+  # the E2E tests all passed.
+  e2e:
+    needs: [changes, build, extension-host, latency, search-quality, e2e-tests]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Require the build, the extension host tests, latency parity, search quality and E2E
+        if: >-
+          needs.build.result != 'success' || needs.extension-host.result != 'success' ||
+          needs.latency.result != 'success' || needs.search-quality.result != 'success' ||
+          needs.e2e-tests.result != 'success'
+        env:
+          BUILD: ${{ needs.build.result }}
+          EXTENSION_HOST: ${{ needs.extension-host.result }}
+          LATENCY: ${{ needs.latency.result }}
+          SEARCH_QUALITY: ${{ needs.search-quality.result }}
+          E2E_TESTS: ${{ needs.e2e-tests.result }}
+        run: |
+          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY, search-quality: $SEARCH_QUALITY, e2e-tests: $E2E_TESTS"
+          exit 1

@@ -34,6 +34,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
+Dev builds keep full debug info for the workspace's own crates only; dependencies carry line tables, so backtraces still name their files and lines. To profile, build with `cargo build -p dupin --profile profiling`: the release build's code, with full debug info and its symbols kept, in `target/profiling/dupin`.
+
 For rebuild times and the sccache decision, see [Build caching](#build-caching).
 
 ## Remote development with Testbox
@@ -42,6 +44,23 @@ The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
 `testbox-dev.yml` workflow compiles native test dependencies on a disposable Apple
 silicon runner, then keeps it available for commands. It follows ccusage's
 Testbox setup and uses the same macOS runner and Nix setup as CI.
+
+CI jobs that do any real work (build, test, lint, format, record) run on the largest
+Blacksmith instance for their OS; jobs that only post comments may use `ubuntu-slim`. Check
+https://docs.blacksmith.sh when adding a job or when Blacksmith adds larger runners.
+On macOS that is `blacksmith-12vcpu-macos-26`, not the same-sized macOS 27 runner, because
+27 is slower per core. At one commit and one cache state, CI's `build` job took 9–14% longer on
+12 vCPU macOS 27 than on 26, the release build's fat LTO step 12–17% longer and the
+extension-host test build 18–19% longer. `latency`'s parity does not hold on 27 either, but
+not because extensions are slower there: on 12 vCPU runners an extension's whole host call
+(the socket, the sandboxed helper, QuickJS and the host service) took 560–653 µs at p95 on 27
+and 639–675 µs on 26. A headless run takes a delivery only when its next frame starts, and
+rune paces those frames with `thread::sleep`, whose sub-millisecond wake-ups on the 27 runners
+are late by anything from 0 to 1.1 ms where on 26 they are late by a nearly constant 0.9–1 ms.
+That jitter lands in `merge_ms`, so it widens the p95 of scenarios whose own work is short, as
+the extensions' is, more than the native `search` control's, and the control's scale can't
+absorb it ([Keypress latency](#keypress-latency)). A window wakes on the delivery instead, so
+this is the benchmark's, not the app's. Measure again before moving to a newer macOS.
 
 After this workflow is available on the repository's default branch, start a box
 from the root of the worktree you want to test:
@@ -112,12 +131,12 @@ nix shell --inputs-from . nixpkgs#nushell nixpkgs#cargo --command nu scripts/upd
 ## Build caching
 
 The [crate boundary experiment](../experiments/crate-boundaries/README.md)
-times representative edits. On a 6-CPU Testbox, an incremental `cargo build -p
-dupin` after editing a UI file, `dupin-core`'s session code or `dupin-mac` takes
-1.8–2.5 seconds, `cargo test --workspace --no-run` 1.8–3.0 and `cargo clippy`
-0.8–1.5. A docs-only edit rebuilds nothing. Alternating `build`, `test` and
+times representative edits. On the 12-CPU macOS 27 Testbox, an incremental
+`cargo build -p dupin` after editing a UI file, `dupin-core`'s session code or
+`dupin-mac` takes 2.8–3.6 seconds, `cargo test --workspace --no-run` 3.1–4.9 and
+`cargo clippy` 1.4–2.8. A docs-only edit rebuilds nothing. Alternating `build`, `test` and
 `clippy` rebuilds nothing either, so no feature difference between them
-forces rebuilds. A release build takes 79–92 seconds whichever crate changed,
+forces rebuilds. A release build takes 126–129 seconds whichever crate changed,
 because fat LTO recompiles the whole program. These numbers justify no
 crate split: editing the `dupin` crate already costs the least. New crates
 should stay leaves that depend on `serde` and `libc`, as the extension crates
@@ -130,21 +149,19 @@ manifest changed, and 16–18 seconds when everything came from the cache. 17
 runs could not download a path that the Hestia manifest still listed, because
 its pack had been evicted from the cache; nine of them rebuilt the app for a
 change that touched no Rust. Each `Cargo.lock` change stores about 1 GB of
-compiled dependencies. On the Testbox, the same step after a UI edit takes 107
-seconds instead of 142 now that Hawk reuses its dependencies, and the three
-dependency outputs that step builds together hold 1.03 GB (debug 353 MB,
-release 343 MB, Hawk 338 MB), where the debug output alone held 662 MB with
-debug info.
+compiled dependencies. On the 12-CPU Testbox, the same step after a UI edit
+takes 163 seconds, and the three dependency outputs that step builds together
+hold 1.19 GB (debug 406 MB, release 384 MB, Hawk 401 MB).
 
 sccache is not configured for local builds or CI. Cargo builds workspace
 crates incrementally in the dev profile, which sccache cannot cache, and those
 crates are all that an edit rebuilds. It can only replay third-party crates in
 a fresh target directory. In the
-[Cargo cache experiment](../experiments/cargo-cache/README.md) on the Testbox,
-a warm cache built a fresh target at a new path, as a new worktree has, in 46.5
-seconds against 48.8–49.5 without it, and a cold cache cost 1.2 seconds more.
-It only pays when a removed target is rebuilt at the same path: 18.1 seconds
-against 47.5. CI compiles through Nix, which caches whole dependency outputs
+[Cargo cache experiment](../experiments/cargo-cache/README.md) on the 12-CPU
+Testbox, a warm cache built a fresh target at a new path, as a new worktree has,
+in 47.5 seconds against 47.0–47.4 without it, and a cold cache cost 6.8 seconds
+more. It only pays when a removed target is rebuilt at the same path: 21.9
+seconds against 47.3. CI compiles through Nix, which caches whole dependency outputs
 instead. The development shell does not include sccache. A developer who often
 deletes and rebuilds the same target directory can run it from nixpkgs without
 installing it:
@@ -157,6 +174,8 @@ RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
 ## Formatting
 
 `nix fmt` runs treefmt with nixfmt, deadnix and statix for Nix, rustfmt, oxfmt (configured in `.oxfmtrc.json`) for JSON, YAML, TOML and Markdown, nufmt for Nushell, typos (`typos.toml`; it only reports, since a typo's fix needs a person), and actionlint and zizmor for the workflows. `nix flake check` fails on anything left unformatted.
+
+Entering the development shell installs Git hooks (`nix/git-hooks.nix`, run by prek): treefmt and `gitleaks protect` on each commit, and `treefmt --fail-on-change` and `gitleaks detect` on each push. The hooks and their config live in the repository's common Git directory, so one shell entry from any worktree covers every worktree of the clone, including those created later with `git worktree add`. Never skip them with `PREK_ALLOW_NO_CONFIG` or `--no-verify`; if a commit reports a missing config, enter the development shell once.
 
 On every pull request, the `autofix.ci` workflow runs `nix fmt` after the [Rune step](#rune-updates), and autofix.ci commits both fixes in one commit, so unformatted files come back formatted instead of failing CI. The flake targets only aarch64-darwin, but it exports the same treefmt configuration as `formatter.x86_64-linux`, so the workflow runs on a cheap Linux runner. The `treefmt` check in CI still fails where autofix.ci can't commit, such as a pull request from a fork that hasn't installed the app, and on what the formatters report but can't fix, such as a typo, an actionlint error or a zizmor finding. The workflow also runs on every push to `main`, without formatting or committing anything, because Blacksmith saves the job's Nix store only from `main`; without it, every pull request would download the formatter, Nushell and cargo again.
 
@@ -172,6 +191,8 @@ nu scripts/render.nu --only calendar --theme dark # one scenario, in one appeara
 
 `--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead, and clipboard scenarios the history in `scripts/fixtures/clipboard.json`, or a scenario's own in `<name>.clipboard/history.json`, whose `image` entries name PNG files beside it. A scenario with a `<name>.snapshots/snapshots.json`, a list of snapshots, starts with them saved in scratch storage. A scenario with a `<name>.home/` folder runs with a copy of it as its home: apps in its `Applications` folder are found like any other, and its `Library/Application Support/Dupin/history.json` is the usage history, where `$HOME` in an app's path stands for the copy's path. A scenario's own snapshots, clipboard history, extensions, grants and home are read only beside its own `<name>.toml`. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
+Screenshots for a PR: reference local files in the body and pass them with `gh pr create/edit --attach`; never commit them. gh rewrites only Markdown references (`![alt](./shot.png)`), not an HTML `<img src>`.
+
 ## Documentation site
 
 dupin.app/docs is this folder, rendered when the website builds (`just website::build`): `website/src/docs/pages.ts` lists the pages it publishes, by section, and ox-content renders each one and indexes `docs/` for the site's search. A link to another published page goes to its page on the site, and a link to anything else, such as this page, a design document or `extensions/`, goes to GitHub. Add a new user-facing page to `pages.ts`; pages for people working on Dupin stay on GitHub only.
@@ -180,7 +201,7 @@ dupin.app/docs is this folder, rendered when the website builds (`just website::
 
 The images in `docs/images` are rendered, never taken by hand. `scripts/docs-images/images.toml` lists each one; `just docs-images` (`nu scripts/docs-images.nu` after `cargo build -p dupin`) renders every one in light and dark to `docs/images/<page>/<name>-<theme>.png`, compresses them losslessly with oxipng and deletes the images the list no longer has. `--only <text>` renders just the images whose `<page>/<name>` contains it. Re-run it after a change to anything an image shows, and commit the result.
 
-Every image comes from fixtures, so a render on any Mac shows nothing of that Mac's: a bundled or example extension's own fixture through `dupin ext render`, or a headless scenario run in a scratch home that holds the fixture documents and usage history the list names, with the fixture clipboard history and snapshots, and with `DUPIN_HEADLESS_APPS=/System/Applications`. A headless run takes that `PATH`-style list in place of the app folders, so it lists only the stock apps; `dupin ext render` sets it empty. Spotlight indexes nothing in a scratch home, and on some Macs not even a fresh disk image, so no image shows a Spotlight search: the file images start from Recent items. Settings pages are drawn from the `prefs` window (`--window prefs`).
+Every image comes from fixtures, so a render on any Mac shows nothing of that Mac's: a bundled or example extension's own fixture through `dupin ext render`, or a headless scenario run in a scratch home that holds the fixture documents and usage history the list names, with the fixture clipboard history and snapshots, and with `DUPIN_HEADLESS_APPS=/System/Applications`. A headless run takes that `PATH`-style list in place of the app folders, so it lists only the stock apps; `dupin ext render` sets it empty. It treats as running only the app bundles `DUPIN_HEADLESS_RUNNING` lists the same way, none without it, so an action offered only while its app runs shows the same on every Mac. Neither inherits the shell's environment: each run gets only the variables it is given, so one set on the rendering Mac, such as `DO_NOT_TRACK`, changes nothing drawn. Spotlight indexes nothing in a scratch home, and on some Macs not even a fresh disk image, so no image shows a Spotlight search: the file images start from Recent items. Settings pages are drawn from the `prefs` window (`--window prefs`).
 
 A page embeds an image as a `<picture>` whose `prefers-color-scheme: dark` source is the dark image, so GitHub shows the one matching the reader's theme:
 
@@ -206,17 +227,17 @@ The same list's `[[clips]]` are short recordings: each plays its `steps` (typed 
 
 Animated WebP, not video, because the same Markdown is read on GitHub, which shows a `<video>` only for files uploaded to an issue or pull request, never one in the repository; GitHub shows an animated WebP as an image, and so does every current browser, without a player or autoplay rules. A clip must never type into a Spotlight search (Space on an empty query, or `in`), since Spotlight answers from the rendering Mac's own index; the files clips start from Recent items and folder browsing instead, which read only the scratch home.
 
-The website's home page plays clips of its own, on page `home`: one per tab of its demo (Apps, Files, In files, Dictionary, Keywords and Clipboard) over Liquid Glass, and the Apps tab again over each backdrop shader (`apps-flow`, `apps-aurora` and so on) for its backdrop switcher. Every tab over every shader would be six times the bytes for the same point. A page outside GitHub can play video, and a [backdrop shader](./features/shaders.md) changes every pixel of every frame, where an animated WebP is several times larger than a video, so these set `video = true`: `ffmpeg` encodes the frames over the page's black (`background`) as an H.264 MP4, and the last frame is saved as `<name>-<theme>-poster.webp`, which the page shows before the video plays and in its place under reduced motion. `themes = ["dark"]` renders only the theme the site uses, `scale` sets the scale (2, so their text stays sharp on a Retina screen), `backdrop` names the shader as `config.toml` would (the example shaders are in the scratch configuration's `shaders` folder), and `captions = false` leaves the captions off. The website names each file at the path it serves it from (`/docs/images/home/apps-dark.mp4`), and `check` counts those as embeds.
+The website's home page plays clips of its own, on page `home`: one per tab of its demo (Apps, Files, In files, Dictionary, Keywords and Clipboard) over Liquid Glass. A page outside GitHub can play video, which takes a fraction of an animated WebP's bytes for a backdrop that changes every pixel of every frame, so these set `video = true`: `ffmpeg` encodes the frames over the page's black (`background`) as an H.264 MP4, and the last frame is saved as `<name>-<theme>-poster.webp`, which the page shows before the video plays and in its place under reduced motion. `themes = ["dark"]` renders only the theme the site uses, `scale` sets the scale (2, so their text stays sharp on a Retina screen), `backdrop` names the shader a headless stand-in is drawn over, as `config.toml` would, and `captions = false` leaves the captions off. The website names each file at the path it serves it from (`/docs/images/home/apps-dark.mp4`), and `check` counts those as embeds.
 
 ### Liquid Glass clips
 
-A headless render draws Liquid Glass as an opaque fallback, since there is no desktop behind it to refract, so the clips marked `glass = true` are recorded from the real app instead. `just docs-glass` (`nu scripts/docs-glass.nu --app result/Applications/Dupin.app` after `nix build .#dupin`) needs macOS 26 or later in Dark mode, and a terminal already allowed Screen Recording and Accessibility; it never asks for either. For each clip it starts the bundle's `dupin` as an instance of its own, with the scratch home and configuration the headless clips use, no hotkey (so a Dupin already running keeps its own) and its own `XDG_RUNTIME_DIR`; covers the screens with a borderless window showing the wallpaper, so the desktop picture is never changed; records the screen with ffmpeg; opens the panel with `dupin open`; presses the clip's steps at their times through System Events; and cuts the recording to the panel and the wallpaper around it, with the same captions below, to the files `just docs-clips` would render. Its log, scratch home and raw recording stay in `target/docs-glass` until the next run. Apps are the Mac's own, so record on a Mac with only stock apps, or on CI. Two tabs aren't `glass`: Clipboard, since the real app records a copy only once macOS lets it read the clipboard in the background, a permission a recording must not grant; and Files, since the real app on the runner listed no Recent items from the scratch home's history, leaving no folder to browse.
+A headless render draws Liquid Glass as an opaque fallback, since there is no desktop behind it to refract, so the clips marked `glass = true` are recorded from the real app instead. `just docs-glass` (`nu scripts/docs-glass.nu --app result/Applications/Dupin.app` after `nix build .#dupin`) needs macOS 26 or later in Dark mode, and a terminal already allowed Screen Recording and Accessibility; it never asks for either. For each clip it starts the bundle's `dupin` as an instance of its own, with the scratch home and configuration the headless clips use, `DUPIN_RECORDING=1`, no hotkey (so a Dupin already running keeps its own), its own `XDG_RUNTIME_DIR` and telemetry off, and nothing else of the shell's environment; covers the screens with a borderless window showing the wallpaper, so the desktop picture is never changed; records the screen with ffmpeg; opens the panel with `dupin open`; presses the clip's steps at their times through System Events; and cuts the recording to the panel and the wallpaper around it, with the same captions below, to the files `just docs-clips` would render. Its log, scratch home and raw recording stay in `target/docs-glass` until the next run. `DUPIN_RECORDING=1` makes the real app draw on fixtures as a headless run does: it scans only the folders `DUPIN_HEADLESS_APPS` names, and opens its storage, where the scratch home's usage history is migrated to, under a throwaway key instead of the Keychain, which a scratch home has no item in. It takes effect only when the launch's `HOME` is not the account's own, so a normal launch, whose `HOME` is, ignores a stray variable and never hides the user's apps or history. Its clipboard history is the fixture's, seeded into the scratch storage, and it never watches the real pasteboard, which a recording must not be allowed to read.
 
-The wallpaper is the manifest's `wallpaper`, a clip's own `wallpaper`, or `--wallpaper` for every clip: a preset drawn by ImageMagick (`dusk`, `lagoon` or `ember`, soft blobs of colour for the glass to bend, with nothing sharp behind the text) or the path to an image. Only wallpapers made here are published; macOS's own are Apple's.
+The wallpaper is the manifest's `wallpaper`, a clip's own `wallpaper`, or `--wallpaper` for every clip: a preset drawn by ImageMagick, each a landscape of a sky, a sun or moon, layered mountain ridges, a treeline and a lake (`dusk`, the default, `lagoon` for a day and `night`), whose edges and contrasts the glass visibly blurs and bends or the path to an image. Only wallpapers made here are published; macOS's own are Apple's.
 
 `docs/images/glass.json` lists each clip recorded this way, with the macOS version, wallpaper and screen scale. `just docs-clips` keeps those and renders the rest headless over their `backdrop` (Flow) in their place, and the website says which tabs are headless recordings over Flow. `check` fails if it lists a clip that isn't `glass = true`.
 
-The `Docs glass` workflow (`.github/workflows/docs-glass.yml`) runs the same on a `blacksmith-6vcpu-macos-latest` runner, which runs macOS 26 with a GUI session and grants its runner Screen Recording and Accessibility, as the E2E job relies on. Dispatch it (optionally with `only` or `wallpaper`), then `gh run download <run> --name docs-glass --dir docs/images` and commit the result. A pull request that changes the recorder runs it too. The runner's screen is at 1×, so its recordings are half the resolution of a Retina Mac's.
+The `Docs glass` workflow (`.github/workflows/docs-glass.yml`) runs the same on a `blacksmith-6vcpu-macos-latest` runner, which runs macOS 26 with a GUI session and grants its runner Screen Recording and Accessibility, as the E2E job relies on. Dispatch it (optionally with `only` or `wallpaper`), then `gh run download <run> --name docs-glass --dir docs/images` and commit the result. A pull request that changes the recorder runs it too. The runner's own display is a 1920×1200 framebuffer at 1× with no 2× mode, so on CI the recorder adds a 1440×1000 virtual display, tall enough for every clip to be cut to the demo frame's shape, at 2× (the private `CGVirtualDisplay`, which needs no permission), makes it the main display and mirrors the runner's to it, so the clips are as sharp as a Retina Mac's. It does this only when `CI` is `true`, never on a Mac in use. The runner also has Reduce Transparency on (`defaults read com.apple.universalaccess reduceTransparency` prints `1`), which makes Liquid Glass a solid panel, so on CI the recorder turns it and Increase Contrast off for the job; on a Mac in use it only reports them.
 
 ## Native E2E evidence
 
@@ -295,14 +316,14 @@ nu scripts/latency.nu parity target/latency/results.json     # extensions agains
 
 `nix build .#dupin-latency` builds the same binary, inside a `Dupin.app` whose Resources hold the repository's `extensions/`, so it runs the bundled extensions as the released app does; outside one, a binary built away from the source tree finds none. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
 
-Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it and, for an extension, the `package` behind it (`bundled:<name>` for one that ships with Dupin); the run fails when a measured keypress does not search that provider answered by that package, or by Dupin itself for an implementation without one, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A headless run reaches no program, so a package whose catalogue runs one, as Processes does, is measured against a fixture: its implementation's `extensions` folder holds only `.headless-fixture.json`, `{ "name": <bundled package>, "fixture": <file beside it> }`, whose replies, `exec` included, answer every host request and whose consent turns the package on, as `dupin ext render` hands a fixture over. For a built-in command a bundled extension answers, only the rows from that package count as the provider's: the command shows a row of its own when its package is off, missing or failing, and that row is cheap enough to pass any budget. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
+Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it and, for an extension, the `package` behind it (`bundled:<name>` for one that ships with Dupin); the run fails when a measured keypress does not search that provider answered by that package, or by Dupin itself for an implementation without one, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A headless run reaches no program, so a package whose catalogue runs one, as Processes does, is measured against a fixture: its implementation's `extensions` folder holds only `.headless-fixture.json`, `{ "name": <bundled package>, "fixture": <file beside it> }`, whose replies, `exec` included, answer every host request and whose consent turns the package on, as `dupin ext render` hands a fixture over. A package that changes a feature it doesn't answer, such as one adding default kind actions to the main search's app rows, is measured by a variant of that feature's native implementation that lists it in `enables`: the run turns it on in the broker's base (`extension-grants.toml` beside the config), the provider is still answered by Dupin itself, and every pass must end with rows from each enabled package or carrying its kind actions, which a headless run's latency samples list as `composed`, or the run fails. `parity` holds such a variant to the native implementation of the same run, as `search.running-apps` is held to `search`. For a built-in command a bundled extension answers, only the rows from that package count as the provider's: the command shows a row of its own when its package is off, missing or failing, and that row is cheap enough to pass any budget. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
 
 For each scenario the results give p50, p95 and p99 of the total, and p50 and p95 of each stage, which add up to it:
 
 - `dispatch_ms`: from the edit to the searches it starts being handed to their providers' workers.
 - `provider_ms`: from there to the last provider's final delivery leaving its worker. `providers` in the raw lines has each one's time.
-- `merge_ms`: from there to the session holding the finished, ranked results. It includes waiting for the UI thread, which may be drawing a frame.
-- `layout_ms`: from there to the next frame being built, laid out and encoded. Headless frames start at most every `1 / --fps` seconds, so this includes up to a millisecond of waiting at the default 1000 fps.
+- `merge_ms`: from there to the session holding the finished, ranked results. It includes waiting for the UI thread. A headless run's UI thread takes deliveries only when its next frame starts, and frames start at most every `1 / --fps` seconds, paced by `thread::sleep`, so this includes up to a millisecond of waiting at the default 1000 fps, plus however late the sleep wakes.
+- `layout_ms`: from there to the next frame being built, laid out and encoded.
 
 `compare` holds a candidate result set against a baseline, scenario by scenario, and fails when the candidate's p95 exceeds the baseline's by more than `--tolerance` percent (10 by default) or `--floor` (1 ms), whichever is larger. `--report` prints the comparison without failing. `--baseline-implementation` and `--candidate-implementation` compare two implementations across result sets.
 
@@ -337,6 +358,8 @@ package = "bundled:emoji"
 budget_ms = 5.0
 ```
 
+A headless run has no display, so the panel lays out its default 416-point list (eight rows). An implementation's `display` simulates one: `run` sets `DUPIN_HEADLESS_DISPLAY` to it, `<width>x<height>` points of usable area, and the panel sizes its list from that area as it would from a real display's, through the same placement. `search-tall` measures the main search on a 1728×2560 display, whose list reaches the 832-point maximum (16 rows), so drawing more rows can't slow every keypress unnoticed. `display` is set outside `scripts/latency/measure.nu`, so it doesn't change any scenario's `benchmark` fingerprint.
+
 The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity, and both are held to a 5 ms budget.
 
 ### Native baselines
@@ -364,7 +387,7 @@ A Blacksmith Testbox measures the same way: warm a box up, check out the commit 
 
 A baseline goes stale when the benchmark changes after the native implementation is gone, so the last commit that had it measures with the old benchmark. Branch from that commit, check out `scripts/latency.nu`, `scripts/latency/measure.nu` and `scripts/fixtures/clipboard.json` from your branch, give the feature's scenarios and the native `search` scenarios (the control) your branch's `prefix` and `typed` while keeping their native implementations, then commit, push, and dispatch the workflow with that commit as `ref`.
 
-CI runs the Latency workflow as its `latency` job whenever the app could have changed (any pull request that touches more than `website/`), and on `main`. It uploads `results.json` as the `latency` artifact. The parity check fails the job, and the required `e2e` job fails unless `latency` passed, so a port that falls behind its native implementation can't merge. Dispatch `latency.yml` on its own only to record a baseline, as above.
+CI runs the Latency workflow as its `latency` job whenever the app could have changed (any pull request that touches more than `docs/`, `experiments/`, `website/`, `telemetry/` and the top-level Markdown files; see the `changes` job in `.github/workflows/ci.yml`), and on `main`. It uploads `results.json` as the `latency` artifact. The parity check fails the job, and the required `e2e` job fails unless `latency` passed, so a port that falls behind its native implementation can't merge. Dispatch `latency.yml` on its own only to record a baseline, as above.
 
 A pull request is compared with `main` but never fails on it, since a shared runner's noise is larger than many real changes and a slowdown can be worth what it buys. `scripts/latency.nu fetch-main` downloads the results of the CI run on the `main` commit the pull request's merge commit sits on, or, when that run measured nothing, of the latest `main` run that did (the same choice as the size report's, in `scripts/main-build.nu`), and the job uploads them in its `latency` artifact as `main.json`. `scripts/latency.nu report` holds each scenario to them with `compare`'s tolerance, 10% or 1 ms of main's p95, whichever is larger, after multiplying main's figures by this run's median native `search` p95 over main's, as `parity` scales a recorded baseline, so a slower runner does not read as a slower pull request. The `search` scenarios themselves are held to main's unscaled, since the scale is made of them; when they are slower, the comment says that scaling may hide a slowdown every keypress pays for.
 

@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use std::time::{Duration, Instant};
 
 use dupin_ext_sdk::fixture::{self, Consent, FilesReply, Replies};
 use dupin_extension_bridge::services::{self, Services, Subscription};
@@ -23,7 +22,7 @@ use dupin_extension_bridge::{
     Revision, Scope,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, context, exec, windows};
+use dupin_host_services::{apps, calendar, context, exec, windows};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
 use serde_json::Value;
@@ -82,6 +81,7 @@ struct State {
     effects: Mutex<Effects>,
     windows: Option<windows::Service<windows::Fixture>>,
     context: Option<context::Service<context::Fixture>>,
+    apps: Option<apps::Service<apps::Fixture>>,
     /// The snippets the fixture hands the package, which its `snippets` calls change.
     snippets: Mutex<Snippets>,
     /// What watches the clipboard, by subscription, which a headless launcher hands the
@@ -195,6 +195,7 @@ impl Replier {
             .with_clock(FixtureClock(now));
         let windows = replies.windows.as_ref().map(window_fixture).transpose()?;
         let context = replies.context.as_ref().map(context_fixture).transpose()?;
+        let apps = replies.apps.as_ref().map(apps_fixture).transpose()?;
         let state = Arc::new(State {
             replies: replies.clone(),
             now,
@@ -204,6 +205,7 @@ impl Replier {
             effects: Mutex::default(),
             windows,
             context,
+            apps,
             snippets: Mutex::new(Snippets::seeded(preferences)),
             watchers: Mutex::default(),
             subscriptions: AtomicU64::default(),
@@ -224,6 +226,7 @@ impl Replier {
             calendar: shared(),
             windows: shared(),
             context: shared(),
+            apps: shared(),
         }
     }
 
@@ -405,9 +408,10 @@ pub(in crate::extensions) struct Headless {
     /// value until they change again.
     preferences: Mutex<Arc<dupin_js_runtime::Preferences>>,
     /// The copies the clipboard `event` steps make, and the seconds into the script each
-    /// comes at.
+    /// comes at, in order.
     events: Vec<(f64, Value)>,
-    played: AtomicBool,
+    /// How many of them were handed over.
+    played: Mutex<usize>,
 }
 
 /// The fixture `dupin ext render` handed this headless launcher, if it handed one. A launcher
@@ -451,7 +455,7 @@ impl Headless {
                     _ => None,
                 })
                 .collect(),
-            played: AtomicBool::new(false),
+            played: Mutex::default(),
         })
     }
 
@@ -499,26 +503,24 @@ impl Headless {
         Some(held.clone())
     }
 
-    /// Hands what watches the clipboard each copy the fixture's clipboard `event` steps make,
-    /// at its time in the script, counted from now: the first frame, where the script starts.
-    pub fn play_events(&'static self) {
-        if self.events.is_empty() || self.played.swap(true, Ordering::Relaxed) {
-            return;
-        }
-        let start = Instant::now();
-        std::thread::spawn(move || {
-            for (at, copy) in &self.events {
-                let due = start + Duration::from_secs_f64(*at);
-                std::thread::sleep(due.saturating_duration_since(Instant::now()));
-                let watchers: Vec<Watcher> = lock(&self.replier.state.watchers)
-                    .iter()
-                    .map(|(_, watcher)| watcher.clone())
-                    .collect();
-                for watcher in watchers {
-                    watcher(copy.clone());
-                }
+    /// Hands what watches the clipboard each copy the fixture's clipboard `event` steps make
+    /// that the script's `clock` has reached, once, before the frame at that time takes its keys:
+    /// on the script's own clock, a copy lands between the keys around it however late a busy
+    /// machine draws the frames.
+    pub fn play_events(&self, clock: f64) {
+        let mut played = lock(&self.played);
+        while let Some((at, copy)) = self.events.get(*played)
+            && *at <= clock
+        {
+            *played += 1;
+            let watchers: Vec<Watcher> = lock(&self.replier.state.watchers)
+                .iter()
+                .map(|(_, watcher)| watcher.clone())
+                .collect();
+            for watcher in watchers {
+                watcher(copy.clone());
             }
-        });
+        }
     }
 }
 
@@ -556,6 +558,17 @@ fn context_fixture(reply: &fixture::ContextReply) -> Result<context::Service<con
         document: serde_json::from_value(reply.document.clone())
             .map_err(|error| invalid("document", error))?,
     }))
+}
+
+/// The apps service a fixture's `replies.apps` describes, read as the service's own shapes.
+fn apps_fixture(reply: &fixture::AppsReply) -> Result<apps::Service<apps::Fixture>, Diagnostic> {
+    let running = serde_json::from_value(reply.running.clone()).map_err(|error| {
+        Diagnostic::new("invalid-fixture", error.to_string()).field("replies.apps.running")
+    })?;
+    Ok(apps::Service::new(apps::Fixture::new(
+        running,
+        reply.refuse.clone(),
+    )))
 }
 
 /// Each record's data, oldest first; blobs are left out.
@@ -829,6 +842,13 @@ impl Shared {
             .ok_or_else(|| missing("reading or moving windows".into()))
     }
 
+    fn apps(&self) -> Result<&apps::Service<apps::Fixture>, Failure> {
+        self.0
+            .apps
+            .as_ref()
+            .ok_or_else(|| missing("listing or quitting running apps".into()))
+    }
+
     fn context(&self) -> Result<&context::Service<context::Fixture>, Failure> {
         self.0
             .context
@@ -852,6 +872,20 @@ impl services::Windows for Shared {
 
     fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
         encoded(self.windows()?.set_frame(frame)?)
+    }
+}
+
+impl services::Apps for Shared {
+    fn running(&self) -> Result<Value, Failure> {
+        encoded(self.apps()?.running())
+    }
+
+    fn hide(&self, target: &apps::Target) -> Result<Value, Failure> {
+        encoded(self.apps()?.hide(target))
+    }
+
+    fn quit(&self, target: &apps::Target, force: bool) -> Result<Value, Failure> {
+        encoded(self.apps()?.quit(target, force))
     }
 }
 

@@ -94,6 +94,8 @@ let
           script = "open-in-zed";
         }
       ];
+      kinds.file.hide = [ "quick-look" ];
+      kinds.file.order = [ "reveal" ];
     };
   };
   declared = evaluate {
@@ -172,6 +174,13 @@ assert
     "windows:read"
     "windows:arrange"
   ];
+assert
+  bundledExtensions.running-apps == [
+    "apps:read"
+    "apps:control"
+    "rows:app"
+  ];
+assert rejects { bundledExtensions.running-apps.deny = [ "apps:quit" ]; };
 assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
 assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
   "proc"
@@ -271,7 +280,7 @@ pkgs.runCommand "dupin-home-manager-module"
     toml2json "$advanced" | jq -e '.advanced == {
       sources: { apps: { matcher: "builtin.prefix" } },
       commands: { default: { append_sources: ["files"] } },
-      kinds: { file: { actions: [{ title: "Open in Zed", script: "open-in-zed" }] } }
+      kinds: { file: { actions: [{ title: "Open in Zed", script: "open-in-zed" }], hide: ["quick-look"], order: ["reveal"] } }
     }'
     toml2json "$advanced" | jq -e '.aliases == { c: "calendar", ff: "app:org.mozilla.firefox", goo: "web:g" }'
     toml2json "$advanced" | jq -e '.bindings == {

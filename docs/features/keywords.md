@@ -108,13 +108,19 @@ An alias that is well formed but reaches nothing is left out with a notice, and 
 
 ### Shortcuts
 
-A global shortcut can open a command from any app, with the panel already in that command; pressing it again hides the panel. Record one in [Settings → Keywords](#settings), or write a `target = "dupin"` binding that names the command as an alias does, as [Hotkeys](./hotkeys.md#configuration) describes:
+A global shortcut can reach whatever a keyword reaches from any app: a command or a web search shows the panel already in it, and pressing it again hides the panel; an app or file opens. Record one in [Settings → Keywords](#settings), or write a `target = "dupin"` binding that names it as an alias's target does, as [Hotkeys](./hotkeys.md#configuration) describes:
 
 ```toml
 [bindings."cmd+shift+v"]
 target = "dupin"
 command = "clipboard"
+
+[bindings."alt+cmd+y"]
+target = "dupin"
+command = "web:yt"
 ```
+
+The same `command` also names one row, such as `system/sleep` or `window-management/left-half`, which the shortcut runs without showing the panel ([Hotkeys › Rows](./hotkeys.md#rows)).
 
 ### Who gets a keyword
 
@@ -131,26 +137,26 @@ So an alias never takes a keyword a built-in, `dictionary_keywords`, `snippet_ke
 
 ## Settings
 
-Settings → Keywords lists every command, web search, app and file a keyword reaches with its keywords, the aliases among them drawn quieter, and each extension with its keyword.
+Settings → Keywords lists every command, web search, app and file a keyword reaches with its keywords, the aliases among them drawn quieter, each extension with its keyword, and the system commands.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/settings/keywords-dark.png" />
 <img alt="Settings → Keywords, listing each command and web search with its keywords and each command's shortcut recorder, Clipboard's set to ⇧⌘V, the aliases section and the Dictionary and snippet keyword fields." src="../images/settings/keywords-light.png" width="760" />
 </picture>
 
-| Key / action                                       | What it does                                                           |
-| -------------------------------------------------- | ---------------------------------------------------------------------- |
-| Click a command's shortcut recorder, press a chord | Save it to `[bindings]`                                                |
-| <kbd>⌫</kbd> while recording, or **Clear**         | Remove the shortcut                                                    |
-| <kbd>Esc</kbd> while recording                     | Cancel                                                                 |
-| **Remove** beside an alias                         | Delete the alias                                                       |
-| The fields below the aliases                       | Add an alias                                                           |
-| The last card                                      | Edit `dictionary_keywords` and `snippet_keywords`, separated by spaces |
+| Key / action                                         | What it does                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| Click a row's shortcut, or **Record**, press a chord | Save it to `[bindings]`                                                |
+| <kbd>⌫</kbd> while recording, or **×** beside it     | Remove the shortcut                                                    |
+| <kbd>Esc</kbd> while recording                       | Cancel                                                                 |
+| **Remove** beside an alias                           | Delete the alias                                                       |
+| The fields below the aliases                         | Add an alias                                                           |
+| The last card                                        | Edit `dictionary_keywords` and `snippet_keywords`, separated by spaces |
 
 <details>
 <summary>Locked and refused shortcuts</summary>
 
-- Each command a binding can name has a shortcut recorder below its keywords.
+- Each command, web search and aliased app or file has a shortcut recorder below its keywords, and each system command has one in the card below them.
 - A chord the panel, the selection hotkey, another binding or macOS already uses is refused with what holds it.
 - When `bindings` is set in a read-only config.toml, such as one Home Manager writes, the recorders are locked and say so; otherwise a read-only config.toml's other keys stay locked and the shortcut is saved with Dupin's own settings, as [Configuration](../configuration.md) describes.
 - Each alias shows what it reaches and, if it is left out, why.

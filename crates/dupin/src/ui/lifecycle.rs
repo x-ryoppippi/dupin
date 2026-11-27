@@ -9,8 +9,8 @@ use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge, Tx};
 
 use super::{PendingPaste, Ui, selection::SelectionRequest};
 
-// Match Spotlight's offset for the top position.
-const TOP_MARGIN: f32 = 180.0;
+// Match Spotlight's offset for the top position, and mirror it for the bottom.
+const EDGE_MARGIN: f32 = 180.0;
 
 pub struct Busy(Arc<AtomicUsize>);
 
@@ -105,38 +105,80 @@ impl Ui {
 
     fn place_panel(&mut self) {
         self.display_notice = None;
-        let (display, align, inset, margin) = if !rune::tooling::is_headless()
-            && let Some(screen) = dupin_mac::window::display_geometry(self.display)
-        {
+        let edge = panel_edge(self.position);
+        let geometry = (!rune::tooling::is_headless())
+            .then(|| dupin_mac::window::display_geometry(self.display))
+            .flatten();
+        let screen = match &geometry {
+            Some(geometry) => Some(PanelScreen::new(geometry)),
+            None if rune::tooling::is_headless() => PanelScreen::simulated(),
+            None => None,
+        };
+        if screen != self.screen {
+            self.screen = screen;
+            self.prefs
+                .update(move |prefs, _| prefs.reflect_panel_screen(screen));
+        }
+        self.fit_list();
+        let (display, align, inset, margin) = if let Some(screen) = geometry {
             self.display_notice = screen.notice;
-            let (inset, margin) = panel_offsets(
+            let place = panel_offsets(
                 screen.frame,
                 screen.visible_frame,
                 self.theme.panel_width,
                 self.position,
             );
+            self.pin_bottom_edge(
+                (edge == ScreenEdge::Bottom).then(|| screen.frame.origin.y + f64::from(place.margin)),
+            );
             (
                 DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
                 Align::Start,
-                inset,
-                margin,
+                place.inset,
+                place.margin,
             )
         } else {
             let display = match self.display {
                 DisplaySelection::Mouse => DisplayTarget::UnderPointer,
                 DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
             };
-            (display, Align::Center, 0.0, TOP_MARGIN)
+            (display, Align::Center, 0.0, EDGE_MARGIN)
         };
         self.me.place(
             display,
             OverlayPlacement::Edge {
-                edge: ScreenEdge::Top,
+                edge,
                 margin,
                 align,
                 inset,
             },
         );
+    }
+
+    /// Size the result list for the display the panel last opened on and the configured rows.
+    pub(super) fn fit_list(&mut self) {
+        let room = self
+            .screen
+            .map(|screen| screen.list_room(self.theme.panel_width, self.position));
+        self.list_budget = crate::view::list_fit(room, self.rows, f32::from(self.theme.row_height)).budget;
+    }
+
+    /// Keep the panel's bottom edge at `bottom` as it fits its content, or let it go.
+    fn pin_bottom_edge(&self, bottom: Option<f64>) {
+        let Some(window) = &self.panel_window else {
+            return;
+        };
+        let pinned = window.with_raw_handle(|handle| match handle.as_raw() {
+            RawWindowHandle::AppKit(appkit) => {
+                // SAFETY: Rune lends this live view only for this main-thread callback.
+                unsafe { dupin_mac::window::pin_bottom_edge(appkit.ns_view, bottom) };
+                true
+            }
+            _ => false,
+        });
+        if bottom.is_some() && !pinned.unwrap_or(false) {
+            crate::log::warn("couldn't hold the panel's bottom edge; it grows downwards");
+        }
     }
 
     pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
@@ -215,11 +257,11 @@ impl Ui {
             self.show_script_output(id);
         }
         if show_snapshots {
-            self.snapshots.update(|s, _| s.show());
+            self.prefs.update(|prefs, _| prefs.open_snapshots());
         }
         if show_settings {
             crate::trace::settings("panel closed");
-            self.prefs.open();
+            self.prefs.update(|prefs, _| prefs.open_settings());
         }
         if !show_snapshots && !show_settings && self.relaunch.is_some() {
             // Rune clears the panel's visibility after this callback.
@@ -299,10 +341,7 @@ impl Ui {
     /// Automatic updates wait so a restart does not interrupt work in a visible window.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
         if request == Restart::Update
-            && (self.me.is_visible()
-                || self.prefs.is_visible()
-                || self.snapshots.is_visible()
-                || self.script_output.is_visible())
+            && (self.me.is_visible() || self.prefs.is_visible() || self.script_output.is_visible())
         {
             self.relaunch = Some(request);
         } else if request.waiting_for_work(&self.running, self.runner.activity()) {
@@ -402,16 +441,104 @@ impl Ui {
     }
 }
 
-fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
+/// The display the panel opens on, as much of it as sizing the panel's list needs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PanelScreen {
+    frame: NSRect,
+    visible: NSRect,
+}
+
+impl PanelScreen {
+    fn new(geometry: &dupin_mac::window::DisplayGeometry) -> Self {
+        Self {
+            frame: geometry.frame,
+            visible: geometry.visible_frame,
+        }
+    }
+
+    /// The display the panel would open on now, for `selection`; in a headless run, the one
+    /// `DUPIN_HEADLESS_DISPLAY` simulates, if any.
+    pub fn current(selection: DisplaySelection) -> Option<Self> {
+        if rune::tooling::is_headless() {
+            return Self::simulated();
+        }
+        dupin_mac::window::display_geometry(selection).map(|geometry| Self::new(&geometry))
+    }
+
+    /// A headless run's display, whose usable area `DUPIN_HEADLESS_DISPLAY` gives as
+    /// `<width>x<height>` points, so the list is sized as on a real display of that size.
+    fn simulated() -> Option<Self> {
+        let value = std::env::var("DUPIN_HEADLESS_DISPLAY").ok()?;
+        let screen = Self::parse(&value);
+        if screen.is_none() {
+            crate::log::warn(&format!(
+                "DUPIN_HEADLESS_DISPLAY is {value:?}, not <width>x<height>; using the default list"
+            ));
+        }
+        screen
+    }
+
+    /// A display whose whole frame is usable, `value` points as `<width>x<height>`.
+    fn parse(value: &str) -> Option<Self> {
+        let (w, h) = value.split_once('x')?;
+        let (w, h) = (w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?);
+        if !(w > 0.0 && h > 0.0) {
+            return None;
+        }
+        let area = NSRect::new(
+            objc2_foundation::NSPoint::new(0.0, 0.0),
+            objc2_foundation::NSSize::new(w, h),
+        );
+        Some(Self {
+            frame: area,
+            visible: area,
+        })
+    }
+
+    /// The height the display leaves on the result list's side of the field.
+    pub fn list_room(self, width: u16, position: Position) -> f32 {
+        panel_offsets(self.frame, self.visible, width, position).list_room
+    }
+}
+
+/// Where the panel goes on a display, in points from the display's frame.
+#[derive(Debug, PartialEq)]
+struct PanelOffsets {
+    /// From the display's left edge to the panel's.
+    inset: f32,
+    /// From the display's edge the panel is placed against (`panel_edge`) to the panel's.
+    margin: f32,
+    /// The height the visible area leaves on the result list's side of the field.
+    list_room: f32,
+}
+
+/// The display edge the panel keeps still as it fits its content: the field's side.
+fn panel_edge(position: Position) -> ScreenEdge {
+    if position.grows_up() {
+        ScreenEdge::Bottom
+    } else {
+        ScreenEdge::Top
+    }
+}
+
+fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> PanelOffsets {
     let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
-    let top = frame.max().y - visible.max().y;
-    // Use the query field's height so results can grow below it.
+    // From the display's edge to the visible area's, on the side the panel is placed against.
+    let outside = match panel_edge(position) {
+        ScreenEdge::Top => frame.max().y - visible.max().y,
+        ScreenEdge::Bottom => visible.origin.y - frame.origin.y,
+    };
+    // Use the query field's height so results can grow away from it.
     let room = (visible.size.height - f64::from(crate::app::HEADER_HEIGHT)).max(0.0);
     let offset = match position {
         Position::Center => room / 2.0,
-        Position::Top => f64::from(TOP_MARGIN).min(room),
+        Position::Top | Position::Bottom => f64::from(EDGE_MARGIN).min(room),
     };
-    (inset as f32, (top + offset) as f32)
+    PanelOffsets {
+        inset: inset as f32,
+        margin: (outside + offset) as f32,
+        list_room: (room - offset) as f32,
+    }
 }
 
 #[cfg(test)]
@@ -423,18 +550,29 @@ mod tests {
         NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
     }
 
+    fn offsets(inset: f32, margin: f32, list_room: f32) -> PanelOffsets {
+        PanelOffsets {
+            inset,
+            margin,
+            list_room,
+        }
+    }
+
     #[test]
     fn places_the_query_inside_the_selected_screens_visible_frame() {
         let frame = rect(100.0, -900.0, 1440.0, 900.0);
         let visible = rect(160.0, -850.0, 1380.0, 820.0);
         assert_eq!(
             panel_offsets(frame, visible, 680, Position::Center),
-            (410.0, 408.0)
+            offsets(410.0, 408.0, 378.0)
         );
-        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (410.0, 210.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Top),
+            offsets(410.0, 210.0, 576.0)
+        );
         assert_eq!(
             panel_offsets(frame, visible, 400, Position::Center),
-            (550.0, 408.0)
+            offsets(550.0, 408.0, 378.0)
         );
     }
 
@@ -442,6 +580,59 @@ mod tests {
     fn top_spacing_cannot_push_the_query_below_the_visible_area() {
         let frame = rect(-800.0, 200.0, 800.0, 150.0);
         let visible = rect(-800.0, 200.0, 800.0, 120.0);
-        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (60.0, 86.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Top),
+            offsets(60.0, 86.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_simulated_display_sizes_the_list_as_a_real_one_would() {
+        use dupin_core::Rows;
+        let budget = |room| crate::view::list_fit(room, Rows::Auto, 52.0).budget;
+        let real = rect(0.0, 0.0, 1728.0, 2560.0);
+        let room = panel_offsets(real, real, 680, Position::Center).list_room;
+        let simulated = PanelScreen::parse("1728x2560").unwrap();
+        assert_eq!(simulated.list_room(680, Position::Center), room);
+        assert_eq!(
+            budget(Some(room)),
+            832.0,
+            "a 2560-point display reaches the list's maximum"
+        );
+        let short = PanelScreen::parse("1440x900").unwrap();
+        assert_eq!(budget(Some(short.list_room(680, Position::Center))), budget(None));
+        for bad in ["", "1440", "1440x", "x900", "0x900", "1440x-1", "wide x tall"] {
+            assert_eq!(PanelScreen::parse(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_bottom_position_mirrors_the_top_from_the_visible_frames_bottom() {
+        // The Dock takes 50 points along the bottom, the menu bar 30 along the top.
+        let frame = rect(100.0, -900.0, 1440.0, 900.0);
+        let visible = rect(160.0, -850.0, 1380.0, 820.0);
+        assert_eq!(panel_edge(Position::Bottom), ScreenEdge::Bottom);
+        assert_eq!(panel_edge(Position::Top), ScreenEdge::Top);
+        assert_eq!(panel_edge(Position::Center), ScreenEdge::Top);
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Bottom),
+            offsets(410.0, 230.0, 576.0)
+        );
+        let short = rect(-800.0, 200.0, 800.0, 120.0);
+        assert_eq!(
+            panel_offsets(short, short, 680, Position::Bottom),
+            offsets(60.0, 56.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_taller_display_leaves_the_list_more_room() {
+        let short = rect(0.0, 0.0, 1440.0, 900.0);
+        let tall = rect(0.0, 0.0, 2560.0, 1440.0);
+        for position in [Position::Center, Position::Top, Position::Bottom] {
+            let short = panel_offsets(short, short, 680, position).list_room;
+            let tall = panel_offsets(tall, tall, 680, position).list_room;
+            assert!(tall > short, "{position:?}: {tall} <= {short}");
+        }
     }
 }

@@ -1,5 +1,5 @@
-<script lang="ts">
-	const steps = [
+<script lang="ts" module>
+	export const steps = [
 		{ label: 'Hotkey', note: 'The panel appears' },
 		{ label: 'A few letters', note: 'The same few reach the same place' },
 		{ label: '↩', note: 'It opens' },

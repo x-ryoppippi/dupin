@@ -44,7 +44,6 @@ pub(super) fn page(s: &Prefs, k: &Kit, dark: bool) -> Vec<El> {
         theme_card(s, k, dark),
         card(
             k,
-            1.0,
             vec![
                 setting_with_lock(
                     k,
@@ -438,7 +437,6 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
     ));
     card(
         k,
-        1.0,
         vec![
             row()
                 .w_full()

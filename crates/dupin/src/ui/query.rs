@@ -33,7 +33,18 @@ impl Ui {
             crate::trace::edited(&self.query.text);
         }
         self.apply(effects, tx);
-        crate::latency::edit_applied(&self.session, &|origin, item| self.row_package(origin, item));
+        let row = |origin: &CommandId, item: &dupin_core::Item| self.row_package(origin, item);
+        let extension = |id: &str| {
+            self.extension_package(id)
+                .map(|package| package.as_str().to_owned())
+        };
+        crate::latency::edit_applied(
+            &self.session,
+            crate::latency::Packages {
+                row: &row,
+                extension: &extension,
+            },
+        );
     }
 }
 

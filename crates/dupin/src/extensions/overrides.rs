@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use dupin_core::{CommandId, Config, Provider};
 use dupin_extension_bridge::services::{self, Services};
 use dupin_extension_bridge::{
-    Bridge, ClipboardAccess, ConsentState, Failure, OsAccess, OsPermission, PackageId, Request, Scope,
-    StorageOp, Trigger, WindowsAccess,
+    AppsAccess, Bridge, ClipboardAccess, ConsentState, Failure, OsAccess, OsPermission, PackageId, Request,
+    Scope, StorageOp, Trigger, WindowsAccess,
 };
 use dupin_host_services::calendar;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Storage};
@@ -82,6 +82,11 @@ fn case(name: &str) -> Option<Override> {
         "window-management" => Override::extension(
             "window-management",
             Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),
+        )
+        .ships_off(),
+        "running-apps" => Override::extension(
+            "running-apps",
+            Some(Use::Effect(Request::Apps(AppsAccess::Control))),
         )
         .ships_off(),
         _ => return None,
@@ -308,13 +313,16 @@ impl Override {
                 None,
                 "a built-in copy's own keyword is ignored"
             );
-            // A built-in in the main search has no keyword, and the copy takes none.
-            let keyword =
-                (crate::features::ported_role(self.name) == super::Role::Keyword).then_some(&self.command);
+            // A built-in in the main search has no keyword, and its package declares none.
+            let expected = (crate::features::ported_role(self.name) == super::Role::Keyword)
+                .then_some(Some(&self.command));
             assert_eq!(
-                configured.registry.keyword(&original.keyword),
-                keyword,
-                "it answers the built-in's keyword"
+                original
+                    .keyword
+                    .as_deref()
+                    .map(|keyword| configured.registry.keyword(keyword)),
+                expected,
+                "it declares the keyword the built-in answers, and only then"
             );
         } else {
             assert_eq!(configured.registry.keyword(EDITED_KEYWORD), Some(&self.command));

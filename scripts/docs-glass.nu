@@ -4,7 +4,6 @@ use docs-images.nu [
     MANIFEST
     GLASS
     CLIP_FPS
-    CAPTION_SPACE
     manifest-entries
     image-id
     image-themes
@@ -16,44 +15,126 @@ use docs-images.nu [
     scratch-environment
 ]
 use e2e/keys.nu key-script
+use headless-config.nu only-env
 
 const STAGE = path self docs-glass/Stage.swift
 # Wallpaper around the panel, in points, so the glass's edge shows against it.
 const MARGIN = 32
+# The website's demo frame in points, whose shape every clip is cut to.
+const FRAME = {width: 680, height: 578}
 
-# The wallpapers the glass is recorded over, drawn here rather than shipped: soft blobs of colour
-# for the glass to bend, with nothing sharp to read through the text. Positions and radii are in
-# a 64×40 grid.
+# The wallpapers the glass is recorded over, drawn here rather than shipped, each a landscape: a
+# sky in bands of colour with a sun or moon, ridges of mountains fading into the haze, a treeline
+# and a lake that reflects them. Their hard edges and contrasts are what the glass visibly blurs
+# and bends. `sky` lists colours down to the horizon, `sun` sits at a fraction of the sky's
+# width and height, each ridge's `base` and `amp` are fractions of the sky's height, `haze` is
+# how much of the horizon's colour each ridge takes, and `stars` are drawn only in a dark sky.
 const WALLPAPERS = {
     dusk: {
-        base: "#1d1747"
-        blobs: [
-            [x, y, r, colour];
-            [14, 10, 16, "#c3418f"]
-            [50, 31, 15, "#f08a3c"]
-            [52, 6, 12, "#3a6df0"]
-            [30, 36, 10, "#7b3fd0"]
+        sky: [
+            "#1b1850"
+            "#4b2f7e"
+            "#a1447f"
+            "#e8705f"
+            "#fbab69"
+            "#ffd592"
         ]
+        sun: {
+            x: 0.66
+            y: 0.80
+            r: 70
+            colour: "#fff1cf"
+            glow: "255,190,120"
+        }
+        ridges: [
+            {
+                base: 0.84
+                amp: 0.22
+                colour: "#c0668a"
+                seed: 2.1
+            }
+            {
+                base: 0.90
+                amp: 0.24
+                colour: "#7d4388"
+                seed: 5.7
+            }
+            {
+                base: 0.96
+                amp: 0.20
+                colour: "#3f2a6e"
+                seed: 9.3
+            }
+        ]
+        trees: "#150f33"
+        water: "#1a1244"
+        stars: 0
     }
     lagoon: {
-        base: "#08263a"
-        blobs: [
-            [x, y, r, colour];
-            [12, 30, 16, "#1fb7a6"]
-            [48, 10, 15, "#2f7df6"]
-            [56, 34, 10, "#8fe07a"]
-            [28, 6, 9, "#5ad1f0"]
+        sky: ["#2a73c4" "#4fa0dc" "#8cc9ea" "#c5e6ee" "#f2f1de"]
+        sun: {
+            x: 0.30
+            y: 0.60
+            r: 60
+            colour: "#fffbe6"
+            glow: "255,250,220"
+        }
+        ridges: [
+            {
+                base: 0.84
+                amp: 0.22
+                colour: "#8fb4c8"
+                seed: 1.3
+            }
+            {
+                base: 0.91
+                amp: 0.24
+                colour: "#4f8a9a"
+                seed: 4.4
+            }
+            {
+                base: 0.97
+                amp: 0.20
+                colour: "#1f5a62"
+                seed: 8.1
+            }
         ]
+        trees: "#0c2f35"
+        water: "#14506a"
+        stars: 0
     }
-    ember: {
-        base: "#2a0f12"
-        blobs: [
-            [x, y, r, colour];
-            [16, 12, 15, "#e2502f"]
-            [50, 30, 16, "#f2b33d"]
-            [46, 4, 10, "#b8306a"]
-            [26, 36, 10, "#ff8a4c"]
+    night: {
+        sky: ["#060b24" "#0d1c4a" "#1e3a7a" "#3f64a6" "#7a9ccc"]
+        sun: {
+            x: 0.72
+            y: 0.34
+            r: 52
+            colour: "#f4f1e2"
+            glow: "190,210,255"
+        }
+        ridges: [
+            {
+                base: 0.86
+                amp: 0.20
+                colour: "#355590"
+                seed: 3.7
+            }
+            {
+                base: 0.92
+                amp: 0.22
+                colour: "#1f3566"
+                seed: 6.2
+            }
+            {
+                base: 0.97
+                amp: 0.18
+                colour: "#0f1a3a"
+                seed: 10.5
+            }
         ]
+        trees: "#060a1c"
+        water: "#08122c"
+        stars: 90
     }
 }
 
@@ -70,7 +151,8 @@ const WALLPAPERS = {
 def main [
     --app: path = "result/Applications/Dupin.app" # The app bundle to record
     --only: string # Record only the clips whose `<page>/<name>` contains this
-    --wallpaper: string # A preset (dusk, lagoon or ember) or an image, for every clip
+    --wallpaper: string # A preset (dusk, lagoon or night) or an image, for every clip
+    --no-retina # Record on the display as it is, without a 2x virtual one, on CI
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
@@ -105,6 +187,10 @@ def main [
         }
     }
     dark-mode
+    let ci = ($env.CI? | default "") == "true"
+    let retina = if $ci and not $no_retina { retina-display $stage }
+    clear-transparency-settings $stage $ci
+    print --stderr (^$stage displays)
     let recorded = $clips | each {|clip|
         let chosen = $wallpaper | default ($clip.wallpaper? | default $manifest.wallpaper)
         record-clip $clip $manifest $binary $stage (wallpaper-image $chosen $tmp) $tmp
@@ -120,7 +206,44 @@ def main [
         $all | upsert $clip.image ($clip | select macos wallpaper scale)
     }
     {clips: $captured} | to json --tabs 1 | $"($in)\n" | save --force $GLASS
+    if $retina != null { job kill $retina }
     $recorded | select image bytes wallpaper scale
+}
+
+# A CI runner's display is a 1x framebuffer with no 2x mode, so its clips would be half the
+# resolution of a Retina Mac's. This makes a 2x virtual display the main one, which needs no
+# permission and lasts as long as its job, and returns that job, or null when there is none and
+# the clips stay at 1x. Never on a Mac in use, whose displays it would rearrange.
+def retina-display [stage: path]: nothing -> any {
+    let job = job spawn { ^$stage hidpi }
+    let ready = try {
+        wait-for "the 2x display" { (^$stage scale | into float) == 2.0 }
+        true
+    } catch { false }
+    if $ready { return $job }
+    print --stderr "no 2x display: recording at 1x"
+    job kill $job
+    null
+}
+
+# Liquid Glass shows what is behind it only when Reduce Transparency and Increase Contrast are
+# off, or it is drawn as a solid panel. A CI runner is a throwaway VM, so on it they are turned
+# off for the job; on a Mac in use they are only reported, since they are the user's.
+def clear-transparency-settings [stage: path, ci: bool] {
+    for key in [reduceTransparency increaseContrast] {
+        let value = ^defaults read com.apple.universalaccess $key | complete
+        print --stderr $"($key): ($value.stdout | str trim) ($value.stderr | str trim)"
+        if $ci {
+            ^defaults write com.apple.universalaccess $key -bool false
+        }
+    }
+    sleep 1sec
+    print --stderr (
+        ^$stage displays
+        | lines
+        | where {|line| $line starts-with reduceTransparency }
+        | str join (char nl)
+    )
 }
 
 # The panel is drawn in the system appearance, and the clips are of the dark one.
@@ -135,7 +258,8 @@ def dark-mode [] {
     ^osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
 }
 
-# The image a wallpaper names: a preset drawn at 2560×1600, or a file as it is.
+# The image a wallpaper names: a preset drawn at 2880×2000, the shape of the 1440×1000 virtual
+# display at 2x, or a file as it is.
 def wallpaper-image [name: string, tmp: path]: nothing -> string {
     let preset = $WALLPAPERS | get --optional $name
     if $preset == null {
@@ -148,12 +272,120 @@ def wallpaper-image [name: string, tmp: path]: nothing -> string {
     }
     let out = $tmp | path join $"wallpaper-($name).png"
     if not ($out | path exists) {
-        let blobs = $preset.blobs | each {|blob|
-            [-fill $blob.colour -draw $"circle ($blob.x),($blob.y) ($blob.x + $blob.r),($blob.y)"]
-        } | flatten
-        ^magick -size 64x40 $"xc:($preset.base)" ...$blobs -blur 0x9 -resize 2560x1600! $out
+        draw-landscape $preset $tmp $name $out
     }
     $out
+}
+
+# A number in 0..1 that looks random and is the same every run.
+def scatter [n: float]: nothing -> float {
+    let x = ($n | math sin) * 43758.5453
+    $x - ($x | math floor)
+}
+
+# A ridge's outline: 1 at a peak and 0 in a valley, sharp at the peaks, from three waves.
+def ridge-height [x: int, seed: float]: nothing -> float {
+    let t = $x / 2880.0 * 6.2832
+    let a = 1.0 - (($t * 1.3 + $seed | math sin) | math abs)
+    let b = 1.0 - (($t * 3.1 + $seed * 2.7 | math sin) | math abs)
+    let c = 1.0 - (($t * 7.9 + $seed * 5.1 | math sin) | math abs)
+    0.55 * $a + 0.3 * $b + 0.15 * $c
+}
+
+# The landscape a preset describes, to `out`: the sky and everything above the horizon first,
+# then the lake, which is that scene turned upside down, rippled and darkened.
+def draw-landscape [
+    preset: record
+    tmp: path
+    name: string
+    out: path
+] {
+    let width = 2880
+    let height = 2000
+    let horizon = 1240
+    let bands = $preset.sky | window 2
+    let band = ($horizon / ($bands | length)) | math ceil
+    let sky = $bands | each {|pair|
+        ["(" -size $"($width)x($band)" $"gradient:($pair.0)-($pair.1)" ")"]
+    } | flatten
+    let sun = $preset.sun
+    let sun_x = $sun.x * $width | math round
+    let sun_y = $sun.y * $horizon | math round
+    let glow = $tmp | path join $"wallpaper-($name)-glow.png"
+    ^magick -size 1600x1600 $"radial-gradient:rgba\(($sun.glow),0.85\)-rgba\(($sun.glow),0\)" $glow
+    let stars = if $preset.stars > 0 {
+        1..$preset.stars | each {|i|
+            let x = (scatter ($i * 12.9898)) * $width | math round
+            let y = (scatter ($i * 78.233)) * $horizon * 0.6 | math round
+            let r = 1 + (scatter ($i * 3.7)) * 3 | math round
+            [-fill "rgba(255,255,255,0.8)" -draw $"circle ($x),($y) ($x + $r),($y)"]
+        } | flatten
+    } else {
+        []
+    }
+    let ridges = $preset.ridges | each {|ridge|
+        let points = 0..($width // 16) | each {|i|
+            let x = $i * 16
+            let y = $horizon * ($ridge.base - $ridge.amp * (ridge-height $x $ridge.seed)) | math round
+            $"($x),($y)"
+        }
+        let outline = $points | append [$"($width),($horizon)" $"0,($horizon)"] | str join " "
+        [-fill $ridge.colour -draw $"polygon ($outline)"]
+    } | flatten
+    let trees = 0..($width // 11) | each {|i|
+        let x = $i * 11 + ((scatter ($i * 5.31)) * 8 | math round)
+        let tall = 34 + (scatter ($i * 9.17)) * 70 | math round
+        [-fill $preset.trees -draw $"polygon ($x - 9),($horizon + 2) ($x),($horizon - $tall) ($x + 9),($horizon + 2)"]
+    } | flatten
+    let scene = $tmp | path join $"wallpaper-($name)-scene.png"
+    (
+        ^magick ...$sky -append -resize $"($width)x($horizon)!"
+        ...$stars
+        $glow -geometry $"+($sun_x - 800)+($sun_y - 800)" -composite
+        -fill $sun.colour -draw $"circle ($sun_x),($sun_y) ($sun_x + $sun.r),($sun_y)"
+        ...$ridges
+        -fill $preset.trees -draw $"rectangle 0,($horizon - 10) ($width),($horizon)"
+        ...$trees
+        $scene
+    )
+    let lake = $height - $horizon
+    let reflection = $tmp | path join $"wallpaper-($name)-reflection.png"
+    (
+        ^magick $scene -flip -crop $"($width)x($lake)+0+0" +repage
+        -motion-blur 0x28+0 -blur 0x3 -modulate 92,90
+        -fill $preset.water -colorize 18%
+        "(" -size $"($width)x($lake)" gradient:white-#4a4a4a ")" -compose multiply -composite
+        $reflection
+    )
+    (
+        ^magick $scene $reflection -append
+        -attenuate 0.06 +noise Gaussian -depth 8
+        $out
+    )
+}
+
+# The whole environment a clip's Dupin is launched with, and nothing of this shell's: the scratch
+# home and configuration the headless clips use, a runtime directory of its own for its control
+# socket, and `DUPIN_RECORDING`, so that it lists only the fixture apps and keeps its history in a
+# scratch store, as a headless run does. The window server is reached through the session the
+# process inherits, not a variable. Telemetry is off whatever the build, so a recording never
+# sends a ping or shows its notice.
+export def recording-environment [clip: record, manifest: record, tmp: path]: nothing -> record {
+    let name = image-id $clip | str replace --all / -
+    # Glass is the panel with no backdrop shader.
+    let environment = scratch-environment ($clip.fixtures? | default ($tmp | path join none.json)) ($clip | reject --optional backdrop) $manifest $tmp
+    let config = $environment.XDG_CONFIG_HOME | path join dupin config.toml
+    # No hotkey, so it never takes the one a Dupin already running here holds: `dupin open`
+    # shows its panel instead.
+    open $config | upsert hotkey "" | upsert auto_update false | to toml | save --force $config
+    let runtime = $tmp | path join $"($name)-runtime"
+    mkdir $runtime
+    ^chmod 700 $runtime
+    $environment | merge {
+        XDG_RUNTIME_DIR: $runtime
+        DUPIN_RECORDING: "1"
+        DUPIN_TELEMETRY_DISABLED: "1"
+    }
 }
 
 # One clip: Dupin over the wallpaper, its steps pressed in time, the screen recorded around the
@@ -170,19 +402,12 @@ def record-clip [
     let name = $id | str replace --all / -
     print --stderr $"recording ($id)"
     let timeline = clip-timeline $clip.steps
-    # Glass is the panel with no backdrop shader.
-    let environment = scratch-environment ($clip.fixtures? | default ($tmp | path join none.json)) ($clip | reject --optional backdrop) $manifest $tmp
-    let config = $environment.XDG_CONFIG_HOME | path join dupin config.toml
-    # No hotkey, so it never takes the one a Dupin already running here holds: `dupin open`
-    # shows its panel instead.
-    open $config | upsert hotkey "" | upsert auto_update false | to toml | save --force $config
-    let runtime = $tmp | path join $"($name)-runtime"
-    mkdir $runtime
-    ^chmod 700 $runtime
-    let environment = $environment | merge {XDG_RUNTIME_DIR: $runtime}
+    let environment = recording-environment $clip $manifest $tmp
+    let launch = only-env $environment
+    let runtime = $environment.XDG_RUNTIME_DIR
     let log = $tmp | path join $"($name).log"
     let backdrop = job spawn { ^$stage wallpaper $wallpaper }
-    let dupin = job spawn { with-env $environment { ^$binary o+e> $log } }
+    let dupin = job spawn { ^/usr/bin/env ...$launch $binary o+e> $log }
     let outcome = try {
         # Its control socket is there once it has started.
         wait-for $"($id) to start; see ($log)" {
@@ -196,7 +421,7 @@ def record-clip [
             (
                 ^ffmpeg -nostdin -hide_banner -loglevel error -y -f avfoundation -framerate 30
                 -capture_cursor 0 -i "Capture screen 0:none" -t ($seconds | into string) -an
-                -c:v libx264 -preset veryfast -crf 12 -pix_fmt yuv420p -stats_period 0.1
+                -c:v libx264 -preset veryfast -crf 8 -pix_fmt yuv444p -stats_period 0.1
                 -progress $progress $movie
             )
             true | job send 0 --tag 1
@@ -208,13 +433,14 @@ def record-clip [
         let started = (date now) - ($written * 1us)
         wait-for $"($id) to open; see ($log)" {
             (
-                with-env $environment { ^$binary open | complete }
+                ^/usr/bin/env ...$launch $binary open | complete
             ).exit_code == 0
         }
         let pid = dupin-pid $binary
         wait-for $"($id)'s panel to show; see ($log)" { (^$stage panel ($pid | into string) | complete).exit_code == 0 }
         # The window is listed a moment before the panel has faded in.
         sleep 1sec
+        print --stderr (^$stage windows)
         # The script touches this as it starts, which is when the clip's time 0 is.
         let mark = $tmp | path join $"($name).start"
         job spawn {
@@ -275,7 +501,6 @@ def finish-glass [
     let name = $id | str replace --all / -
     let scale = $panel.scale
     let margin = $MARGIN * $scale | math round
-    let space = $CAPTION_SPACE * $scale | math round
     let x = [
         ($panel.x - $margin)
         0
@@ -284,13 +509,23 @@ def finish-glass [
         ($panel.y - $margin)
         0
     ] | math max
-    # H.264 takes only even sides. The Dock and the menu bar are above the wallpaper, so the cut
-    # stops short of them.
-    let width = ($panel.width + 2 * $margin) // 2 * 2
-    let height = ([
-        ($panel.y + $panel.height + $margin + $space)
-        $panel.bottom
-    ] | math min) - $y | $in // 2 * 2
+    # Every clip is cut to the same rectangle: the aspect ratio of the page's demo frame (`FRAME`)
+    # with the wallpaper around the panel, so the frame is filled whichever tab shows and
+    # switching never moves it. It must cover the tallest panel with its captions, and end above
+    # the Dock, which is not wallpaper. H.264 takes only even sides.
+    let width = ($FRAME.width * $scale + 2 * $margin) // 2 * 2
+    let height = ($width * $FRAME.height / $FRAME.width | math ceil) // 2 * 2 + 2
+    if $height > $panel.bottom {
+        error make {
+            msg: $"($id): a ($width)x($height) cut doesn't fit above the Dock, at ($panel.bottom)"
+        }
+    }
+    # Sliding it up when the panel is too low for the cut to end above the Dock, by the same
+    # amount for every clip as the panel opens in the same place.
+    let y = [
+        $y
+        ($panel.bottom - $height)
+    ] | math min
     let crop = $"crop=($width):($height):($x):($y)"
     # A key shows in the panel some way after System Events presses it, so the clip is lined up
     # on the frame the first key changed, not on when the script started.

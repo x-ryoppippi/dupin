@@ -3,7 +3,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dupin_core::catalogue::{Catalogue, Change, Entry};
 use dupin_core::{Action, Batch, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
@@ -121,7 +121,7 @@ fn the_catalogue_lists_its_sections_and_typing_ranks_it_natively() {
             "forget",
             &serde_json::json!({"id": "dupin"}),
             &dupin_js_runtime::PageContext::default(),
-            Instant::now() + QUERY_DEADLINE,
+            crate::extensions::deadline_in(QUERY_DEADLINE),
             &no_services(),
         )
         .unwrap();
@@ -248,7 +248,7 @@ fn a_catalogue_change_the_host_rejects_names_the_package() {
         .catalogue(
             "",
             10,
-            Instant::now() + QUERY_DEADLINE,
+            crate::extensions::deadline_in(QUERY_DEADLINE),
             &Call::none(),
             Role::Keyword,
             None,
@@ -326,7 +326,7 @@ fn an_update_removes_rows_from_the_keyword_and_the_main_search() {
             "forget",
             &serde_json::Value::Null,
             &dupin_js_runtime::PageContext::default(),
-            Instant::now() + QUERY_DEADLINE,
+            crate::extensions::deadline_in(QUERY_DEADLINE),
             &no_services(),
         )
         .unwrap();
@@ -358,7 +358,7 @@ fn an_event_that_invalidates_the_catalogue_updates_it_incrementally() {
         .event(
             "clipboard",
             &copied,
-            Instant::now() + QUERY_DEADLINE,
+            crate::extensions::deadline_in(QUERY_DEADLINE),
             &no_services(),
         )
         .unwrap();
@@ -368,7 +368,7 @@ fn an_event_that_invalidates_the_catalogue_updates_it_incrementally() {
         .event(
             "clipboard",
             &serde_json::json!({"type": "image"}),
-            Instant::now() + QUERY_DEADLINE,
+            crate::extensions::deadline_in(QUERY_DEADLINE),
             &no_services(),
         )
         .unwrap();
@@ -454,27 +454,47 @@ fn a_catalogue_asks_the_broker_as_a_search_does_and_never_with_an_activation() {
 #[test]
 fn every_part_of_a_catalogue_shares_one_deadline() {
     dupin_extension_host::skip_inside_a_sandbox!();
+    // Each part does the same work, which `search` does once to measure it.
     let (_folder, extension) = package(
         "",
         &[(
             "main.js",
-            r#"export function items(ctx) {
-                 const end = Date.now() + 150;
-                 while (Date.now() < end) {}
+            r#"function work() {
+                 let sum = 0;
+                 for (let i = 0; i < 1000000; i++) sum += i % 7;
+                 return sum;
+               }
+               export function search() { work(); return []; }
+               export function items(ctx) {
+                 work();
                  const part = Number(ctx.cursor ?? 0) + 1;
                  return { more: part < 10, cursor: String(part), items: [{ id: `part-${part}`, title: `Part ${part}` }] };
                }"#,
         )],
     );
-    // Linked first, so the deadline below only has the parts to cover.
-    extension.check(Instant::now() + QUERY_DEADLINE).unwrap();
-    // Short, since the busy parts hold the extension host every other test shares.
-    let deadline = Duration::from_millis(400);
-    let started = Instant::now();
+    let part = || {
+        let started = super::host_now();
+        extension
+            .query(
+                "x",
+                10,
+                super::deadline_in(QUERY_DEADLINE),
+                || false,
+                &no_services(),
+            )
+            .unwrap();
+        super::host_now() - started
+    };
+    // The first call also starts and links the helper.
+    part();
+    let part = part();
+    // Three parts' worth, which the ten parts outrun only if they share it.
+    let deadline = part * 3;
+    let started = super::host_now();
     let error = extension
         .catalogue("", 10, started + deadline, &Call::none(), Role::Keyword, None)
         .unwrap_err();
-    let elapsed = started.elapsed();
+    let elapsed = super::host_now() - started;
     assert!(
         matches!(&error, dupin_js_runtime::RunError::Failed(diagnostic) if diagnostic.code == "deadline"),
         "{error:?}"
@@ -651,7 +671,7 @@ impl History {
             .catalogue(
                 query,
                 50,
-                Instant::now() + Duration::from_secs(60),
+                crate::extensions::deadline_in(Duration::from_secs(60)),
                 &call,
                 Role::Keyword,
                 None,
@@ -669,7 +689,7 @@ impl History {
             .event(
                 "clipboard",
                 &serde_json::json!({ "type": "text", "text": text }),
-                Instant::now() + Duration::from_secs(60),
+                crate::extensions::deadline_in(Duration::from_secs(60)),
                 &call.services,
             )
             .unwrap();
@@ -799,7 +819,7 @@ fn every_part_is_asked_for_with_the_settings_it_is_handed() {
     let mut fetch = extension.fetch(
         super::host(),
         super::Fetching::Resident,
-        Instant::now() + QUERY_DEADLINE,
+        crate::extensions::deadline_in(QUERY_DEADLINE),
         &never,
         &services,
     );
@@ -813,4 +833,29 @@ fn every_part_is_asked_for_with_the_settings_it_is_handed() {
     assert_eq!(cursor(&first), r#"{"n":1}"#);
     assert_eq!(cursor(&second), r#"{"n":2}"#);
     assert_eq!(cursor(&first), r#"{"n":1}"#);
+}
+
+#[test]
+fn a_binding_finds_one_catalogue_row_by_its_id() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package("", &[("main.js", BOOKMARKS)]);
+    let deadline = || crate::extensions::deadline_in(QUERY_DEADLINE);
+    let rust = super::catalogue_row(&extension, "rust", deadline(), &Call::none())
+        .unwrap()
+        .expect("the row in the second section");
+    assert_eq!(rust.display_title(), "The Rust Book");
+    assert_eq!(rust.id, "extension:marks/rust");
+    assert!(
+        super::catalogue_row(&extension, "nothing", deadline(), &Call::none())
+            .unwrap()
+            .is_none()
+    );
+
+    let (_folder, searching) = package("", &[("main.js", "export function search() { return []; }")]);
+    assert!(
+        super::catalogue_row(&searching, "rust", deadline(), &Call::none())
+            .unwrap()
+            .is_none(),
+        "a package without a catalogue lists no row"
+    );
 }

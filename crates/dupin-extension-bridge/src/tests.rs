@@ -113,6 +113,7 @@ fn world_with(
         calendar: Box::new(fixture::Calendar { today: 0 }),
         windows: Box::new(windows.clone()),
         context: Box::new(fixture::Context),
+        apps: Box::new(Arc::new(fixture::Apps::default())),
     };
     let grants = MemoryLocal::default();
     let bridge = Bridge::new(
@@ -242,7 +243,7 @@ const ASKED: HostRequest = HostRequest { run: 0, call: 1 };
 
 fn guest(body: &str) -> String {
     format!(
-        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context }} from 'dupin';\n{REPORT}\n{body}"
+        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context, apps }} from 'dupin';\n{REPORT}\n{body}"
     )
 }
 
@@ -636,7 +637,8 @@ fn revoking_while_a_request_runs_drops_its_result_and_the_call_is_stale() {
     );
     world.enable();
     world.grant("http:https://api.example.com");
-    *world.http.delay.lock().unwrap() = Duration::from_millis(300);
+    let (release, hold) = std::sync::mpsc::channel();
+    *world.http.hold.lock().unwrap() = Some(hold);
     let world = Arc::new(world);
     let call = world.bridge.call(&world.id, Trigger::Query);
     let searching = {
@@ -653,11 +655,12 @@ fn revoking_while_a_request_runs_drops_its_result_and_the_call_is_stale() {
             )
         })
     };
-    std::thread::sleep(Duration::from_millis(100));
+    wait_for(|| !world.http.requests.lock().unwrap().is_empty());
     world
         .bridge
         .revoke(&world.id, &"http:https://api.example.com".parse().unwrap())
         .unwrap();
+    release.send(()).unwrap();
     let rows = searching.join().unwrap().unwrap();
     assert_eq!(rows[0].title, "revoked");
     assert_eq!(
@@ -920,7 +923,8 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
              export const events = { async clipboard(change) { await storage.put(change.text); } };",
         ),
     ));
-    let delivered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // Noted once the handler has returned, so a delivery still under way is never counted.
+    let delivered = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let (world_for_watch, delivered) = (Arc::downgrade(&world), delivered.clone());
         world.bridge.watch_clipboard(&world.id, move |event| {
@@ -937,7 +941,7 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
                 &|| false,
                 &call.services,
             );
-            delivered.fetch_add(1, Ordering::Relaxed);
+            delivered.lock().unwrap().push(event["text"].clone());
         });
     }
     assert_eq!(world.clipboard.watchers(), 0, "not on, not granted");
@@ -951,11 +955,12 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
     assert_eq!(world.clipboard.watchers(), 1);
 
     world.clipboard.copy("first");
-    wait_for(|| delivered.load(Ordering::Relaxed) == 1);
+    wait_for(|| delivered.lock().unwrap().len() == 1);
     for index in 0..20 {
         world.clipboard.copy(&format!("burst {index}"));
     }
-    wait_for(|| world.stored().first() == Some(&serde_json::json!("burst 19")));
+    wait_for(|| delivered.lock().unwrap().last() == Some(&serde_json::json!("burst 19")));
+    assert_eq!(world.stored().first(), Some(&serde_json::json!("burst 19")));
     let mut seen = world.stored();
     seen.reverse();
     assert_eq!(seen[0], "first");
@@ -966,10 +971,10 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
         .revoke(&world.id, &"clipboard:watch".parse().unwrap())
         .unwrap();
     assert_eq!(world.clipboard.watchers(), 0);
-    let before = delivered.load(Ordering::Relaxed);
+    let before = delivered.lock().unwrap().len();
     world.clipboard.copy("after revoking");
     std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(delivered.load(Ordering::Relaxed), before);
+    assert_eq!(delivered.lock().unwrap().len(), before);
 }
 
 #[test]
@@ -1543,6 +1548,58 @@ fn context_reaches_a_search_only_scope_by_scope_and_only_while_allowed() {
         r#"needs-consent ok {"path":"/Users/me/notes.md"}"#,
         "each scope is allowed on its own"
     );
+}
+
+#[test]
+fn a_search_may_list_running_apps_but_only_a_chosen_action_quits_one() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "apps": ["read", "control"] }),
+        &guest(
+            "const names = async () => (await apps.running()).map((app) => app.name).join(',');
+             export async function search() {
+               return [{ title: `${await report(names)} ${await report(() => apps.quit({ pid: 10 }))}` }];
+             }
+             export const actions = {
+               async quit(data) { return { type: 'toast', text: `${await report(() => apps.quit(data))} ${await report(names)}` }; },
+               async force(data) { return { type: 'toast', text: await report(() => apps.forceQuit(data)) }; },
+               async hide(data) { return { type: 'toast', text: await report(() => apps.hide(data)) }; },
+             };",
+        ),
+    );
+    world.enable();
+    world.grant("apps:read");
+    world.grant("apps:control");
+    assert_eq!(
+        world.first(""),
+        r#"ok "Notes,Editor" needs-activation"#,
+        "with no macOS access of its own, and nothing quits while the user types"
+    );
+    let toast = |name: &str, data: serde_json::Value| {
+        let acted = world.act(name, data).unwrap();
+        match acted.effect {
+            Some(ActionEffect::Toast { text }) => text,
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(
+        toast("hide", serde_json::json!({ "path": "/Applications/Notes.app" })),
+        r#"ok {"app":{"active":false,"bundleId":"com.example.notes","hidden":false,"name":"Notes","path":"/Applications/Notes.app","pid":10},"done":true}"#
+    );
+    assert!(toast("quit", serde_json::json!({ "pid": 10 })).ends_with(r#""done":true} ok "Editor""#));
+    assert_eq!(
+        toast("quit", serde_json::json!({ "pid": 10 })),
+        r#"ok null ok "Editor""#,
+        "it no longer runs"
+    );
+    assert!(toast("force", serde_json::json!({ "pid": 11 })).ends_with(r#""done":true}"#));
+    for invalid in [
+        serde_json::json!({}),
+        serde_json::json!({ "pid": 1, "path": "/a.app" }),
+        serde_json::json!({ "path": "Notes.app" }),
+    ] {
+        assert_eq!(toast("hide", invalid.clone()), "invalid", "{invalid}");
+    }
 }
 
 fn world_with_document() -> World {

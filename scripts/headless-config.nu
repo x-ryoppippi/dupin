@@ -42,6 +42,13 @@ export def scenario-env [script: path, tmp: path]: nothing -> record {
     } else {
         $data
     }
+    # And the app bundles it treats as running, one path per line, as `<name>.running`.
+    let running = $script | path parse | update extension running | path join
+    let data = if ($running | path exists) {
+        $data | merge {DUPIN_HEADLESS_RUNNING: (open --raw $running | lines | where {|line| $line != "" } | str join ":")}
+    } else {
+        $data
+    }
     # And a clipboard history of its own, as `<name>.clipboard/history.json` beside the images it
     # names, in place of the shared one, which the latency baselines are fingerprinted by.
     let clipboard = $script | path parse | update extension clipboard | path join | path join history.json
@@ -70,4 +77,16 @@ export def --wrapped headless [bin: path, ...args: string]: nothing -> nothing {
     if $result.exit_code != 0 {
         error make {msg: $"($bin) ($args | str join ' ') failed:\n($result.stderr)"}
     }
+}
+
+# The arguments to `/usr/bin/env` that start a command with exactly `environment`, inheriting
+# none of this shell's, as `dupin ext render` starts its own: a variable left over from the shell,
+# such as `DO_NOT_TRACK`, would otherwise change what a render or recording draws.
+export def only-env [environment: record]: nothing -> list<string> {
+    $environment | transpose name value | each {|variable| $"($variable.name)=($variable.value)" } | prepend "-i"
+}
+
+# Run Dupin headless with exactly `environment`.
+export def --wrapped headless-in [environment: record, bin: path, ...args: string]: nothing -> nothing {
+    headless /usr/bin/env ...(only-env $environment) $bin ...$args
 }

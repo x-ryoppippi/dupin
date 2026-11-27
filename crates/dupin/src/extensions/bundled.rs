@@ -13,7 +13,14 @@ include!(concat!(env!("OUT_DIR"), "/bundled_seals.rs"));
 /// Extensions, since not everyone wants what they do: moving other apps' windows, running Git
 /// over the repositories in their folders, or running `ps`, `lsof` and `kill` to list and stop
 /// processes.
-pub const OFF_UNTIL_TURNED_ON: &[&str] = &["repo", "window-management", "proc", "port", "agent"];
+pub const OFF_UNTIL_TURNED_ON: &[&str] = &[
+    "repo",
+    "window-management",
+    "proc",
+    "port",
+    "agent",
+    "running-apps",
+];
 
 /// The content hash of each bundled package folder, by folder name, as the build found them.
 #[derive(Clone, Debug)]
@@ -82,7 +89,7 @@ pub fn resources(executable: &Path) -> Option<PathBuf> {
 }
 
 /// Each bundled package's folder, with the `name` and keyword in its package.json.
-pub fn packages(bundled: &Path) -> Vec<(PathBuf, String, String)> {
+pub fn packages(bundled: &Path) -> Vec<(PathBuf, String, Option<String>)> {
     let Ok(entries) = std::fs::read_dir(bundled) else {
         return Vec::new();
     };
@@ -191,6 +198,44 @@ mod tests {
         assert_eq!(seals.0.len(), folders);
     }
 
+    /// A package imports only from its own folder, so that it can be ejected, sealed and
+    /// granted as one, so a module that several bundled packages share is copied into each.
+    #[test]
+    fn a_module_bundled_packages_share_is_the_same_in_each() {
+        const SHARED: &[(&str, &[&str])] = &[("ps.ts", &["agent", "proc"])];
+        let source = directory().unwrap();
+        for (module, packages) in SHARED {
+            let (first, rest) = packages.split_first().unwrap();
+            let canonical = std::fs::read(source.join(first).join(module)).unwrap();
+            for package in rest {
+                assert!(
+                    std::fs::read(source.join(package).join(module)).unwrap() == canonical,
+                    "extensions/{package}/{module} differs from extensions/{first}/{module}; change both"
+                );
+            }
+        }
+    }
+
+    /// Dupin reads `name`, `version` and `dupin` from package.json and ignores the rest, so a
+    /// bundled package says anything else in its README, where someone reads it.
+    #[test]
+    fn a_bundled_package_json_holds_only_what_dupin_or_npm_reads() {
+        let packages = packages(&directory().unwrap());
+        assert!(!packages.is_empty());
+        for (folder, name, _) in packages {
+            let package: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_slice(&std::fs::read(folder.join("package.json")).unwrap()).unwrap();
+            let ignored: Vec<_> = package
+                .keys()
+                .filter(|key| !["name", "version", "private", "dupin"].contains(&key.as_str()))
+                .collect();
+            assert!(
+                ignored.is_empty(),
+                "{name}'s package.json has {ignored:?}, which Dupin ignores"
+            );
+        }
+    }
+
     #[test]
     fn a_folder_the_build_did_not_seal_is_refused() {
         let bundled = tempfile::tempdir().unwrap();
@@ -223,7 +268,7 @@ mod tests {
             .query(
                 "report",
                 10,
-                std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE),
                 || false,
                 &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )

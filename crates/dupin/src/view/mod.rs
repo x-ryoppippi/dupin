@@ -19,13 +19,20 @@ use crate::ui::Ui;
 use theme::divider;
 
 pub use header::HEADER_H;
-pub use results::{row_key, wanted_rows};
+pub(crate) use results::visible_rows;
+pub use results::{list_fit, row_key, wanted_rows};
 pub use theme::{ResolvedTheme, theme_preview};
 
 /// How much of the theme's card color covers the glass.
 const FROST: f32 = 0.45;
 
 pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
+    if s.grows_up() {
+        // Rune moves a fitting window's frame on a spring and lays its content out from the
+        // top; a panel held at its bottom edge would show the field sliding while both move.
+        // Jumping lands the frame and the layout in the same frame.
+        cx.reduced_motion(true);
+    }
     let dark = cx.system_dark();
     let t = ResolvedTheme::new(&s.theme, dark);
     let content = if let Some(picker) = &s.picker {
@@ -44,6 +51,14 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
             .system_material(SystemMaterial::Glass)
             .child(content),
     )
+}
+
+/// `parts`, listed from the field outwards, in the order they stack from the panel's top.
+fn from_field(s: &Ui, mut parts: Vec<El>) -> Vec<El> {
+    if s.grows_up() {
+        parts.reverse();
+    }
+    parts
 }
 
 fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
@@ -67,37 +82,42 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
                 .effect_data([accent.r, accent.g, accent.b, if dark { 1.0 } else { 0.0 }]),
         );
     }
+    panel.children(from_field(s, launcher_parts(s, t, accent)))
+}
+
+/// What the panel shows, from the field outwards.
+fn launcher_parts(s: &Ui, t: &ResolvedTheme, accent: Color) -> Vec<El> {
     if let Some(entry) = &s.script_entry {
-        return panel.children(scripts::script_arguments(s, entry, t));
+        return scripts::script_arguments(s, entry, t).into();
     }
-    panel = panel.child(if s.action_screen.is_some() {
+    let mut parts = vec![if s.action_screen.is_some() {
         actions::action_header(s, t)
     } else {
         header::header(s, t, accent)
-    });
-    panel = notices::panel_notices(panel, s, t, accent);
+    }];
+    notices::panel_notices(&mut parts, s, t, accent);
     if let Some(card) = &s.script_card {
-        return panel.child(divider(t)).child(scripts::script_inline(card, t));
+        parts.extend([divider(t), scripts::script_inline(card, t)]);
+        return parts;
     }
-    panel = notices::search_notices(panel, s, t);
+    notices::search_notices(&mut parts, s, t);
     let items = s.session.items();
     if let Some(draft) = s.form_draft() {
-        panel = panel.child(divider(t)).child(form::form(draft, t, accent));
+        parts.extend([
+            divider(t),
+            form::form(draft, s.list_budget, s.grows_up(), t, accent),
+        ]);
     } else if let Some(renaming) = s.session.renaming() {
-        panel = panel
-            .child(divider(t))
-            .child(files::rename_status(s, renaming, t));
+        parts.extend([divider(t), files::rename_status(s, renaming, t)]);
     } else if s.action_screen.is_some() {
-        panel = panel.child(divider(t)).child(actions::action_list(s, t, accent));
+        parts.extend([divider(t), actions::action_list(s, t, accent)]);
     } else if !items.is_empty() && header::query_problem(s).is_none() {
-        panel = panel
-            .child(divider(t))
-            .child(results::results(s, items, t, accent));
+        parts.extend([divider(t), results::results(s, items, t, accent)]);
     } else if let Some(hint) = header::hint_row(s, t) {
-        panel = panel.child(divider(t)).child(hint);
+        parts.extend([divider(t), hint]);
     }
     if s.session.destination().is_some() {
-        panel = panel.child(divider(t)).child(files::destination_hint(t));
+        parts.extend([divider(t), files::destination_hint(t)]);
     }
-    panel
+    parts
 }

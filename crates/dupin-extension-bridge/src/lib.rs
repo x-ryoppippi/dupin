@@ -25,10 +25,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime};
 
 pub use dupin_broker::{
-    Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
-    Generation, GrantSource, Local, LocalStore, MemoryLocal, OsAccess, OsConsumer, OsPermission, PackageId,
-    Permit, Reconciliation, Request, Revision, SaveError, Scope, ScopeKey, StorageOp, StoreError, Trigger,
-    WindowsAccess,
+    AppsAccess, Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState,
+    Denial, FilesKind, Generation, GrantSource, Local, LocalStore, MemoryLocal, OsAccess, OsConsumer,
+    OsPermission, PackageId, Permit, Reconciliation, Request, Revision, SaveError, Scope, ScopeKey,
+    StorageOp, StoreError, Trigger, WindowsAccess,
 };
 pub use dupin_extension_host::HostRequest;
 use dupin_extension_host::Services as HostServices;

@@ -12,7 +12,7 @@ const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
 const FILE_LIMIT: &str = "file-limit";
 const CLIPBOARD_RETENTION: &str = "clipboard-retention";
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let mut rows = vec![
         calculator_setting(s, k),
         currency_setting(s, k),
@@ -27,7 +27,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         window_management_setting(k),
     ];
     rows.extend(snippet_accessibility(s, k));
-    let mut body = vec![card(k, hair, rows)];
+    let mut body = vec![card(k, rows)];
     body.extend(
         s.scripts_notice
             .as_deref()
