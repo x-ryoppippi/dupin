@@ -34,6 +34,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
+Dev builds keep full debug info for the workspace's own crates only; dependencies carry line tables, so backtraces still name their files and lines. To profile, build with `cargo build -p dupin --profile profiling`: the release build's code, with full debug info and its symbols kept, in `target/profiling/dupin`.
+
 For rebuild times and the sccache decision, see [Build caching](#build-caching).
 
 ## Remote development with Testbox
