@@ -65,19 +65,17 @@ impl ResolvedTheme {
             dupin_core::config::SearchIcon::Symbol(name) => {
                 match crate::symbols::symbol(name, size, self.text_secondary) {
                     Some(pixels) => {
-                        return row()
+                        return el()
                             .key("search-icon")
-                            .h(HEADER_H)
-                            .min_w(size.square)
-                            .center()
-                            .child(el().size(size.square, size.square).pixels(&pixels));
+                            .size(size.square, size.square)
+                            .pixels(&pixels);
                     }
                     None => dupin_core::config::DEFAULT_SEARCH_ICON,
                 }
             }
             dupin_core::config::SearchIcon::Text(glyph) => glyph,
         };
-        row().key("search-icon").h(HEADER_H).min_w(size.square).center().child(
+        row().key("search-icon").min_w(size.square).center().child(
             text(glyph)
                 .font(self.font(TextStyle::new(24.0, 400.0).lh(30.0)))
                 .color(self.text_secondary),
