@@ -144,7 +144,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .virtualize(s.theme.row_height as f32)
             .on_visible_rows(rows_in_view(s, rows.len()))
             .children(list_order(rows, s.grows_up()));
-        return col().key("results").w_full().py(LIST_PAD).child(
+        return results_box(s).child(
             col()
                 .key("scroll")
                 .w_full()
@@ -178,7 +178,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .key("content-rows")
             .w_full()
             .children(list_order(rows, s.grows_up()));
-        return col().key("results").w_full().py(LIST_PAD).child(
+        return results_box(s).child(
             col()
                 .key("content-scroll")
                 .w_full()
@@ -223,7 +223,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             list,
         )
     };
-    col().key("results").w_full().py(LIST_PAD).child(
+    results_box(s).child(
         col()
             .key("scroll")
             .w_full()
@@ -233,6 +233,18 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .instant_changes()
             .child(list.children(list_order(rows, s.grows_up()))),
     )
+}
+
+/// The list's rows change in place as a query is refined, and land at once there; entering or
+/// leaving a command swaps in another command's list as a new element, which fades in whichever
+/// row was selected and whatever entered it. The list it replaces goes at once: fading it out
+/// too would draw both lists under the first keys typed into the command.
+fn results_box(s: &Ui) -> El {
+    col()
+        .key(format!("results-{}", s.session.command_id()))
+        .transition_motion(rune::tok::motion::SETTLE, rune::Anim::INSTANT)
+        .w_full()
+        .py(LIST_PAD)
 }
 
 /// The rows, first match first, in the order they stack from the list's top: a list that runs

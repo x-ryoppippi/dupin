@@ -6,7 +6,22 @@ Add a `tagpr:minor` or `tagpr:major` label to the release pull request for a big
 
 The crates stay at version 0.0.0 and the Nix package reads `VERSION`, so a release doesn't change `Cargo.lock`.
 
-A pull request that tagpr pushes with `GITHUB_TOKEN` starts no workflows, so the tagpr workflow dispatches CI on the release branch itself.
+tagpr runs with a token from the release GitHub App rather than `GITHUB_TOKEN`, whose pushes and pull requests start no workflows: the release pull request has to report `main`'s required checks ([Branch rules](./development.md#branch-rules)), CLA included, like any other. The workflow fails up front when the App's secrets are missing.
+
+### Release App
+
+Create a GitHub App owned by the account that owns the repository, named `dupin-release` (the CLA workflow allowlists its `dupin-release[bot]` commits; if you choose another name, change the allowlist in `.github/workflows/cla.yml` to match):
+
+- No webhook and no callback URL; it only mints installation tokens.
+- Repository permissions: **Contents** read and write (the release branch, the tag and the release), **Pull requests** read and write (the release pull request and its labels), **Issues** read only (tagpr reads the labels of merged pull requests through the issues API). **Metadata** read only is implied. Nothing else.
+- Installable only on this account, and installed on this repository alone.
+
+Generate a private key, then set these repository secrets:
+
+| Secret                    | Value                                        |
+| ------------------------- | -------------------------------------------- |
+| `RELEASE_APP_CLIENT_ID`   | The App's Client ID (from its settings page) |
+| `RELEASE_APP_PRIVATE_KEY` | The whole `.pem` private key                 |
 
 ## CI
 

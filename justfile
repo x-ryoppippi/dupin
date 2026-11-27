@@ -136,3 +136,11 @@ fmt:
 # Bring Cargo.lock and nix/cargo-vendor.nix in step with the Rune rev Cargo.toml pins
 update-rune:
     nu scripts/update-rune.nu
+
+# Create or update the live rulesets to match .github/rulesets (scripts/ruleset.nu apply)
+ruleset-apply *args:
+    nu --no-config-file scripts/ruleset.nu apply "$@"
+
+# Show how the live rulesets differ from .github/rulesets (scripts/ruleset.nu diff)
+ruleset-diff *args:
+    nu --no-config-file scripts/ruleset.nu diff "$@"

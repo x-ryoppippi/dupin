@@ -26,6 +26,10 @@ impl Ui {
             return;
         }
         self.action_screen = None;
+        // Typing lands an entrance still moving, so the list it filters draws once a frame.
+        if tx.clock() - self.entered_at < f64::from(rune::tok::motion::SETTLE.duration) {
+            tx.settle();
+        }
         self.typed_at = tx.clock();
         crate::latency::edit_started(self.typed_at, &self.query.text);
         let effects = self.session.set_query(&self.query.text);
