@@ -35,12 +35,12 @@ tccutil reset All app.dupin.Dupin
 | Where                                 | Holds                                                                                                               |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `~/.config/dupin`                     | `config.toml`, [scripts](./features/scripts.md), [extensions](./features/extensions.md) and `extension-grants.toml` |
-| `~/Library/Application Support/Dupin` | The encrypted store in `storage/`, and copies a file action left unfinished                                         |
+| `~/Library/Application Support/Dupin` | The encrypted store in `storage/`, sync state, and copies a file action left unfinished                             |
 | `~/Library/Caches/Dupin`              | The calculator's exchange rates                                                                                     |
 | `~/Library/Logs/Dupin`                | `dupin.log`                                                                                                         |
 | Keychain: `app.dupin.Dupin.storage`   | The data key, account `data-key`, named "Dupin storage key"                                                         |
-| `defaults` domain `app.dupin.Dupin`   | Whether Dupin has asked for Accessibility                                                                           |
-| `tccutil reset`                       | The Accessibility, Calendars and Paste from Other Apps answers macOS keeps for Dupin                                |
+| `defaults` domain `app.dupin.Dupin`   | Whether Dupin has asked for Accessibility, and where you left the Settings and script output windows                |
+| `tccutil reset`                       | The Accessibility, Automation, Calendars and Paste from Other Apps answers macOS keeps for Dupin                    |
 
 With `XDG_CONFIG_HOME`, `XDG_DATA_HOME` or `XDG_CACHE_HOME` set, the configuration is in `$XDG_CONFIG_HOME/dupin`, the store in `$XDG_DATA_HOME/dupin` and the cache in `$XDG_CACHE_HOME/dupin`; remove those as well.
 
