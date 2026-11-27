@@ -445,10 +445,7 @@ fn kinds() -> &'static Kinds {
 /// The action `subject`'s kind runs first, under the ID and title the row gives it.
 fn kind_action(kinds: &Kinds, subject: &Subject, id: String, title: &str) -> ItemAction {
     let mut action = kinds
-        .resolve(subject, title)
-        .actions
-        .into_iter()
-        .next()
+        .primary(subject, title)
         .expect("the text and URL kinds offer an action for their own subjects");
     action.id = id;
     title.clone_into(&mut action.title);

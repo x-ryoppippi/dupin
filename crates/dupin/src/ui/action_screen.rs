@@ -53,6 +53,34 @@ enum ActionKey {
 }
 
 impl ActionScreen {
+    /// The screen for the row `item`, whose result key is `key`, listing what its kind doesn't
+    /// hide; asking to confirm `confirmation` opens on that action's prompt, as Enter does on
+    /// an action that needs one, hidden or not.
+    fn new(key: String, mut item: dupin_core::Item, confirmation: Option<String>) -> Option<Self> {
+        item.actions
+            .retain(|action| action.is_listed() || confirmation.as_ref() == Some(&action.id));
+        let (selected, stage) = if let Some(action_id) = confirmation {
+            let selected = item.actions.iter().position(|action| action.id == action_id)?;
+            crate::trace::action_screen("confirm");
+            (
+                selected,
+                ActionStage::Confirm {
+                    action_id,
+                    selected: 0,
+                    from_list: false,
+                },
+            )
+        } else {
+            (0, ActionStage::List)
+        };
+        Some(Self {
+            key,
+            item,
+            selected,
+            stage,
+        })
+    }
+
     fn accept_applications(
         &mut self,
         key: &str,
@@ -182,28 +210,9 @@ impl Ui {
         else {
             return;
         };
-        let (selected, stage) = if let Some(action_id) = confirmation {
-            let Some(selected) = item.actions.iter().position(|action| action.id == action_id) else {
-                return;
-            };
-            crate::trace::action_screen("confirm");
-            (
-                selected,
-                ActionStage::Confirm {
-                    action_id,
-                    selected: 0,
-                    from_list: false,
-                },
-            )
-        } else {
-            (0, ActionStage::List)
-        };
-        self.action_screen = Some(ActionScreen {
-            key: id,
-            item: item.clone(),
-            selected,
-            stage,
-        });
+        if let Some(screen) = ActionScreen::new(id, item.clone(), confirmation) {
+            self.action_screen = Some(screen);
+        }
     }
 
     pub fn actions(&mut self, id: &str, tx: &mut Tx) {
@@ -553,6 +562,14 @@ mod action_screen_tests {
     }
 
     fn fixture() -> (Session, ActionScreen) {
+        fixture_with(Item::path(
+            PathBuf::from("/fixture/example"),
+            "Example".into(),
+            vec![],
+        ))
+    }
+
+    fn fixture_with(item: Item) -> (Session, ActionScreen) {
         let origin = CommandId::new("sample.search").unwrap();
         let mut registry = CommandRegistry::new(origin.clone(), None);
         registry
@@ -582,11 +599,7 @@ mod action_screen_tests {
             origin,
             Delivery::Batch {
                 generation,
-                items: vec![Item::path(
-                    PathBuf::from("/fixture/example"),
-                    "Example".into(),
-                    vec![],
-                )],
+                items: vec![item],
             },
         );
         session.intent(Intent::Actions);
@@ -687,5 +700,73 @@ mod action_screen_tests {
         assert_eq!(screen.key(&Key::Escape, false), ActionKey::Stay);
         assert!(matches!(screen.stage, ActionStage::List));
         assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
+    }
+
+    #[test]
+    fn a_hidden_action_leaves_the_list_but_keeps_its_route_and_shortcut() {
+        use dupin_core::kind::QUICK_LOOK;
+
+        let kinds = dupin_mac::kinds::native();
+        kinds.configure(
+            &dupin_core::Config::parse(
+                "[advanced.kinds.file]\nhide = [\"open\", \"quick-look\"]\norder = [\"reveal\"]",
+            )
+            .unwrap()
+            .advanced
+            .kinds,
+        );
+        let path = PathBuf::from("/fixture/example.txt");
+        let item = kinds.file(path.clone(), "example.txt".into(), vec![], false);
+        let (mut session, _) = fixture_with(item.clone());
+        let key = session.result_key(0);
+
+        let screen = ActionScreen::new(key.clone(), item.clone(), None).unwrap();
+        let listed: Vec<_> = screen
+            .item
+            .actions
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "reveal",
+                "open-with",
+                "copy-name",
+                "rename",
+                "move-to",
+                "copy-to",
+                "duplicate",
+                "compress",
+                "trash"
+            ]
+        );
+        assert_eq!(
+            ActionScreen::new(key.clone(), item, Some("open".into()))
+                .unwrap()
+                .item
+                .item_action("open")
+                .map(|action| action.title.as_str()),
+            Some("Open"),
+            "a hidden action its route confirms is shown for the prompt"
+        );
+
+        assert_eq!(
+            session.intent(Intent::Open).unwrap().first(),
+            Some(&Effect::Run(Action::Open(path.clone()))),
+            "Enter still opens"
+        );
+        let (mut session, _) = fixture_with(kinds.file(path.clone(), "example.txt".into(), vec![], false));
+        assert_eq!(
+            session.intent(Intent::OpenAlternate).unwrap().first(),
+            Some(&Effect::Run(Action::Reveal(path.clone())))
+        );
+        let (mut session, _) = fixture_with(kinds.file(path.clone(), "example.txt".into(), vec![], false));
+        let key = session.result_key(0);
+        assert_eq!(
+            session.run_key_action(&key, QUICK_LOOK).first(),
+            Some(&Effect::Run(Action::Preview(path))),
+            "⌘Y still previews"
+        );
     }
 }

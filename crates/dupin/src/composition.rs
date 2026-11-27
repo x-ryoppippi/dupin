@@ -384,15 +384,28 @@ pub fn summary(advanced: &Advanced) -> Vec<String> {
         lines.push(format!("Main search also searches {}", appended.join(", ")));
     }
     let kinds = &advanced.kinds;
-    for (kind, actions) in [
-        ("Text", &kinds.text.actions),
-        ("URL", &kinds.url.actions),
-        ("File", &kinds.file.actions),
-        ("App", &kinds.app.actions),
+    for (kind, config) in [
+        ("Text", &kinds.text),
+        ("URL", &kinds.url),
+        ("File", &kinds.file),
+        ("App", &kinds.app),
     ] {
-        if !actions.is_empty() {
-            let titles: Vec<_> = actions.iter().map(|action| action.title.as_str()).collect();
+        if !config.actions.is_empty() {
+            let titles: Vec<_> = config
+                .actions
+                .iter()
+                .map(|action| action.title.as_str())
+                .collect();
             lines.push(format!("{kind} actions: {}", titles.join(", ")));
+        }
+        if !config.order.is_empty() {
+            lines.push(format!(
+                "{kind} actions listed first: {}",
+                config.order.join(", ")
+            ));
+        }
+        if !config.hide.is_empty() {
+            lines.push(format!("{kind} actions hidden: {}", config.hide.join(", ")));
         }
     }
     lines
@@ -499,6 +512,9 @@ script = "open-in-zed"
 [[advanced.kinds.text.actions]]
 title = "Translate"
 url = "https://translate.example/?q={text}"
+[advanced.kinds.app]
+hide = ["quick-look"]
+order = ["reveal"]
 "#,
         );
         assert_eq!(
@@ -508,6 +524,8 @@ url = "https://translate.example/?q={text}"
                 "Main search also searches files",
                 "Text actions: Translate",
                 "File actions: Open in Zed",
+                "App actions listed first: reveal",
+                "App actions hidden: quick-look",
             ]
         );
     }

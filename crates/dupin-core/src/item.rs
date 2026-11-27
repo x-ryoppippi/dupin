@@ -197,6 +197,8 @@ pub struct ItemAction {
     pub(crate) action: Action,
     pub(crate) disposition: ActionDisposition,
     pub(crate) confirmation: Option<Confirmation>,
+    /// Left out of the action screen; its route and shortcut still run it.
+    pub(crate) hidden: bool,
 }
 
 impl ItemAction {
@@ -207,7 +209,13 @@ impl ItemAction {
             action,
             disposition: ActionDisposition::Dismiss,
             confirmation: None,
+            hidden: false,
         }
+    }
+
+    /// Whether the action screen lists it.
+    pub fn is_listed(&self) -> bool {
+        !self.hidden
     }
 
     /// Leave the current search open after this action runs.
@@ -413,7 +421,7 @@ impl Item {
     }
 
     pub fn has_actions(&self) -> bool {
-        !self.actions.is_empty() || !self.payload.is_empty()
+        self.actions.iter().any(ItemAction::is_listed) || !self.payload.is_empty()
     }
 
     pub fn display_title(&self) -> &str {
