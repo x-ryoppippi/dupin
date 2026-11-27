@@ -10,8 +10,8 @@
 ## About
 
 - [Philosophy](./philosophy.md): why Dupin exists: built for searching, a launcher and nothing more, fast by rule, extensions agents can write
-- [FAQ](./faq.md): short answers on installing, privacy, extensions and how Dupin compares
 - [The name](./name.md): why Dupin, and the Mac launchers it descends from
+- [FAQ](./faq.md): short answers on installing, privacy, extensions and how Dupin compares
 
 ## Built-in features
 
