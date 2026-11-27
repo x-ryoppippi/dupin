@@ -1,14 +1,14 @@
 {
-	"commit": "5f1ea197e2df4bd097e1300dfd5ae88e71b5009a",
-	"script_sha256": "59e149801f81d4860907a0de291133773c379d569380d0e360763e741b99e001",
-	"cargo_lock_sha256": "a35983daceb8e5c817bf019369dbeea3496eb854e413f7e97f110f9fb644139c",
+	"commit": "983024e86a199abf3bd923965c8243ee8fcfee56",
+	"script_sha256": "d0ff12f5b25ed06099fb2dc1251849fcedf936a634187f75a22790b6aaaa4553",
+	"cargo_lock_sha256": "95df031cf62fc55c739c1eda01a8b819847aab8f228f34a223f1a8597ac5347e",
 	"nix": "nix (Nix) 2.35.4",
 	"host": {
 		"name": "Darwin",
-		"os_version": "26.3",
-		"kernel_version": "25.3.0"
+		"os_version": "27.0",
+		"kernel_version": "27.0.0"
 	},
-	"cpus": 6,
+	"cpus": 12,
 	"measurements": [
 		{
 			"edit": "dupin UI, function body",
@@ -16,18 +16,18 @@
 			"checks": [
 				{
 					"check": "lint-and-test",
-					"seconds": 36.169929042,
+					"seconds": 68.572813084,
 					"built": ["dupin-lint-and-test-0.1.0.drv"]
 				},
 				{
 					"check": "hawk",
-					"seconds": 74.473049875,
+					"seconds": 15.81865675,
 					"built": ["dupin-hawk-0.1.0.drv"]
 				},
 				{
 					"check": "dupin",
-					"seconds": 106.381459834,
-					"built": ["dupin-0.1.0.drv", "dupin-0.1.0.drv"]
+					"seconds": 144.602263417,
+					"built": ["dupin-0.1.0.drv", "dupin-third-party-notices.drv", "dupin-0.1.0.drv"]
 				}
 			]
 		},
@@ -37,18 +37,18 @@
 			"checks": [
 				{
 					"check": "lint-and-test",
-					"seconds": 36.435780208,
+					"seconds": 68.078013291,
 					"built": ["dupin-lint-and-test-0.1.0.drv"]
 				},
 				{
 					"check": "hawk",
-					"seconds": 66.482635958,
+					"seconds": 15.86156225,
 					"built": ["dupin-hawk-0.1.0.drv"]
 				},
 				{
 					"check": "dupin",
-					"seconds": 100.112455209,
-					"built": ["dupin-0.1.0.drv", "dupin-0.1.0.drv"]
+					"seconds": 144.562353959,
+					"built": ["dupin-0.1.0.drv", "dupin-third-party-notices.drv", "dupin-0.1.0.drv"]
 				}
 			]
 		},
@@ -58,18 +58,18 @@
 			"checks": [
 				{
 					"check": "lint-and-test",
-					"seconds": 34.335414041,
+					"seconds": 68.521727167,
 					"built": ["dupin-lint-and-test-0.1.0.drv"]
 				},
 				{
 					"check": "hawk",
-					"seconds": 63.506926584,
+					"seconds": 15.974392833,
 					"built": ["dupin-hawk-0.1.0.drv"]
 				},
 				{
 					"check": "dupin",
-					"seconds": 103.788624584,
-					"built": ["dupin-0.1.0.drv", "dupin-0.1.0.drv"]
+					"seconds": 144.328818958,
+					"built": ["dupin-third-party-notices.drv", "dupin-0.1.0.drv", "dupin-0.1.0.drv"]
 				}
 			]
 		},
@@ -79,17 +79,17 @@
 			"checks": [
 				{
 					"check": "lint-and-test",
-					"seconds": 0.053175292,
+					"seconds": 0.06630225,
 					"built": []
 				},
 				{
 					"check": "hawk",
-					"seconds": 0.050658042,
+					"seconds": 0.0652215,
 					"built": []
 				},
 				{
 					"check": "dupin",
-					"seconds": 0.049330916,
+					"seconds": 0.064921708,
 					"built": []
 				}
 			]
@@ -100,18 +100,18 @@
 			"checks": [
 				{
 					"check": "lint-and-test",
-					"seconds": 39.425303208,
+					"seconds": 67.729686583,
 					"built": ["dupin-lint-and-test-9.9.9.drv"]
 				},
 				{
 					"check": "hawk",
-					"seconds": 63.71823475,
+					"seconds": 15.81392825,
 					"built": ["dupin-hawk-9.9.9.drv"]
 				},
 				{
 					"check": "dupin",
-					"seconds": 101.465148792,
-					"built": ["dupin-9.9.9.drv", "dupin-9.9.9.drv"]
+					"seconds": 144.547261458,
+					"built": ["dupin-third-party-notices.drv", "dupin-9.9.9.drv", "dupin-9.9.9.drv"]
 				}
 			]
 		}
