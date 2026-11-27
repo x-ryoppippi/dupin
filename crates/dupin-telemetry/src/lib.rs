@@ -143,3 +143,5 @@ mod tests {
         }
     }
 }
+
+// Probe for the check job without the release build; not for merging.
