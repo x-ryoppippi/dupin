@@ -1,15 +1,8 @@
-use std::path::Path;
-
 use dupin_core::{Action, CommandId, Effect, Session};
 use rune::Tx;
 use rune::raw_window_handle::RawWindowHandle;
 
 use super::{Busy, Ui, query::mark_session_query};
-
-fn same_bundle_path(path: &Path, running_bundle: &Path) -> bool {
-    let resolved = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_owned());
-    resolved(path) == resolved(running_bundle)
-}
 
 impl Ui {
     pub(super) fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
@@ -116,7 +109,7 @@ impl Ui {
                     Action::Compress(path) => self.compress_file(path),
                     Action::OpenWith { path, application } => self
                         .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
-                    Action::Open(path) => self.open_path(path),
+                    Action::Open(path) => self.run_workspace_action(dupin_mac::workspace::Action::Open(path)),
                     Action::Reveal(path) => {
                         self.run_workspace_action(dupin_mac::workspace::Action::Reveal(path))
                     }
@@ -154,23 +147,6 @@ impl Ui {
 
     pub(super) fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
         self.run_native_action(move || dupin_mac::workspace::run(&action));
-    }
-
-    fn open_path(&self, path: std::path::PathBuf) {
-        let running_bundle = dupin_mac::bundle::path();
-        let me = self.me.clone();
-        let busy = Busy::new(self.running.clone());
-        std::thread::spawn(move || {
-            let is_running_bundle = same_bundle_path(&path, &running_bundle);
-            me.update(move |ui, _| {
-                if is_running_bundle {
-                    ui.prefs.update(|prefs, _| prefs.open_settings());
-                } else {
-                    ui.run_workspace_action(dupin_mac::workspace::Action::Open(path));
-                }
-            });
-            drop(busy);
-        });
     }
 
     fn run_native_action(&self, run: impl FnOnce() -> Result<(), String> + Send + 'static) {
@@ -215,23 +191,8 @@ fn entered(shown: &mut CommandId, session: &Session) -> bool {
 mod tests {
     use dupin_core::searcher::Delivery;
     use dupin_core::{Config, History, Intent, Item};
-    use std::os::unix::fs::symlink;
 
     use super::*;
-
-    #[test]
-    fn recognizes_the_running_bundle_through_an_application_link() {
-        let directory = tempfile::tempdir().unwrap();
-        let bundle = directory.path().join("Dupin.app");
-        let link = directory.path().join("Applications/Dupin.app");
-        std::fs::create_dir_all(&bundle).unwrap();
-        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
-        symlink(&bundle, &link).unwrap();
-
-        assert!(same_bundle_path(&bundle, &bundle));
-        assert!(same_bundle_path(&link, &bundle));
-        assert!(!same_bundle_path(&directory.path().join("Other.app"), &bundle));
-    }
 
     fn session() -> Session {
         let config = Config::parse("[calendar]\nenabled = true").unwrap();

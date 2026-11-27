@@ -224,6 +224,19 @@ impl Ui {
         self.settings_after_close = true;
     }
 
+    /// Dupin is opened again while it runs (its app row, Finder, Spotlight, `open`): as an
+    /// accessory app it has no window of its own to bring back, so Settings opens.
+    pub fn reopened(&mut self, _: bool, tx: &mut Tx) -> bool {
+        if self.shown {
+            self.prepare_settings();
+            self.dismiss(tx);
+        } else {
+            crate::trace::settings("reopened");
+            self.prefs.update(|prefs, _| prefs.open_settings());
+        }
+        true
+    }
+
     pub fn closed(&mut self, tx: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
         let show_snapshots = std::mem::take(&mut self.snapshots_after_close);
