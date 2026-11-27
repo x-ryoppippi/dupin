@@ -9,7 +9,7 @@ name: Latency
 # fails the job. CI calls this workflow whenever the app could have changed, and its required
 # e2e job fails unless this one passed, so a port that falls behind native can't merge.
 # Dispatching with `ref` measures that commit's native implementations instead, to record such a
-# baseline.
+# baseline: only the app comes from that commit, and the benchmark from the dispatched branch.
 on:
   workflow_call:
   workflow_dispatch:
@@ -48,21 +48,32 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      # A baseline's results must carry the fingerprint of the benchmark a port is measured by
+      # today, and the commit may predate the recipes and scripts that measure it, so only its
+      # build and its native implementations come from this checkout.
+      - name: Check out the commit to measure
+        if: ${{ inputs.ref }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           ref: ${{ steps.target.outputs.sha }}
+          path: target/native-at
           persist-credentials: false
 
       - uses: ./.github/actions/setup-nix-cache
       - run: nix profile install --inputs-from . nixpkgs#just nixpkgs#nushell
 
-      - run: just latency-build
+      - env:
+          NATIVE_AT: ${{ inputs.ref && 'target/native-at' || '' }}
+        run: just latency-build ${NATIVE_AT:+"./$NATIVE_AT"}
 
-      # A baseline is of native implementations; a commit's ports may not run in its own build.
       - name: Measure
         env:
-          IMPLEMENTATION: ${{ inputs.ref && 'native' || '' }}
+          NATIVE_AT: ${{ inputs.ref && 'target/native-at' || '' }}
         run: >-
           just latency-measure --out "$RUNNER_TEMP/latency/results.json"
-          ${IMPLEMENTATION:+--implementation "$IMPLEMENTATION"}
+          ${NATIVE_AT:+--native-at "$NATIVE_AT"}
 
       # Comparing with main is informational, so none of its steps can fail the job: a pull
       # request's artifact also carries main's results it was compared with, and

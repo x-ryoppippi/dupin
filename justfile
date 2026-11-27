@@ -89,8 +89,9 @@ extension-host-test:
 warm-tests:
     cargo test --workspace --no-run --locked
 
-latency-build:
-    nix build .#dupin-latency --out-link result-latency
+# Build the latency binary of the flake at `flake`, another commit's checkout to record its native baseline
+latency-build flake=".":
+    nix build "$1#dupin-latency" --out-link result-latency
 
 # Measure keypress latency with `latency-build`'s binary (scripts/latency.nu run)
 latency-measure *args:

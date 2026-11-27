@@ -8,6 +8,7 @@ use ../latency.nu [
     checked-main
     checked-results
     display-groups
+    native-at
     render
     parity-pairs
     stale
@@ -442,6 +443,72 @@ def main [] {
         [tall]
     ]
     assert equal (display-groups $features absent) []
+
+    # A baseline measures another checkout's native implementations, read from it, with this
+    # catalogue's scenarios, and nothing else that checkout declares.
+    let checkout = mktemp --directory
+    mkdir ($checkout | path join scripts/latency)
+    {
+        features: {
+            search: {
+                native: {config: "search.toml", provider: apps.search}
+            }
+            calculator: {
+                native: {
+                    config: "calc.toml"
+                    provider: calculator.evaluate
+                    extensions: "calc.extensions"
+                }
+                extension: {
+                    extends: native
+                    provider: calculator.evaluate
+                    package: "bundled:calculator"
+                }
+            }
+            emoji: {
+                extension: {
+                    config: "emoji.toml"
+                    provider: extension.emoji
+                    package: "bundled:emoji"
+                }
+            }
+        }
+        scenarios: [
+            {
+                id: calculator.old
+                feature: calculator
+                prefix: ""
+                typed: "1+1"
+            }
+        ]
+    }
+    | to toml
+    | save ($checkout | path join scripts/latency/scenarios.toml)
+    let scenarios = [
+        {
+            id: calculator.arithmetic
+            feature: calculator
+            prefix: ""
+            typed: "12*3"
+        }
+    ]
+    assert equal (native-at {features: {}, scenarios: $scenarios} $checkout) {
+        features: {
+            search: {native: {config: ($checkout | path join search.toml), provider: apps.search}}
+            calculator: {
+                native: {
+                    config: ($checkout | path join calc.toml)
+                    provider: calculator.evaluate
+                    extensions: ($checkout | path join calc.extensions)
+                }
+            }
+        }
+        scenarios: $scenarios
+    }
+    rm --recursive $checkout
+    let empty = mktemp --directory
+    assert error { native-at {features: {}, scenarios: []} $empty }
+    rm --recursive $empty
 
     # Every implementation in the catalogue resolves, and every scenario names a feature it has.
     let catalogue = open ($env.FILE_PWD | path dirname | path join latency scenarios.toml)
