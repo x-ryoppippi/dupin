@@ -7,7 +7,7 @@ import { repo } from '../site.ts';
 export const sections = [
 	{
 		title: 'Getting started',
-		pages: ['usage.md', 'tutorial.md', 'configuration.md', 'features/keywords.md'],
+		pages: ['usage.md', 'tutorial.md', 'configuration.md', 'features/keywords.md', 'uninstall.md'],
 	},
 	{ title: 'About', pages: ['philosophy.md', 'name.md', 'faq.md'] },
 	{
@@ -50,6 +50,7 @@ export const sections = [
 			'features/web-searches.md',
 			'features/maps.md',
 			'features/window-management.md',
+			'features/running-apps.md',
 			'features/processes.md',
 			'features/ports.md',
 			'features/coding-agents.md',

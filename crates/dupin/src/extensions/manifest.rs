@@ -507,7 +507,7 @@ pub(super) fn parse_capabilities(capabilities: &Value) -> Result<dupin_broker::C
             .field(format!("dupin.{}", problem.field));
         match problem.hint {
             Some(hint) => diagnostic.hint(hint),
-            None => diagnostic.hint("See the capability sections of docs/features/extensions.md."),
+            None => diagnostic.hint("See the capability sections of docs/features/extension-permissions.md."),
         }
     })
 }

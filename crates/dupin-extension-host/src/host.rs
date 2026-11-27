@@ -1039,14 +1039,7 @@ impl Helper {
         let footprint_limit = FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64 + request.allowance;
         self.footprint_limit = footprint_limit;
         let mut cancelled = None;
-        // Services keep to the wall clock, so they are given the time left as a moment on it.
-        let mut requests = Requests::new(
-            services.clone(),
-            Instant::now() + remaining,
-            id,
-            self.socket.clone(),
-            shared.workers.clone(),
-        );
+        let mut requests = Requests::new(services.clone(), id, self.socket.clone(), shared.workers.clone());
         loop {
             match self.replies.recv_timeout(shared.tick) {
                 Ok((
@@ -1061,7 +1054,7 @@ impl Helper {
                     return Ok((answer, tail));
                 }
                 Ok((FromHelper::Host { id: asking, call, op }, args)) if asking == id => {
-                    requests.start(call, op, args).map_err(|problem| {
+                    requests.start(call, op, args, meter.due()).map_err(|problem| {
                         RunError::Failed(host_error(format!(
                             "the extension host broke the rules for host requests: {problem}"
                         )))
@@ -1115,7 +1108,6 @@ static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
 /// services learn which replies the guest took.
 struct Requests {
     services: Arc<dyn Services>,
-    deadline: Instant,
     cancelled: Arc<AtomicBool>,
     /// The helper's id for the run.
     run: u64,
@@ -1134,14 +1126,12 @@ struct Requests {
 impl Requests {
     fn new(
         services: Arc<dyn Services>,
-        deadline: Instant,
         run: u64,
         socket: Arc<Mutex<UnixStream>>,
         workers: Arc<Workers>,
     ) -> Self {
         Self {
             services,
-            deadline,
             cancelled: Arc::default(),
             run,
             token: NEXT_RUN.fetch_add(1, Ordering::Relaxed),
@@ -1154,9 +1144,9 @@ impl Requests {
         }
     }
 
-    /// Starts request `call`. The guest runtime keeps to these bounds itself, so a helper that
-    /// breaks one has been subverted and is stopped.
-    fn start(&mut self, call: u32, op: String, args: Vec<u8>) -> Result<(), &'static str> {
+    /// Starts request `call`, due as `due` says. The guest runtime keeps to these bounds itself,
+    /// so a helper that breaks one has been subverted and is stopped.
+    fn start(&mut self, call: u32, op: String, args: Vec<u8>, due: Due) -> Result<(), &'static str> {
         if call != self.last + 1 || call > dupin_js_runtime::MAX_CALLS {
             return Err("a request out of sequence");
         }
@@ -1170,14 +1160,13 @@ impl Requests {
         self.waiting.fetch_add(1, Ordering::AcqRel);
         let services = self.services.clone();
         let cancelled = self.cancelled.clone();
-        let deadline = self.deadline;
         let reply = self.reply(call);
         let request = HostRequest {
             run: self.token,
             call,
         };
         let started = self.workers.run(Box::new(move || {
-            reply.send(&services.call(request, &op, &args, deadline, &cancelled));
+            reply.send(&services.call(request, &op, &args, due.at(), &cancelled));
         }));
         if started.is_err() {
             self.reply(call)
@@ -1332,6 +1321,23 @@ fn footprint(pid: u32) -> Option<u64> {
     (status == 0).then(|| unsafe { usage.assume_init() }.ri_phys_footprint)
 }
 
+/// When a host request must be answered by, on the wall clock its services keep to.
+#[derive(Clone, Copy)]
+enum Due {
+    At(Instant),
+    /// This long after the request starts.
+    Left(Duration),
+}
+
+impl Due {
+    fn at(self) -> Instant {
+        match self {
+            Due::At(at) => at,
+            Due::Left(left) => Instant::now() + left,
+        }
+    }
+}
+
 /// What a host measures its calls' deadlines on.
 enum Clock {
     /// The wall clock: the launcher answers a person, who waits however busy the Mac is.
@@ -1383,6 +1389,16 @@ impl<'a> Meter<'a> {
         match self.clock {
             Clock::Wall => Instant::now(),
             Clock::Processor { .. } => self.from + self.read().saturating_sub(self.used),
+        }
+    }
+
+    /// When a host request asked for now is due. Services keep to the wall clock: on it the
+    /// call's deadline itself, and on a processor clock the time the call has left, from when
+    /// the request starts on its worker, since waiting for one takes none of the guest's time.
+    fn due(&self) -> Due {
+        match (self.clock, self.deadline) {
+            (Clock::Wall, Some(deadline)) => Due::At(deadline),
+            _ => Due::Left(self.remaining()),
         }
     }
 

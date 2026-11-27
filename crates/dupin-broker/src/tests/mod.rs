@@ -64,7 +64,7 @@ fn caps(value: serde_json::Value) -> Capabilities {
     Capabilities::parse(&value).unwrap_or_else(|diagnostics| panic!("{diagnostics:#?}"))
 }
 
-/// Every capability, as the examples in docs/features/extensions.md declare them.
+/// Every capability, as the example in docs/capability-broker.md declares them.
 fn everything() -> Capabilities {
     caps(json!({
         "http": [{ "origin": "https://api.github.com", "methods": ["GET", "POST"] }],

@@ -30,14 +30,8 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-nix-cache
-
-      # Every flake check except those that need the Rust builds, which build runs, so a new
-      # quick check lands here.
-      - run: |
-          read -ra checks <<<"$(nix eval --raw .#checks.aarch64-darwin --apply '
-            checks: toString (map (name: ".#checks.aarch64-darwin." + name)
-              (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" "bundled-extension-scopes" ])))')"
-          nix build --no-link "${checks[@]}"
+      - run: nix profile install --inputs-from . nixpkgs#just
+      - run: just ci-check
 
   # A pull request that only touches prose (docs/, experiments/, the top-level Markdown files) or
   # website/ cannot change the app or the collector: no Nix build reads them (package.nix's
@@ -116,18 +110,11 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-nix-cache
+      - run: nix profile install --inputs-from . nixpkgs#just nixpkgs#nushell
+      - run: just ci-build
 
-      # Clippy, tests, Hawk's analysis toolchain, the release app bundle and the scopes its
-      # bundled extensions declare.
-      - run: >-
-          nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.hawk
-          .#checks.aarch64-darwin.dupin .#checks.aarch64-darwin.bundled-extension-scopes
-
-      # The bundle is already in the store. tar keeps its executable bits, which
-      # upload-artifact drops.
-      - run: |
-          nix build .#dupin
-          tar -czf "$RUNNER_TEMP/Dupin.app.tar.gz" -C result/Applications Dupin.app
+      # The bundle is already in the store.
+      - run: just bundle-archive "$RUNNER_TEMP/Dupin.app.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Dupin.app
@@ -138,10 +125,7 @@ jobs:
       # `size` artifacts are what pull requests compare with; size-comment.yml comments with it.
       - name: Measure the app's size
         continue-on-error: true
-        run: >-
-          nix shell --inputs-from . nixpkgs#nushell --command
-          nu --no-config-file scripts/size.nu measure result/Applications/Dupin.app
-          --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/size/size.json"
+        run: just size-measure --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/size/size.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         continue-on-error: true
         with:
@@ -155,9 +139,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: >-
-          nix shell --inputs-from . nixpkgs#nushell --command
-          nu --no-config-file scripts/size.nu report "$RUNNER_TEMP/size/size.json"
-          --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+          just size-report "$RUNNER_TEMP/size/size.json" --repo "$GITHUB_REPOSITORY" --commit "$HEAD"
+          >> "$GITHUB_STEP_SUMMARY"
 
   # The extension host confines itself with sandbox_init, which macOS refuses inside the Nix
   # build sandbox, so lint-and-test skips the tests that start it. They run here natively, where
@@ -178,15 +161,7 @@ jobs:
           cache-scope: extension-host
 
       - name: Test the extension host outside the Nix sandbox
-        env:
-          DUPIN_REQUIRE_EXTENSION_HOST: '1'
-        run: |
-          while IFS= read -r crate; do
-            set -- "$@" "--package=$crate"
-          done < <(git grep -l 'skip_inside_a_sandbox!' -- 'crates/*.rs' | cut -d/ -f2 | sort -u)
-          test "$#" -gt 0
-          echo "Testing $*"
-          nix develop --command cargo test --locked "$@"
+        run: nix develop --command just extension-host-test
 
   # Keypress latency, and the bundled extensions' parity with native (latency.yml).
   latency:
@@ -211,14 +186,12 @@ jobs:
       - uses: ./.github/actions/setup-nix-cache
         with:
           cache-scope: search-quality
+      - run: nix profile install --inputs-from . nixpkgs#just nixpkgs#nushell
 
-      - run: nix build .#dupin-search-quality --out-link result-search-quality
+      - run: just search-quality-build
 
       - name: Measure
-        run: >-
-          nix shell --inputs-from . nixpkgs#nushell --command
-          nu --no-config-file scripts/search-quality.nu run --bin result-search-quality/bin/dupin-search-quality
-          --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/search-quality/results.json"
+        run: just search-quality-measure --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/search-quality/results.json"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -233,8 +206,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: >-
-          nix shell --inputs-from . nixpkgs#nushell --command
-          nu --no-config-file scripts/search-quality.nu report "$RUNNER_TEMP/search-quality/results.json"
+          just search-quality-report "$RUNNER_TEMP/search-quality/results.json"
           --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
 
   # Drives the built app. It needs only build's Dupin.app, so it runs beside latency, the longest
