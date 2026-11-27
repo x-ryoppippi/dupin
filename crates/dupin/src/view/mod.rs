@@ -19,7 +19,8 @@ use crate::ui::Ui;
 use theme::divider;
 
 pub use header::HEADER_H;
-pub use results::{DEFAULT_LIST_BUDGET, list_budget, row_key, wanted_rows};
+pub(crate) use results::visible_rows;
+pub use results::{list_fit, row_key, wanted_rows};
 pub use theme::{ResolvedTheme, theme_preview};
 
 /// How much of the theme's card color covers the glass.

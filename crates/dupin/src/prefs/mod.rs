@@ -143,6 +143,8 @@ pub struct Prefs {
     /// Settings itself, which a change written on a worker thread reports back to.
     me: AppHandle<Prefs>,
     sync: sync::SyncPane,
+    /// The display the panel opens on, which the row count's recommendation is for.
+    panel_screen: Option<crate::ui::PanelScreen>,
 }
 
 impl Prefs {
@@ -172,6 +174,7 @@ impl Prefs {
             snippets: snippets::Snippets::new(&config),
             me,
             sync: sync::SyncPane::default(),
+            panel_screen: crate::ui::PanelScreen::current(config.display),
             config,
             current,
             page: Page::General,
@@ -213,6 +216,11 @@ impl Prefs {
         if page == Page::Sync {
             self.sync_ask(crate::control::SyncAction::Status {});
         }
+    }
+
+    /// The panel opened on another display.
+    pub fn reflect_panel_screen(&mut self, screen: Option<crate::ui::PanelScreen>) {
+        self.panel_screen = screen;
     }
 
     pub fn reflect_extensions(

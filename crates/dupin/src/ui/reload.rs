@@ -48,6 +48,8 @@ impl Ui {
             self.apply(effects, tx);
         }
         self.position = config.position;
+        self.rows = config.rows;
+        self.fit_list();
         self.display = config.display;
         if self.display != DisplaySelection::Active {
             self.display_notice = None;

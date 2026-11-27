@@ -27,7 +27,7 @@ pub use aliases::{AliasTarget, Aliases, MAX_ALIASES, check_alias};
 pub use calendar::Calendar;
 pub use clipboard::{Clipboard, Retention};
 pub use hotkeys::{Address, HotkeyTarget};
-pub use panel::{DisplaySelection, InputSource, Position};
+pub use panel::{DisplaySelection, InputSource, Position, Rows};
 pub use snippets::Snippet;
 pub use sync::Sync;
 pub use theme::{Backdrop, Colors, DEFAULT_SEARCH_ICON, FontFamily, SearchIcon, Theme};
@@ -71,6 +71,8 @@ pub struct Config {
     pub display: DisplaySelection,
     /// Where the panel opens on the selected display.
     pub position: Position,
+    /// How many result rows the panel shows before its list scrolls.
+    pub rows: Rows,
     /// The keyboard input source to type with while the panel shows.
     pub input_source: InputSource,
     /// Whether a signed release build installs its channel's updates by itself. Builds
@@ -119,6 +121,7 @@ impl Default for Config {
             snippet_keywords: snippets::default_keywords(),
             snippet_paste: snippets::DEFAULT_PASTE,
             position: Position::default(),
+            rows: Rows::default(),
             input_source: InputSource::default(),
             auto_update: updates::DEFAULT_ENABLED,
             telemetry: telemetry::DEFAULT_ENABLED,
@@ -213,6 +216,7 @@ mod tests {
             "bindings",
             "display",
             "position",
+            "rows",
             "input_source",
             "backdrop",
             "calendar",

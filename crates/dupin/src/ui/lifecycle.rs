@@ -106,9 +106,21 @@ impl Ui {
     fn place_panel(&mut self) {
         self.display_notice = None;
         let edge = panel_edge(self.position);
-        let (display, align, inset, margin) = if !rune::tooling::is_headless()
-            && let Some(screen) = dupin_mac::window::display_geometry(self.display)
-        {
+        let geometry = (!rune::tooling::is_headless())
+            .then(|| dupin_mac::window::display_geometry(self.display))
+            .flatten();
+        let screen = match &geometry {
+            Some(geometry) => Some(PanelScreen::new(geometry)),
+            None if rune::tooling::is_headless() => PanelScreen::simulated(),
+            None => None,
+        };
+        if screen != self.screen {
+            self.screen = screen;
+            self.prefs
+                .update(move |prefs, _| prefs.reflect_panel_screen(screen));
+        }
+        self.fit_list();
+        let (display, align, inset, margin) = if let Some(screen) = geometry {
             self.display_notice = screen.notice;
             let place = panel_offsets(
                 screen.frame,
@@ -116,7 +128,6 @@ impl Ui {
                 self.theme.panel_width,
                 self.position,
             );
-            self.list_budget = crate::view::list_budget(place.list_room);
             self.pin_bottom_edge(
                 (edge == ScreenEdge::Bottom).then(|| screen.frame.origin.y + f64::from(place.margin)),
             );
@@ -131,7 +142,6 @@ impl Ui {
                 DisplaySelection::Mouse => DisplayTarget::UnderPointer,
                 DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
             };
-            self.list_budget = unplaced_list_budget(self.theme.panel_width, self.position);
             (display, Align::Center, 0.0, EDGE_MARGIN)
         };
         self.me.place(
@@ -143,6 +153,14 @@ impl Ui {
                 inset,
             },
         );
+    }
+
+    /// Size the result list for the display the panel last opened on and the configured rows.
+    pub(super) fn fit_list(&mut self) {
+        let room = self
+            .screen
+            .map(|screen| screen.list_room(self.theme.panel_width, self.position));
+        self.list_budget = crate::view::list_fit(room, self.rows, f32::from(self.theme.row_height)).budget;
     }
 
     /// Keep the panel's bottom edge at `bottom` as it fits its content, or let it go.
@@ -426,41 +444,64 @@ impl Ui {
     }
 }
 
-/// The list's budget where the panel knows no display: a headless run's simulated one, whose
-/// usable area `DUPIN_HEADLESS_DISPLAY` gives as `<width>x<height>` points, or the default.
-pub(super) fn unplaced_list_budget(width: u16, position: Position) -> f32 {
-    let simulated = rune::tooling::is_headless()
-        .then(|| std::env::var("DUPIN_HEADLESS_DISPLAY").ok())
-        .flatten();
-    let Some(value) = simulated else {
-        return crate::view::DEFAULT_LIST_BUDGET;
-    };
-    match simulated_list_budget(&value, width, position) {
-        Some(budget) => budget,
-        None => {
+/// The display the panel opens on, as much of it as sizing the panel's list needs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PanelScreen {
+    frame: NSRect,
+    visible: NSRect,
+}
+
+impl PanelScreen {
+    fn new(geometry: &dupin_mac::window::DisplayGeometry) -> Self {
+        Self {
+            frame: geometry.frame,
+            visible: geometry.visible_frame,
+        }
+    }
+
+    /// The display the panel would open on now, for `selection`; in a headless run, the one
+    /// `DUPIN_HEADLESS_DISPLAY` simulates, if any.
+    pub fn current(selection: DisplaySelection) -> Option<Self> {
+        if rune::tooling::is_headless() {
+            return Self::simulated();
+        }
+        dupin_mac::window::display_geometry(selection).map(|geometry| Self::new(&geometry))
+    }
+
+    /// A headless run's display, whose usable area `DUPIN_HEADLESS_DISPLAY` gives as
+    /// `<width>x<height>` points, so the list is sized as on a real display of that size.
+    fn simulated() -> Option<Self> {
+        let value = std::env::var("DUPIN_HEADLESS_DISPLAY").ok()?;
+        let screen = Self::parse(&value);
+        if screen.is_none() {
             crate::log::warn(&format!(
                 "DUPIN_HEADLESS_DISPLAY is {value:?}, not <width>x<height>; using the default list"
             ));
-            crate::view::DEFAULT_LIST_BUDGET
         }
+        screen
     }
-}
 
-/// The list's budget on a display whose whole frame is usable, `value` points as
-/// `<width>x<height>`, through the same placement a real display takes.
-fn simulated_list_budget(value: &str, width: u16, position: Position) -> Option<f32> {
-    let (w, h) = value.split_once('x')?;
-    let (w, h) = (w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?);
-    if !(w > 0.0 && h > 0.0) {
-        return None;
+    /// A display whose whole frame is usable, `value` points as `<width>x<height>`.
+    fn parse(value: &str) -> Option<Self> {
+        let (w, h) = value.split_once('x')?;
+        let (w, h) = (w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?);
+        if !(w > 0.0 && h > 0.0) {
+            return None;
+        }
+        let area = NSRect::new(
+            objc2_foundation::NSPoint::new(0.0, 0.0),
+            objc2_foundation::NSSize::new(w, h),
+        );
+        Some(Self {
+            frame: area,
+            visible: area,
+        })
     }
-    let area = NSRect::new(
-        objc2_foundation::NSPoint::new(0.0, 0.0),
-        objc2_foundation::NSSize::new(w, h),
-    );
-    Some(crate::view::list_budget(
-        panel_offsets(area, area, width, position).list_room,
-    ))
+
+    /// The height the display leaves on the result list's side of the field.
+    pub fn list_room(self, width: u16, position: Position) -> f32 {
+        panel_offsets(self.frame, self.visible, width, position).list_room
+    }
 }
 
 /// Where the panel goes on a display, in points from the display's frame.
@@ -550,19 +591,21 @@ mod tests {
 
     #[test]
     fn a_simulated_display_sizes_the_list_as_a_real_one_would() {
+        use dupin_core::Rows;
+        let budget = |room| crate::view::list_fit(room, Rows::Auto, 52.0).budget;
         let real = rect(0.0, 0.0, 1728.0, 2560.0);
-        let budget = crate::view::list_budget(panel_offsets(real, real, 680, Position::Center).list_room);
+        let room = panel_offsets(real, real, 680, Position::Center).list_room;
+        let simulated = PanelScreen::parse("1728x2560").unwrap();
+        assert_eq!(simulated.list_room(680, Position::Center), room);
         assert_eq!(
-            simulated_list_budget("1728x2560", 680, Position::Center),
-            Some(budget)
+            budget(Some(room)),
+            832.0,
+            "a 2560-point display reaches the list's maximum"
         );
-        assert_eq!(budget, 832.0, "a 2560-point display reaches the list's maximum");
-        assert_eq!(
-            simulated_list_budget("1440x900", 680, Position::Center),
-            Some(crate::view::DEFAULT_LIST_BUDGET)
-        );
+        let short = PanelScreen::parse("1440x900").unwrap();
+        assert_eq!(budget(Some(short.list_room(680, Position::Center))), budget(None));
         for bad in ["", "1440", "1440x", "x900", "0x900", "1440x-1", "wide x tall"] {
-            assert_eq!(simulated_list_budget(bad, 680, Position::Center), None, "{bad:?}");
+            assert_eq!(PanelScreen::parse(bad), None, "{bad:?}");
         }
     }
 

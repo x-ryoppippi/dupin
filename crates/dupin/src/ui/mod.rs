@@ -31,11 +31,12 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{
-    Backdrop, CommandId, Config, DisplaySelection, History, InputSource, Position, Searcher, Session,
+    Backdrop, CommandId, Config, DisplaySelection, History, InputSource, Position, Rows, Searcher, Session,
 };
 use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer, window::DisplayNotice};
 use rune::{AppHandle, Image, ImageCache, TextEdit, Tx};
 
+pub use self::lifecycle::PanelScreen;
 use crate::scripts::catalog::Catalog;
 
 pub use action_screen::{ActionStage, ApplicationState, SEND_TO};
@@ -138,8 +139,11 @@ pub struct Ui {
     /// How far down the result list is scrolled, as it last drew.
     pub(crate) list_offset: Rc<Cell<f32>>,
     /// The height the result list takes before it scrolls, from the display the panel last
-    /// opened on.
+    /// opened on and the configured rows.
     pub list_budget: f32,
+    /// The display the panel last opened on, if it knows one.
+    screen: Option<lifecycle::PanelScreen>,
+    rows: Rows,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -211,6 +215,7 @@ impl Ui {
             scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
+        let screen = PanelScreen::current(config.display);
         let composition = crate::composition::Composition::native(dupin_mac::kinds::native());
         composition.apply(&config.advanced);
         let kinds = composition.kinds().clone();
@@ -337,7 +342,14 @@ impl Ui {
             thumbnails: thumbnails::Thumbnails::new(),
             visible_rows: 0..0,
             list_offset: Rc::default(),
-            list_budget: lifecycle::unplaced_list_budget(config.theme.panel_width, config.position),
+            list_budget: crate::view::list_fit(
+                screen.map(|screen| screen.list_room(config.theme.panel_width, config.position)),
+                config.rows,
+                f32::from(config.theme.row_height),
+            )
+            .budget,
+            screen,
+            rows: config.rows,
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
