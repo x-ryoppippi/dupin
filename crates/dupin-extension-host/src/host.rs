@@ -251,7 +251,7 @@ impl Host {
 
     /// A host whose guests see the clock and `Math.random` `environment` fixes, as a fixture
     /// replays them; with none, the real ones.
-    pub fn fixed(launch: Launcher, environment: Option<Environment>) -> Self {
+    pub(crate) fn fixed(launch: Launcher, environment: Option<Environment>) -> Self {
         Self::ticking(launch, environment, TICK)
     }
 

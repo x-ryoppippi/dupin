@@ -82,7 +82,7 @@ pub enum Deadline {
 }
 
 impl Deadline {
-    pub fn passed(&self) -> bool {
+    fn passed(&self) -> bool {
         match *self {
             Deadline::At(at) => Instant::now() >= at,
             Deadline::Spent { limit, used } => used() >= limit,
