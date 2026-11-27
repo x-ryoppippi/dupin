@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-use headless-config.nu [scenario-env panel-height headless]
+use headless-config.nu [scenario-env panel-height headless headless-in]
 
 export const MANIFEST = path self docs-images/images.toml
 export const GLASS = path self ../docs/images/glass.json
@@ -333,16 +333,17 @@ def render-scenario [
         ...$window
     ]
     let tree = $tmp | path join $"(image-id $image | str replace --all / -).json"
-    with-env $environment { headless $bin ...$script --theme dark --tree $tree }
+    headless-in $environment $bin ...$script --theme dark --tree $tree
     let size = if $image.window? == null {
         $"680x(open $tree | panel-height)"
     } else {
         $"($image.width)x(open $tree | content-height)"
     }
     image-paths $image | zip (image-themes $image) | each {|pair|
-        with-env $environment {
-            headless $bin ...$script --theme $pair.1 --snap $pair.0 --scale ($SCALE | into string) --size $size
-        }
+        (
+            headless-in $environment $bin ...$script --theme $pair.1 --snap $pair.0
+            --scale ($SCALE | into string) --size $size
+        )
         $pair.0
     }
 }
@@ -375,12 +376,10 @@ def render-clip [
     let captions = if ($clip.captions? | default true) { $timeline.captions } else { null }
     image-themes $clip | each {|theme|
         let frames = $tmp | path join $"($name)-($theme)-frames"
-        with-env $environment {
-            (
-                headless $bin ...$run --theme $theme --size $"680x($CLIP_HEIGHT)"
-                --scale ($scale | into string) --fps ($CLIP_FPS | into string) --out $frames
-            )
-        }
+        (
+            headless-in $environment $bin ...$run --theme $theme --size $"680x($CLIP_HEIGHT)"
+            --scale ($scale | into string) --fps ($CLIP_FPS | into string) --out $frames
+        )
         let pngs = glob ($frames | path join frame_*.png) | sort
         let out = theme-path $clip $theme
         let video = if ($clip.video? | default false) {
@@ -646,7 +645,7 @@ export def key-caption [step: record]: nothing -> string {
 # `scenario`, the manifest's documents and history, and an entry's own `config`.
 #
 # Each runs in a home of its own, with its configuration in ~/.config/dupin, so the paths Settings
-# shows are the same on every Mac and in every run.
+# shows are the same on every Mac and in every run. The record is the run's whole environment.
 export def scratch-environment [
     scenario: path
     image: record
@@ -682,6 +681,7 @@ export def scratch-environment [
     } | merge $fixtures | merge {
         HOME: $home
         XDG_CONFIG_HOME: $config
+        PATH: "/usr/bin:/bin"
         TMPDIR: ($tmp | path join tmp)
         LANG: en_GB.UTF-8
         LC_ALL: en_GB.UTF-8
