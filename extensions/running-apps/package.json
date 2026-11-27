@@ -1,0 +1,47 @@
+{
+	"name": "running-apps",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Running Apps",
+		"keyword": "quit",
+		"icon": "sf:xmark.app",
+		"main": "main.ts",
+		"capabilities": {
+			"apps": [
+				"read",
+				"control"
+			],
+			"rows": {
+				"app": [
+					"path"
+				]
+			}
+		},
+		"provides": {
+			"kinds": {
+				"app": {
+					"hide": {
+						"field": "path",
+						"title": "Hide",
+						"default": true,
+						"when": "running"
+					},
+					"quit": {
+						"field": "path",
+						"title": "Quit",
+						"default": true,
+						"when": "running"
+					},
+					"quit_forcibly": {
+						"field": "path",
+						"title": "Force Quit…",
+						"default": true,
+						"confirm": true,
+						"when": "running"
+					}
+				}
+			}
+		}
+	}
+}

@@ -280,11 +280,12 @@ Dupin grants what a bundled package declares in advance, except its files and pr
 
 Some extensions ship inside Dupin and run whether or not the extensions folder is on, each with a switch in Settings → Extensions.
 
-| Extension                                   | Keyword  | What it does                                                |
-| ------------------------------------------- | -------- | ----------------------------------------------------------- |
-| **Dupin**                                   | `help`   | Searches Dupin's documentation, issues, source and website. |
-| [Emoji & Symbols](./emoji.md)               | `emoji`  | Picks an emoji or symbol by its English or Japanese name.   |
-| [Window Management](./window-management.md) | `window` | Moves and resizes the focused window. Off until turned on.  |
+| Extension                                   | Keyword  | What it does                                                                                        |
+| ------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| **Dupin**                                   | `help`   | Searches Dupin's documentation, issues, source and website.                                         |
+| [Emoji & Symbols](./emoji.md)               | `emoji`  | Picks an emoji or symbol by its English or Japanese name.                                           |
+| [Window Management](./window-management.md) | `window` | Moves and resizes the focused window. Off until turned on.                                          |
+| [Running Apps](./running-apps.md)           | `quit`   | Hides, quits and force quits running apps, and adds those actions to app rows. Off until turned on. |
 
 <details>
 <summary>Built-in features as packages</summary>

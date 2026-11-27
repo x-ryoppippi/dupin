@@ -13,7 +13,14 @@ include!(concat!(env!("OUT_DIR"), "/bundled_seals.rs"));
 /// Extensions, since not everyone wants what they do: moving other apps' windows, running Git
 /// over the repositories in their folders, or running `ps`, `lsof` and `kill` to list and stop
 /// processes.
-pub const OFF_UNTIL_TURNED_ON: &[&str] = &["repo", "window-management", "proc", "port", "agent"];
+pub const OFF_UNTIL_TURNED_ON: &[&str] = &[
+    "repo",
+    "window-management",
+    "proc",
+    "port",
+    "agent",
+    "running-apps",
+];
 
 /// The content hash of each bundled package folder, by folder name, as the build found them.
 #[derive(Clone, Debug)]

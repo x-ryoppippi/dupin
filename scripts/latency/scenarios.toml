@@ -147,6 +147,21 @@ package = "repo"
 extensions = "scripts/latency/repo.extensions"
 budget_ms = 5.0
 
+# The main search with Running Apps on, which composes Hide, Quit and Force Quit… onto every app
+# row, held to parity with the main search without it: their availability is checked only when
+# the action screen opens, so a keypress pays only for building three more actions per row. Its
+# keyword lists the running apps from its fixture, held to the keystroke budget.
+[features.search.running-apps]
+extends = "native"
+extensions = "scripts/latency/running-apps.extensions"
+
+[features.running-apps.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.running-apps"
+package = "bundled:running-apps"
+extensions = "scripts/latency/running-apps.extensions"
+budget_ms = 5.0
+
 # The main search on a display tall enough for the list's maximum, 832 points (16 rows at the
 # default height), so a regression from drawing more rows shows. `display` is the simulated
 # display's usable area in points; without it the panel lays out its default 416-point list.
@@ -251,6 +266,12 @@ id = "port.5173"
 feature = "port"
 prefix = "port "
 typed = "5173"
+
+[[scenarios]]
+id = "running-apps.no"
+feature = "running-apps"
+prefix = "quit "
+typed = "no"
 
 [[scenarios]]
 id = "agent.claude"
