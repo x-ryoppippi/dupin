@@ -191,6 +191,26 @@ mod tests {
         assert_eq!(seals.0.len(), folders);
     }
 
+    /// Dupin reads `name`, `version` and `dupin` from package.json and ignores the rest, so a
+    /// bundled package says anything else in its README, where someone reads it.
+    #[test]
+    fn a_bundled_package_json_holds_only_what_dupin_or_npm_reads() {
+        let packages = packages(&directory().unwrap());
+        assert!(!packages.is_empty());
+        for (folder, name, _) in packages {
+            let package: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_slice(&std::fs::read(folder.join("package.json")).unwrap()).unwrap();
+            let ignored: Vec<_> = package
+                .keys()
+                .filter(|key| !["name", "version", "private", "dupin"].contains(&key.as_str()))
+                .collect();
+            assert!(
+                ignored.is_empty(),
+                "{name}'s package.json has {ignored:?}, which Dupin ignores"
+            );
+        }
+    }
+
     #[test]
     fn a_folder_the_build_did_not_seal_is_refused() {
         let bundled = tempfile::tempdir().unwrap();
