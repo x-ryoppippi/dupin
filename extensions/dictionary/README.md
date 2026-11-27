@@ -8,7 +8,7 @@ Looks a word up in the dictionaries turned on in Dictionary.app and shows the en
 | On by default | Yes                                             |
 | User docs     | [Dictionary](../../docs/features/dictionary.md) |
 
-A port of the former native Dictionary; see [Built-ins as bundled extensions](../../docs/design/extension-platform.md#built-ins-as-bundled-extensions). It answers the built-in `dictionary` command under that command's keywords, so the `keyword` in `package.json` is ignored.
+A port of the former native Dictionary; see [Built-ins as bundled extensions](../../docs/design/extension-platform.md#built-ins-as-bundled-extensions). It answers the built-in `dictionary` command under that command's keywords, so the `keyword` in `package.json` is ignored; the `extensions::overrides` test still fails unless it is one of the keywords the built-in answers by default.
 
 ## How it's built
 

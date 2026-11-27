@@ -56,6 +56,6 @@ cargo run -p dupin -- ext test extensions/calendar
 cargo run -p dupin -- ext render extensions/calendar extensions/calendar/fixtures/upcoming.json upcoming.png
 ```
 
-Run `dupin` from this checkout's build, as above, so a package here replays as the bundled package it is; the READMEs write it as plain `dupin`. `cargo test -p dupin every_bundled_extension_passes_its_fixtures` replays every package's fixtures, and the `extensions::overrides` test fails for a package added here without a case of its own.
+Run `dupin` from this checkout's build, as above, so a package here replays as the bundled package it is; the READMEs write it as plain `dupin`. `cargo test -p dupin every_bundled_extension_passes_its_fixtures` replays every package's fixtures, and the `extensions::overrides` test fails for a package added here without a case of its own. That test also fails when a package that ports a built-in declares a `keyword` the built-in doesn't answer by default, or any keyword when the built-in answers only the main search, as Calculator does. Other tests fail when a bundled `package.json` holds a top-level key besides `name`, `version`, `private` and `dupin`, and when two packages' copies of a shared module, today `ps.ts` in agent and proc, differ.
 
 The build seals each package folder by a hash of every file in it, its README and fixtures included, and ships the folder whole; a folder that no longer matches stays off, so rebuild after editing one. A package's revision, which its grants follow, hashes only `package.json` and its modules.

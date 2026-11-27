@@ -26,13 +26,13 @@ Lists the AI coding agents running on your Mac, such as Claude Code, Codex and G
 
 ## Files
 
-| Path              | What                                                                                                                                                      |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `package.json`    | The manifest and its exec profiles.                                                                                                                       |
-| `main.ts`         | Finding agents, `items` and the actions.                                                                                                                  |
-| `agents.ts`       | The agents' names and the interpreters that run scripts.                                                                                                  |
-| `ps.ts`           | Parsing `ps` and `lsof` output, and sending signals. [`proc/ps.ts`](../proc/ps.ts) is the same file, since a package can import only from its own folder. |
-| `fixtures/*.json` | The list, revealing, copying, opening a terminal, the hand-off to Processes, and Terminate.                                                               |
+| Path              | What                                                                                                                                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `package.json`    | The manifest and its exec profiles.                                                                                                                                                                                                        |
+| `main.ts`         | Finding agents, `items` and the actions.                                                                                                                                                                                                   |
+| `agents.ts`       | The agents' names and the interpreters that run scripts.                                                                                                                                                                                   |
+| `ps.ts`           | Parsing `ps` and `lsof` output, and sending signals. [`proc/ps.ts`](../proc/ps.ts) is the same file, since a package can import only from its own folder; `cargo test -p dupin a_module_bundled_packages_share` fails once the two differ. |
+| `fixtures/*.json` | The list, revealing, copying, opening a terminal, the hand-off to Processes, and Terminate.                                                                                                                                                |
 
 ## Test it
 
