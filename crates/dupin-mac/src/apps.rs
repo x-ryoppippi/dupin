@@ -284,16 +284,35 @@ fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
         .collect()
 }
 
-/// Every `.app` under `roots`, one entry per name: the first root wins, so an app in
-/// `/Applications` hides a same-named copy further down the list.
+/// Every `.app` under `roots`, one entry per bundle on disk: paths that resolve to the same
+/// bundle count once. Distinct bundles stay apart even when they share a name or a bundle
+/// identifier, since hiding one would leave it unreachable; the folder in each row's subtitle
+/// tells them apart.
+///
+/// Of the paths reaching one bundle, the one in the earliest root is kept, and there the
+/// bundle itself over a link to it. The kept path is the row's ID, which the usage history and
+/// `app:` aliases (through Launch Services) are keyed by.
 fn scan(roots: &[PathBuf]) -> Vec<App> {
-    let mut apps = Vec::new();
-    for root in roots {
-        walk(root, 0, &mut apps);
+    let mut found = Vec::new();
+    for (root_index, root) in roots.iter().enumerate() {
+        walk(root, 0, root_index, &mut found);
     }
-    let mut seen = std::collections::HashSet::new();
-    apps.retain(|a: &App| seen.insert(a.name.clone()));
-    apps
+    let real = |app: &App| fs::canonicalize(&app.path).unwrap_or_else(|_| app.path.clone());
+    let reals: Vec<PathBuf> = found.iter().map(|(.., app)| real(app)).collect();
+    let mut kept: HashMap<&Path, (usize, bool, usize)> = HashMap::new();
+    for (index, ((root, linked, _), real)) in found.iter().zip(&reals).enumerate() {
+        let candidate = (*root, *linked, index);
+        kept.entry(real.as_path())
+            .and_modify(|best| *best = (*best).min(candidate))
+            .or_insert(candidate);
+    }
+    let kept: std::collections::HashSet<usize> = kept.into_values().map(|(.., index)| index).collect();
+    found
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| kept.contains(index))
+        .map(|(_, (.., app))| app)
+        .collect()
 }
 
 fn app_subfolders(roots: &[PathBuf]) -> Vec<PathBuf> {
@@ -311,7 +330,9 @@ fn is_bundle(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "app")
 }
 
-fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
+/// Each bundle found, with the index of the root it is under and whether its entry is a
+/// symlink.
+fn walk(dir: &Path, depth: usize, root: usize, out: &mut Vec<(usize, bool, App)>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
@@ -330,15 +351,19 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
                 } else {
                     path.clone()
                 };
-                out.push(App {
-                    name: name.to_owned(),
-                    aliases: Vec::new(),
-                    path,
-                    icon,
-                });
+                out.push((
+                    root,
+                    kind.is_symlink(),
+                    App {
+                        name: name.to_owned(),
+                        aliases: Vec::new(),
+                        path,
+                        icon,
+                    },
+                ));
             }
         } else if depth + 1 < MAX_DEPTH {
-            walk(&path, depth + 1, out);
+            walk(&path, depth + 1, root, out);
         }
     }
 }
@@ -409,6 +434,90 @@ mod tests {
             apps[0].icon,
             fs::canonicalize(root.join("Real/Linked.app")).unwrap()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A bundle at `root/path` with `bundle_id` in its `Info.plist`.
+    fn bundle(root: &Path, path: &str, bundle_id: &str) -> PathBuf {
+        let bundle = root.join(path);
+        fs::create_dir_all(bundle.join("Contents")).unwrap();
+        fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
+                 <key>CFBundleIdentifier</key><string>{bundle_id}</string></dict></plist>\n"
+            ),
+        )
+        .unwrap();
+        bundle
+    }
+
+    fn paths(apps: &[App]) -> Vec<PathBuf> {
+        apps.iter().map(|app| app.path.clone()).collect()
+    }
+
+    #[test]
+    fn same_named_bundles_in_two_folders_both_stay() {
+        let root = tree(&[]);
+        let system = bundle(&root, "Applications/Foo.app", "com.example.foo");
+        let user = bundle(&root, "Home/Applications/Foo.app", "com.example.foo-setapp");
+        let apps = scan(&[root.join("Applications"), root.join("Home/Applications")]);
+        assert_eq!(paths(&apps), [system, user]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_bundle_reached_through_a_symlink_counts_once_under_the_bundles_own_path() {
+        let root = tree(&[]);
+        let apps_dir = root.join("Applications");
+        let real = bundle(&apps_dir, "Real.app", "com.example.real");
+        std::os::unix::fs::symlink(&real, apps_dir.join("Another Name.app")).unwrap();
+        let elsewhere = root.join("Elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&real, elsewhere.join("Real.app")).unwrap();
+        let apps = scan(&[apps_dir.clone(), elsewhere.clone()]);
+        assert_eq!(
+            paths(&apps),
+            [real],
+            "the bundle over a link beside it, the earlier root over a later one"
+        );
+
+        let apps = scan(&[elsewhere.clone(), apps_dir]);
+        assert_eq!(
+            paths(&apps),
+            [elsewhere.join("Real.app")],
+            "the earlier root keeps the path its history was recorded under"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn distinct_bundles_shown_by_one_name_are_both_found() {
+        let root = tree(&[]);
+        let launcher = bundle(&root, "Siri.app", "com.apple.siri.launcher");
+        let campo = bundle(&root, "Siri AI.app", "com.apple.campo");
+        let apps: Vec<App> = scan(std::slice::from_ref(&root))
+            .into_iter()
+            .map(|app| app.with_names("Siri", Vec::new()))
+            .collect();
+        let found = rank(&apps, "siri", 10);
+        let mut ids: Vec<_> = found.iter().map(|item| item.id.clone()).collect();
+        ids.sort();
+        let mut expected = [campo, launcher].map(|path| path.to_string_lossy().into_owned());
+        expected.sort();
+        assert_eq!(ids, expected);
+        assert!(found.iter().all(|item| item.display_title() == "Siri"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn two_installed_copies_of_one_bundle_id_are_both_found() {
+        let root = tree(&[]);
+        let current = bundle(&root, "Applications/Foo.app", "com.example.foo");
+        let old = bundle(&root, "Home/Applications/Foo.app", "com.example.foo");
+        let renamed = bundle(&root, "Applications/Utilities/Foo 2.app", "com.example.foo");
+        let apps = scan(&[root.join("Applications"), root.join("Home/Applications")]);
+        assert_eq!(paths(&apps), [current, renamed, old]);
         fs::remove_dir_all(root).unwrap();
     }
 
