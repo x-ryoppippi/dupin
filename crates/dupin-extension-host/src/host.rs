@@ -24,7 +24,9 @@ use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, is_web_url};
 use crate::wire::{self, Answer, Call, FromHelper, Preferences, ToHelper};
 
 /// How long a call may run past its deadline, or past a cancellation, before the helper is
-/// stopped. The helper's own interrupt normally ends it well inside this.
+/// stopped. The helper's own interrupt normally ends it well inside this. Past a cancellation
+/// it is the helper's processor time, so a helper that is only waiting for a processor on a busy
+/// machine isn't taken for one that ignores the cancel; the deadline still bounds the call.
 const GRACE: Duration = Duration::from_millis(150);
 /// How often a running call is checked for cancellation, its deadline and memory.
 const TICK: Duration = Duration::from_millis(5);
@@ -1008,7 +1010,7 @@ impl Helper {
         self.send(&message, tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64 + request.allowance;
         self.footprint_limit = footprint_limit;
-        let mut cancel_by = None;
+        let mut cancelled = None;
         let mut requests = Requests::new(
             services.clone(),
             deadline,
@@ -1048,11 +1050,11 @@ impl Helper {
                 }
             }
             let now = Instant::now();
-            if cancel_by.is_none() && is_cancelled() {
+            if cancelled.is_none() && is_cancelled() {
                 let _ = self.send(&ToHelper::Cancel { id }, &[]);
-                cancel_by = Some(now + GRACE);
+                cancelled = Some(Since::now(self.child.id(), now));
             }
-            if cancel_by.is_some_and(|by| now >= by) {
+            if cancelled.is_some_and(|since| since.elapsed(self.child.id(), now) >= GRACE) {
                 return Err(RunError::Cancelled);
             }
             if now >= deadline + GRACE {
@@ -1301,9 +1303,32 @@ fn footprint(pid: u32) -> Option<u64> {
     (status == 0).then(|| unsafe { usage.assume_init() }.ri_phys_footprint)
 }
 
+/// A moment in a helper's processor time, or on the wall clock where that can't be read.
+#[derive(Clone, Copy)]
+enum Since {
+    Processor(Duration),
+    Wall(Instant),
+}
+
+impl Since {
+    fn now(pid: u32, now: Instant) -> Self {
+        processor_time(pid).map_or(Self::Wall(now), Self::Processor)
+    }
+
+    fn elapsed(self, pid: u32, now: Instant) -> Duration {
+        match self {
+            // A helper whose time can no longer be read has exited.
+            Self::Processor(since) => {
+                processor_time(pid).map_or(Duration::MAX, |time| time.saturating_sub(since))
+            }
+            Self::Wall(since) => now.saturating_duration_since(since),
+        }
+    }
+}
+
 /// The processor time the helper has used, user and system, across all its threads.
 #[cfg(target_os = "macos")]
-fn processor_time(pid: u32) -> Option<Duration> {
+pub(crate) fn processor_time(pid: u32) -> Option<Duration> {
     #[repr(C)]
     struct Timebase {
         numerator: u32,
@@ -1336,7 +1361,7 @@ fn processor_time(pid: u32) -> Option<Duration> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn processor_time(_pid: u32) -> Option<Duration> {
+pub(crate) fn processor_time(_pid: u32) -> Option<Duration> {
     None
 }
 
