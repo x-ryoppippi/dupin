@@ -30,7 +30,7 @@ pub use hotkeys::{Address, HotkeyTarget};
 pub use panel::{DisplaySelection, InputSource, Position};
 pub use snippets::Snippet;
 pub use sync::Sync;
-pub use theme::{Backdrop, Colors, FontFamily, Theme};
+pub use theme::{Backdrop, Colors, DEFAULT_SEARCH_ICON, FontFamily, SearchIcon, Theme};
 pub use web::WebSearch;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

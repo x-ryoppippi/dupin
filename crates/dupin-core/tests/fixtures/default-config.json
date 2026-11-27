@@ -26,6 +26,7 @@
 		"corner_radius": 14,
 		"font_size": 15,
 		"font_family": "system",
+		"search_icon": "⌕",
 		"light": {
 			"background": null,
 			"text": null,

@@ -99,11 +99,7 @@ pub(super) fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                 .child(text(chip).font(t.font(type_::TITLE)).color(accent).truncate()),
         )
     } else {
-        bar.child(
-            text("⌕")
-                .font(t.font(TextStyle::new(24.0, 400.0).lh(30.0)))
-                .color(t.text_secondary),
-        )
+        bar.child(t.search_icon())
     };
     bar = bar.child(field);
     if !renaming && presentation.show_searching && matches!(s.session.results(), Results::Searching { .. }) {

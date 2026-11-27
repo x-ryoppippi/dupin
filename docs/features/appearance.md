@@ -48,6 +48,7 @@ row_height = 72
 corner_radius = 14
 font_family = "monospace" # "system", "monospace", or an installed family's name
 font_size = 18
+search_icon = "sf:sparkle" # "sf:" and an SF Symbol's name, or a few characters of text
 
 [theme.light]
 background = "#E9F4FA"
@@ -66,6 +67,7 @@ accent = "#176EA6"
 | `corner_radius`                                                                                                     | 0–32 points; applies after a relaunch                                                |
 | `font_family`                                                                                                       | `"system"` (San Francisco), `"monospace"` (SF Mono), or an installed family          |
 | `font_size`                                                                                                         | 12–20 points                                                                         |
+| `search_icon`                                                                                                       | `"⌕"` (default), up to 8 characters of text, or `"sf:"` and an SF Symbol's name      |
 | `[theme.light]`, `[theme.dark]`: `background`, `text`, `secondary`, `accent`, `selected_text`, `hover`, `separator` | `#RRGGBB`; an omitted colour uses the system palette                                 |
 
 ## Backdrop
@@ -92,6 +94,8 @@ Themes are built in: share the `[theme]` section without installing an extension
 <summary>Fonts and the palette</summary>
 
 `font_family` takes any font installed on the Mac by the name Font Book shows — `"Menlo"`, `"JetBrains Mono"`, `"Hiragino Sans"`. A comma-separated list tries each in order, CSS-style: `"Iosevka, JetBrains Mono"`. A name nothing provides falls back to the system font. Settings → Appearance lists the installed families in the Font menu; a name only TOML can express stays there, checked.
+
+`search_icon` is what stands before the query field until a command's chip takes its place. Text draws in the theme's font, so a glyph or an emoji works; `"sf:sparkle"` draws that SF Symbol in the secondary text colour, and a name the system has no symbol for shows the default `"⌕"`.
 
 The background remains a tint over Liquid Glass; headless rendering uses its opaque fallback.
 

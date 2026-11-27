@@ -14,6 +14,7 @@ pub struct ResolvedTheme {
     pub warning: Color,
     scale: f32,
     family: tok::Family,
+    search_icon: dupin_core::config::SearchIcon,
 }
 impl std::ops::Deref for ResolvedTheme {
     type Target = tok::Theme;
@@ -48,7 +49,37 @@ impl ResolvedTheme {
                 dupin_core::config::FontFamily::Monospace => tok::Family::SystemMono,
                 dupin_core::config::FontFamily::Named(name) => tok::Family::Named(intern(name)),
             },
+            search_icon: theme.search_icon.clone(),
         }
+    }
+    /// What stands before the query field while no command's chip does, in a slot as wide as a
+    /// symbol's square so the field starts at the same place whatever the icon. Text is centred
+    /// in it and may widen it rather than be cut. A symbol the system lacks falls back to the
+    /// default icon.
+    pub fn search_icon(&self) -> El {
+        let size = crate::symbols::Size {
+            square: crate::symbols::FIELD.square * self.scale,
+            glyph: crate::symbols::FIELD.glyph * self.scale,
+        };
+        let glyph = match &self.search_icon {
+            dupin_core::config::SearchIcon::Symbol(name) => {
+                match crate::symbols::symbol(name, size, self.text_secondary) {
+                    Some(pixels) => {
+                        return el()
+                            .key("search-icon")
+                            .size(size.square, size.square)
+                            .pixels(&pixels);
+                    }
+                    None => dupin_core::config::DEFAULT_SEARCH_ICON,
+                }
+            }
+            dupin_core::config::SearchIcon::Text(glyph) => glyph,
+        };
+        row().key("search-icon").min_w(size.square).center().child(
+            text(glyph)
+                .font(self.font(TextStyle::new(24.0, 400.0).lh(30.0)))
+                .color(self.text_secondary),
+        )
     }
     pub fn font(&self, mut style: TextStyle) -> TextStyle {
         style.size *= self.scale;
@@ -113,11 +144,7 @@ pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32
                 .px(18.0)
                 .gap(12.0)
                 .center_y()
-                .child(
-                    text("⌕")
-                        .font(t.font(TextStyle::new(24.0, 400.0).lh(30.0)))
-                        .color(t.text_secondary),
-                )
+                .child(t.search_icon())
                 .child(
                     text("gh dupin")
                         .font(t.font(TextStyle::new(22.0, 400.0).lh(30.0)))

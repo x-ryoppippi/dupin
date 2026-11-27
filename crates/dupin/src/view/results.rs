@@ -471,7 +471,10 @@ pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool, i
     }
     let slot = el().size(ICON_SIZE, ICON_SIZE);
     if let Some(dupin_core::Icon::Symbol(name)) = icon {
-        return Some(slot.pixels(&crate::symbols::symbol(name, crate::symbols::ROW, ink)));
+        return Some(match crate::symbols::symbol(name, crate::symbols::ROW, ink) {
+            Some(pixels) => slot.pixels(&pixels),
+            None => slot,
+        });
     }
     Some(match (icon, icon.and_then(|icon| s.icons.get(icon))) {
         // A picture keeps its own shape inside the icon's square, as Finder's thumbnails do.
