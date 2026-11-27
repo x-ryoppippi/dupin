@@ -106,15 +106,7 @@ impl Ui {
                     Action::Compress(path) => self.compress_file(path),
                     Action::OpenWith { path, application } => self
                         .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
-                    Action::Open(path) => {
-                        let running_bundle = dupin_mac::bundle::path();
-                        if same_bundle_path(&path, &running_bundle) {
-                            // Launching Dupin itself cannot show a normal window; take the user to Preferences.
-                            self.prepare_settings();
-                        } else {
-                            self.run_workspace_action(dupin_mac::workspace::Action::Open(path));
-                        }
-                    }
+                    Action::Open(path) => self.open_path(path),
                     Action::Reveal(path) => {
                         self.run_workspace_action(dupin_mac::workspace::Action::Reveal(path))
                     }
@@ -152,6 +144,23 @@ impl Ui {
 
     pub(super) fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
         self.run_native_action(move || dupin_mac::workspace::run(&action));
+    }
+
+    fn open_path(&self, path: std::path::PathBuf) {
+        let running_bundle = dupin_mac::bundle::path();
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        std::thread::spawn(move || {
+            let is_running_bundle = same_bundle_path(&path, &running_bundle);
+            me.update(move |ui, _| {
+                if is_running_bundle {
+                    ui.prefs.update(|prefs, _| prefs.open_settings());
+                } else {
+                    ui.run_workspace_action(dupin_mac::workspace::Action::Open(path));
+                }
+            });
+            drop(busy);
+        });
     }
 
     fn run_native_action(&self, run: impl FnOnce() -> Result<(), String> + Send + 'static) {
