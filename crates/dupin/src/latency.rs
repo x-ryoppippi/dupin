@@ -9,7 +9,7 @@
 //! - `layout_ms`: from there to the next frame being built, laid out and encoded.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time::Instant;
@@ -40,6 +40,10 @@ struct Sample {
     /// Rows per provider in the finished results; with `pending`'s providers, what lets the
     /// driver tell which feature answered.
     shown: BTreeMap<String, usize>,
+    /// The packages whose kind actions the finished results' rows carry, such as a package's
+    /// default actions on app rows, so the driver can tell a package that is on from one that
+    /// isn't when it answers no provider of its own.
+    composed: BTreeSet<String>,
 }
 
 thread_local! {
@@ -90,6 +94,7 @@ pub fn edit_started(t: f64, query: &str) {
             last_provider: None,
             done: None,
             shown: BTreeMap::new(),
+            composed: BTreeSet::new(),
         });
     });
 }
@@ -98,8 +103,18 @@ pub fn edit_started(t: f64, query: &str) {
 /// packages' catalogues without a package answering it.
 pub type RowPackage<'a> = &'a dyn Fn(&CommandId, &Item) -> Option<String>;
 
+/// The package of the extension with this ID, as the broker names it.
+pub type Package<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// How the probe learns which package a row came from and which package an extension is.
+#[derive(Clone, Copy)]
+pub struct Packages<'a> {
+    pub row: RowPackage<'a>,
+    pub extension: Package<'a>,
+}
+
 /// The session took the edit and its searches have started.
-pub fn edit_applied(session: &Session, row_package: RowPackage<'_>) {
+pub fn edit_applied(session: &Session, packages: Packages<'_>) {
     with(|probe| {
         let Some(sample) = &mut probe.sample else { return };
         let now = Instant::now();
@@ -107,7 +122,7 @@ pub fn edit_applied(session: &Session, row_package: RowPackage<'_>) {
         sample.dispatched = Some(now);
         let settled = !matches!(session.results(), Results::Searching { .. });
         if settled || sample.pending.is_empty() {
-            sample.finish(now, session, row_package);
+            sample.finish(now, session, packages);
         }
     });
 }
@@ -150,21 +165,22 @@ pub fn delivered(provider: &CommandId, sent: Instant, pending: impl Fn(u64) -> b
 }
 
 /// Every provider for the current query has finished and the session has merged them.
-pub fn results_done(session: &Session, row_package: RowPackage<'_>) {
+pub fn results_done(session: &Session, packages: Packages<'_>) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_some()
             && sample.done.is_none()
         {
-            sample.finish(Instant::now(), session, row_package);
+            sample.finish(Instant::now(), session, packages);
         }
     });
 }
 
 impl Sample {
-    fn finish(&mut self, at: Instant, session: &Session, row_package: RowPackage<'_>) {
+    fn finish(&mut self, at: Instant, session: &Session, packages: Packages<'_>) {
         self.done = Some(at);
         self.shown.clear();
+        self.composed.clear();
         // A row Dupin shows in place of a ported feature's package is cheap enough to pass any
         // budget, so a scenario whose package is off, missing or failing must not count it.
         for (origin, item) in session.origins().iter().zip(session.items()) {
@@ -172,9 +188,19 @@ impl Sample {
                 *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
             }
             if !self.packages.contains_key(origin.as_str())
-                && let Some(package) = row_package(origin, item)
+                && let Some(package) = (packages.row)(origin, item)
             {
                 self.packages.insert(origin.as_str().to_owned(), package);
+            }
+            for action in &item.actions {
+                if let Some(dupin_core::Action::Extension {
+                    extension,
+                    request: dupin_core::ExtensionRequest::Kind { .. },
+                }) = item.action(&action.id)
+                    && let Some(package) = (packages.extension)(extension)
+                {
+                    self.composed.insert(package);
+                }
             }
         }
     }
@@ -214,6 +240,7 @@ impl Probe {
                     "searched": sample.pending.keys().map(CommandId::as_str).collect::<Vec<_>>(),
                     "packages": sample.packages,
                     "shown": sample.shown,
+                    "composed": sample.composed,
                 })
             }
             _ => serde_json::json!({

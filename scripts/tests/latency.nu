@@ -16,11 +16,13 @@ use ../latency.nu [
     verdicts
 ]
 use ../latency/measure.nu [
+    enabled-grants
     fingerprint
     percentiles
     resolve
     typing-script
     unanswered
+    unenabled
 ]
 
 def result [id: string, implementation: string, p95: float]: nothing -> record {
@@ -328,6 +330,36 @@ def main [] {
     assert equal (unanswered $ported dictionary.lookup 1) 1
     assert equal (unanswered $stand_in dictionary.lookup 1) 0
 
+    # A variant that turns a package on beside a feature it doesn't answer must show the
+    # package at the end of each pass: rows from it, or rows carrying its kind actions.
+    let composed = [
+        {
+            searched: [apps.search]
+            shown: {apps.search: 3}
+        }
+        {
+            searched: [apps.search]
+            shown: {apps.search: 3}
+            composed: ["bundled:running-apps"]
+        }
+    ]
+    assert equal (unenabled $composed ["bundled:running-apps"] 2) 0
+    assert equal (unenabled $composed ["bundled:running-apps"] 1) 1 "a pass that shows it off counts"
+    assert equal (unenabled ($composed | each { reject composed? }) ["bundled:running-apps"] 2) 1
+    assert equal (unenabled $composed [] 1) 0
+    let joined = [
+        {
+            searched: [apps.search, extension-search.repo]
+            packages: {extension-search.repo: "bundled:repo"}
+        }
+    ]
+    assert equal (unenabled $joined ["bundled:repo"] 1) 0 "a package joining the main search shows by its rows"
+    assert equal (unenabled $joined ["bundled:repo", "bundled:running-apps"] 1) 1
+    assert equal (enabled-grants ["bundled:running-apps"] | from toml) {
+        version: 1
+        packages: {"bundled:running-apps": {enabled: true}}
+    }
+
     let ms = 1..100 | each { into float }
     assert equal ($ms | percentiles) {p50: 50.0, p95: 95.0, p99: 99.0}
     assert equal ([7.0] | percentiles) {p50: 7.0, p95: 7.0, p99: 7.0}
@@ -383,7 +415,10 @@ def main [] {
             let setup = resolve $feature.implementations $label
             assert ($setup.config | is-not-empty) $"($feature.name).($label) has no config"
             assert ($setup.provider | is-not-empty) $"($feature.name).($label) has no provider"
-            assert (($label == "native") == ($setup.package? == null)) $"($feature.name).($label) must name the package that answers it, and only an extension has one"
+            assert (
+                ($label == "native") == ($setup.package? == null and $setup.enables? == null)
+            ) $"($feature.name).($label) must name the package that answers it or the packages it turns on, and only a variant of native has one"
+            assert ($setup.package? == null or $setup.enables? == null) $"($feature.name).($label) names both a package that answers it and packages it turns on"
         }
     }
     for scenario in $catalogue.scenarios {

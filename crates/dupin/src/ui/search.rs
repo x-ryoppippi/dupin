@@ -26,7 +26,18 @@ impl Ui {
                 self.session.pending(&origin, generation)
             });
             if self.session.results() == dupin_core::session::Results::Done {
-                crate::latency::results_done(&self.session, &|origin, item| self.row_package(origin, item));
+                let row = |origin: &CommandId, item: &dupin_core::Item| self.row_package(origin, item);
+                let extension = |id: &str| {
+                    self.extension_package(id)
+                        .map(|package| package.as_str().to_owned())
+                };
+                crate::latency::results_done(
+                    &self.session,
+                    crate::latency::Packages {
+                        row: &row,
+                        extension: &extension,
+                    },
+                );
                 if !self.session.command().private_results {
                     crate::trace::results_done(&self.query.text, self.session.items().len());
                 }

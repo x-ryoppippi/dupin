@@ -23,6 +23,17 @@
 #   package = "notes"
 #   extensions = "scripts/latency/notes.extensions"
 #
+# A package that changes a feature it doesn't answer, such as one composing default kind actions
+# onto the main search's rows, is measured by a variant of that feature's native implementation
+# that names it in `enables`, which turns it on in the broker's base (`extension-grants.toml`). Its
+# provider is still answered by Dupin itself, so it names no `package`; instead every pass must end
+# with rows from each package it enables or carrying their kind actions, or the run fails, so a
+# package that didn't turn on can't pass as measured. It is held to parity with native:
+#
+#   [features.search.running-apps]
+#   extends = "native"
+#   enables = ["bundled:running-apps"]
+#
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
 # its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it. Once a
 # port's native implementation is deleted, its scenarios are held to the native baseline recorded
@@ -146,6 +157,15 @@ provider = "extension.repo"
 package = "repo"
 extensions = "scripts/latency/repo.extensions"
 budget_ms = 5.0
+
+# The main search with Running Apps on, which adds Hide, Quit and Force Quit… to every app row as
+# default kind actions, held to parity with the main search without it. Their availability is
+# checked when the action screen opens, so a keypress pays only for the three actions each row
+# carries; every pass must end with rows carrying them, or the variant measures the search
+# without the package.
+[features.search.running-apps]
+extends = "native"
+enables = ["bundled:running-apps"]
 
 # The running apps under Running Apps' keyword, from its fixture, held to the keystroke budget,
 # since nothing native ever answered it.
