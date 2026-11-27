@@ -19,7 +19,7 @@ fn engine() -> Engine {
 
 fn timeout(timeout: Duration) -> Control {
     Control {
-        deadline: Instant::now() + timeout,
+        deadline: (Instant::now() + timeout).into(),
         is_cancelled: Box::new(|| false),
     }
 }
@@ -223,7 +223,7 @@ fn cancelling_stops_a_busy_loop_without_an_error() {
         "",
         MAX_ROWS,
         Control {
-            deadline: Instant::now() + Duration::from_secs(10),
+            deadline: (Instant::now() + Duration::from_secs(10)).into(),
             is_cancelled: Box::new(move || cancelled.load(Ordering::Acquire)),
         },
     );
@@ -700,7 +700,7 @@ fn compiling_stops_at_its_deadline_or_when_cancelled() {
     .unwrap();
     let sources = Sources::read(folder.path(), DEFAULT_ENTRY).unwrap();
     let expired = Control {
-        deadline: Instant::now(),
+        deadline: Instant::now().into(),
         is_cancelled: Box::new(|| false),
     };
     match Package::compile(sources.clone(), expired) {
@@ -711,7 +711,7 @@ fn compiling_stops_at_its_deadline_or_when_cancelled() {
         other => panic!("expected a deadline, got {other:?}"),
     }
     let cancelled = Control {
-        deadline: Instant::now() + DEADLINE,
+        deadline: (Instant::now() + DEADLINE).into(),
         is_cancelled: Box::new(|| true),
     };
     assert_eq!(

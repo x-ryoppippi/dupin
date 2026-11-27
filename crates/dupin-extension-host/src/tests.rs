@@ -47,7 +47,15 @@ fn slow_host_of(
     helper: impl Fn() -> std::io::Result<Command> + Send + Sync + 'static,
     delay: &'static str,
 ) -> Host {
-    Host::new(Box::new(move || {
+    Host::new(slow_launch(helper, delay))
+}
+
+/// Starts the helper as `helper` does, after `delay` spent asleep.
+fn slow_launch(
+    helper: impl Fn() -> std::io::Result<Command> + Send + Sync + 'static,
+    delay: &'static str,
+) -> Launcher {
+    Box::new(move || {
         let helper = helper()?;
         let mut command = Command::new("/bin/sh");
         command
@@ -59,7 +67,7 @@ fn slow_host_of(
             .envs(helper.get_envs().filter_map(|(key, value)| Some((key, value?))))
             .current_dir("/");
         Ok(command)
-    }))
+    })
 }
 
 fn sources(files: &[(&str, &str)]) -> (tempfile::TempDir, Sources) {
@@ -128,6 +136,39 @@ fn pid_is_sandboxed(pid: u32) -> bool {
 }
 
 const ECHO: &str = "export function search(query) { return [{ title: `echo ${query}` }]; }";
+
+const ENVIRONMENT: dupin_js_runtime::Environment = dupin_js_runtime::Environment {
+    now: 1_767_225_600_000,
+    seed: 1,
+};
+
+#[test]
+fn a_replaying_host_holds_a_call_to_its_helpers_processor_time_not_the_wall_clock() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
+    // A second asleep before the helper starts uses next to no processor time: a wall-clock
+    // host gives up on the call, and a replaying host answers it.
+    let within = Duration::from_millis(300);
+    let wall = slow_host("1");
+    assert_eq!(failed(search(&wall, &echo, "a", within)).code, "host-starting");
+    let replaying = Host::replaying(
+        slow_launch(|| helper_command("tests::helper_entry"), "1"),
+        ENVIRONMENT,
+    );
+    let before = replaying.now();
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(replaying.now(), before, "waiting isn't the helpers' work");
+    let answered = replaying.search(&echo, "a", 10, before + within, &|| false, &none());
+    assert_eq!(titles(&answered.unwrap()), ["echo a"]);
+
+    // A guest that never returns is still stopped once it has spent its limit, which then
+    // counts on the host's clock.
+    let busy = package("export function search() { for (;;) {} }");
+    let started = replaying.now();
+    let spun = replaying.search(&busy, "", 10, started + within, &|| false, &none());
+    assert_eq!(failed(spun).code, "deadline");
+    assert!(replaying.now() >= started + within, "the spin moved the clock");
+}
 
 #[test]
 fn a_fixed_environment_reaches_the_guest_through_the_helper() {

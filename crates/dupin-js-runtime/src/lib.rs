@@ -24,7 +24,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::Declared;
@@ -67,8 +67,33 @@ const HOST_MODULE: &str = "dupin";
 /// When a call must stop. Checked between promise jobs and, through QuickJS's interrupt
 /// handler, while JavaScript runs.
 pub struct Control {
-    pub deadline: Instant,
+    pub deadline: Deadline,
     pub is_cancelled: Box<dyn Fn() -> bool>,
+}
+
+/// When a call's time is up.
+#[derive(Clone, Copy, Debug)]
+pub enum Deadline {
+    /// At this moment on the wall clock, as a person waiting for the call sees it.
+    At(Instant),
+    /// Once `used` reports this much processor time: the call's own work, however long other
+    /// processes keep it waiting for a processor.
+    Spent { limit: Duration, used: fn() -> Duration },
+}
+
+impl Deadline {
+    pub fn passed(&self) -> bool {
+        match *self {
+            Deadline::At(at) => Instant::now() >= at,
+            Deadline::Spent { limit, used } => used() >= limit,
+        }
+    }
+}
+
+impl From<Instant> for Deadline {
+    fn from(at: Instant) -> Self {
+        Deadline::At(at)
+    }
 }
 
 /// A QuickJS runtime and a context with the language's standard library and the host's `dupin`
@@ -667,7 +692,7 @@ enum Stop {
 
 #[derive(Clone)]
 struct Watchdog {
-    deadline: Instant,
+    deadline: Deadline,
     is_cancelled: Rc<dyn Fn() -> bool>,
     stop: Rc<Cell<Option<Stop>>>,
 }
@@ -687,7 +712,7 @@ impl Watchdog {
         }
         let stop = if (self.is_cancelled)() {
             Stop::Cancelled
-        } else if Instant::now() >= self.deadline {
+        } else if self.deadline.passed() {
             Stop::Deadline
         } else {
             return false;
