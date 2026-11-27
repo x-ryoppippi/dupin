@@ -288,12 +288,48 @@
 /* The components a page in docs/ draws in place of its fallback (src/docs/components.ts). */
 .docs-content .doc-loop,
 .docs-content .doc-handoff,
-.docs-content .doc-ways {
+.docs-content .doc-ways,
+.docs-content .doc-latency {
 	margin: 28px 0;
 	padding: 24px;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-lg);
 	background: var(--bg-elev);
+	/* A diagram stacks by its own width, so it does in a narrow column beside a screen too. */
+	container-type: inline-size;
+}
+
+/* A diagram and the real panel showing the same idea, side by side where there is room. */
+.docs-content .doc-pair {
+	display: grid;
+	grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+	gap: 20px;
+	align-items: center;
+	margin: 28px 0;
+}
+
+.docs-content .doc-pair > * {
+	margin: 0;
+}
+
+.docs-content .doc-latency {
+	text-align: center;
+}
+
+.docs-content .doc-latency .value {
+	margin: 0;
+	color: var(--fg);
+	font-size: 44px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	line-height: 1.1;
+}
+
+.docs-content .doc-latency .note {
+	margin: 10px 0 0;
+	color: var(--fg-dim);
+	font-size: 13px;
+	line-height: 1.5;
 }
 
 .docs-content .doc-loop ol {
@@ -368,7 +404,8 @@
 
 .docs-content .doc-loop figcaption,
 .docs-content .doc-handoff figcaption,
-.docs-content .doc-ways figcaption {
+.docs-content .doc-ways figcaption,
+.docs-content .doc-latency figcaption {
 	margin-top: 16px;
 	color: var(--fg-dim);
 	font-size: 13px;
@@ -438,6 +475,12 @@
 }
 
 @media (max-width: 640px) {
+	.docs-content .doc-pair {
+		grid-template-columns: 1fr;
+	}
+}
+
+@container (max-width: 560px) {
 	.docs-content .doc-loop ol {
 		grid-template-columns: 1fr;
 		gap: 24px;
