@@ -13,7 +13,7 @@ on:
         type: string
         required: false
       wallpaper:
-        description: A wallpaper preset (tiles, dusk, lagoon or ember) for every clip, in place of each clip's own
+        description: A wallpaper preset (dusk, lagoon or night) for every clip, in place of each clip's own
         type: string
         required: false
       no_retina:

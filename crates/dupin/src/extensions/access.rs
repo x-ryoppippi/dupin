@@ -50,10 +50,15 @@ pub fn shared_storage() -> Option<Arc<dupin_storage::Storage>> {
                 }
                 None => dupin_storage::Storage::new(root, dupin_mac::keychain::KeychainKey),
             };
-            Some(Arc::new(match dupin_mac::machine::platform_uuid() {
+            let storage = match dupin_mac::machine::platform_uuid() {
                 Some(uuid) => storage.with_hardware_id(uuid.as_bytes()),
                 None => storage,
-            }))
+            };
+            // A recording shows the clipboard fixture's history, as a headless run does.
+            if crate::recording::active() {
+                crate::clipboard::seed_fixture(&storage);
+            }
+            Some(Arc::new(storage))
         })
         .clone()
 }
@@ -142,10 +147,14 @@ pub fn open(platform: Platform) -> Bridge {
                 "extension storage needs XDG_DATA_HOME or HOME",
             )),
         },
-        clipboard: Box::new(Pasteboard {
-            settings: platform.clipboard,
-            service: OnceLock::new(),
-        }),
+        // A recording never watches the real pasteboard, whose copies are the user's.
+        clipboard: match crate::recording::active() {
+            true => Box::new(services::Unavailable("a recording has no clipboard to watch")),
+            false => Box::new(Pasteboard {
+                settings: platform.clipboard,
+                service: OnceLock::new(),
+            }),
+        },
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
             dupin_mac::SystemDictionary::default(),
         ))),

@@ -2,27 +2,32 @@
 	"clips": {
 		"home/apps": {
 			"macos": "26.3",
-			"wallpaper": "tiles",
+			"wallpaper": "dusk",
 			"scale": 2.0
 		},
 		"home/in-files": {
 			"macos": "26.3",
-			"wallpaper": "tiles",
+			"wallpaper": "dusk",
 			"scale": 2.0
 		},
 		"home/dictionary": {
 			"macos": "26.3",
-			"wallpaper": "tiles",
+			"wallpaper": "dusk",
 			"scale": 2.0
 		},
 		"home/keywords": {
 			"macos": "26.3",
-			"wallpaper": "tiles",
+			"wallpaper": "dusk",
 			"scale": 2.0
 		},
 		"home/files": {
 			"macos": "26.3",
-			"wallpaper": "tiles",
+			"wallpaper": "dusk",
+			"scale": 2.0
+		},
+		"home/clipboard": {
+			"macos": "26.3",
+			"wallpaper": "dusk",
 			"scale": 2.0
 		}
 	}

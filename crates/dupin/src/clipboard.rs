@@ -179,23 +179,35 @@ pub fn headless_storage() -> Option<dupin_extension_bridge::PackageStorage> {
         .ok()?
         .keep();
     let storage = dupin_storage::Storage::new(root, dupin_storage::MemoryKey::random());
+    seed_fixture(&storage);
+    Some(dupin_extension_bridge::PackageStorage::new(storage))
+}
+
+/// Puts the clipboard fixture into `storage`, in the bundled clipboard history's namespace, as
+/// copies it watched would have left. Does nothing without `DUPIN_HEADLESS_CLIPBOARD`.
+pub fn seed_fixture(storage: &dupin_storage::Storage) {
     let records = fixture_records(crate::extensions::Clock::launcher().now_ms());
-    if !records.is_empty() {
-        let package = dupin_extension_bridge::PackageId::new(format!("bundled:{PACKAGE}")).ok()?;
-        let namespace =
-            dupin_extension_bridge::storage::namespace(&package, dupin_extension_bridge::Origin::Bundled);
-        let store = storage
-            .open(&namespace, dupin_storage::Limits::default())
-            .inspect_err(|error| crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}")))
-            .ok()?;
-        for record in records {
-            if let Err(error) = store.put(record) {
-                crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}"));
-                break;
-            }
+    if records.is_empty() {
+        return;
+    }
+    let Ok(package) = dupin_extension_bridge::PackageId::new(format!("bundled:{PACKAGE}")) else {
+        return;
+    };
+    let namespace =
+        dupin_extension_bridge::storage::namespace(&package, dupin_extension_bridge::Origin::Bundled);
+    let store = match storage.open(&namespace, dupin_storage::Limits::default()) {
+        Ok(store) => store,
+        Err(error) => {
+            crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}"));
+            return;
+        }
+    };
+    for record in records {
+        if let Err(error) = store.put(record) {
+            crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}"));
+            return;
         }
     }
-    Some(dupin_extension_bridge::PackageStorage::new(storage))
 }
 
 #[cfg(test)]

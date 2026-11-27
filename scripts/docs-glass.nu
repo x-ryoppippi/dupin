@@ -22,48 +22,118 @@ const MARGIN = 32
 # The website's demo frame in points, whose shape every clip is cut to.
 const FRAME = {width: 680, height: 578}
 
-# The wallpapers the glass is recorded over, drawn here rather than shipped: soft blobs of colour
-# for the glass to bend, with nothing sharp to read through the text. Positions and radii are in
-# a 64×40 grid.
+# The wallpapers the glass is recorded over, drawn here rather than shipped, each a landscape: a
+# sky in bands of colour with a sun or moon, ridges of mountains fading into the haze, a treeline
+# and a lake that reflects them. Their hard edges and contrasts are what the glass visibly blurs
+# and bends. `sky` lists colours down to the horizon, `sun` sits at a fraction of the sky's
+# width and height, each ridge's `base` and `amp` are fractions of the sky's height, `haze` is
+# how much of the horizon's colour each ridge takes, and `stars` are drawn only in a dark sky.
 const WALLPAPERS = {
-    # Bold harlequin diamonds with crisp edges, two cells of two colours in a repeat of 2×2, so
-    # the glass has hard shapes to bend and blur behind it. Each cell is a background and a
-    # diamond, drawn 200 pixels wide: 100 points on a 2x display.
-    tiles: {
-        cells: [
-            {bg: "#2b1b8a", fg: "#ff9a2e"}
-            {bg: "#d4357f", fg: "#27c4f4"}
-        ]
-    }
     dusk: {
-        base: "#1d1747"
-        blobs: [
-            [x, y, r, colour];
-            [14, 10, 16, "#c3418f"]
-            [50, 31, 15, "#f08a3c"]
-            [52, 6, 12, "#3a6df0"]
-            [30, 36, 10, "#7b3fd0"]
+        sky: [
+            "#1b1850"
+            "#4b2f7e"
+            "#a1447f"
+            "#e8705f"
+            "#fbab69"
+            "#ffd592"
         ]
+        sun: {
+            x: 0.66
+            y: 0.80
+            r: 70
+            colour: "#fff1cf"
+            glow: "255,190,120"
+        }
+        ridges: [
+            {
+                base: 0.84
+                amp: 0.22
+                colour: "#c0668a"
+                seed: 2.1
+            }
+            {
+                base: 0.90
+                amp: 0.24
+                colour: "#7d4388"
+                seed: 5.7
+            }
+            {
+                base: 0.96
+                amp: 0.20
+                colour: "#3f2a6e"
+                seed: 9.3
+            }
+        ]
+        trees: "#150f33"
+        water: "#1a1244"
+        stars: 0
     }
     lagoon: {
-        base: "#08263a"
-        blobs: [
-            [x, y, r, colour];
-            [12, 30, 16, "#1fb7a6"]
-            [48, 10, 15, "#2f7df6"]
-            [56, 34, 10, "#8fe07a"]
-            [28, 6, 9, "#5ad1f0"]
+        sky: ["#2a73c4" "#4fa0dc" "#8cc9ea" "#c5e6ee" "#f2f1de"]
+        sun: {
+            x: 0.30
+            y: 0.60
+            r: 60
+            colour: "#fffbe6"
+            glow: "255,250,220"
+        }
+        ridges: [
+            {
+                base: 0.84
+                amp: 0.22
+                colour: "#8fb4c8"
+                seed: 1.3
+            }
+            {
+                base: 0.91
+                amp: 0.24
+                colour: "#4f8a9a"
+                seed: 4.4
+            }
+            {
+                base: 0.97
+                amp: 0.20
+                colour: "#1f5a62"
+                seed: 8.1
+            }
         ]
+        trees: "#0c2f35"
+        water: "#14506a"
+        stars: 0
     }
-    ember: {
-        base: "#2a0f12"
-        blobs: [
-            [x, y, r, colour];
-            [16, 12, 15, "#e2502f"]
-            [50, 30, 16, "#f2b33d"]
-            [46, 4, 10, "#b8306a"]
-            [26, 36, 10, "#ff8a4c"]
+    night: {
+        sky: ["#060b24" "#0d1c4a" "#1e3a7a" "#3f64a6" "#7a9ccc"]
+        sun: {
+            x: 0.72
+            y: 0.34
+            r: 52
+            colour: "#f4f1e2"
+            glow: "190,210,255"
+        }
+        ridges: [
+            {
+                base: 0.86
+                amp: 0.20
+                colour: "#355590"
+                seed: 3.7
+            }
+            {
+                base: 0.92
+                amp: 0.22
+                colour: "#1f3566"
+                seed: 6.2
+            }
+            {
+                base: 0.97
+                amp: 0.18
+                colour: "#0f1a3a"
+                seed: 10.5
+            }
         ]
+        trees: "#060a1c"
+        water: "#08122c"
+        stars: 90
     }
 }
 
@@ -80,7 +150,7 @@ const WALLPAPERS = {
 def main [
     --app: path = "result/Applications/Dupin.app" # The app bundle to record
     --only: string # Record only the clips whose `<page>/<name>` contains this
-    --wallpaper: string # A preset (tiles, dusk, lagoon or ember) or an image, for every clip
+    --wallpaper: string # A preset (dusk, lagoon or night) or an image, for every clip
     --no-retina # Record on the display as it is, without a 2x virtual one, on CI
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
@@ -187,7 +257,8 @@ def dark-mode [] {
     ^osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
 }
 
-# The image a wallpaper names: a preset drawn at 2560×1600, or a file as it is.
+# The image a wallpaper names: a preset drawn at 2880×2000, the shape of the 1440×1000 virtual
+# display at 2x, or a file as it is.
 def wallpaper-image [name: string, tmp: path]: nothing -> string {
     let preset = $WALLPAPERS | get --optional $name
     if $preset == null {
@@ -199,30 +270,97 @@ def wallpaper-image [name: string, tmp: path]: nothing -> string {
         return ($name | path expand)
     }
     let out = $tmp | path join $"wallpaper-($name).png"
-    if $preset.cells? != null and not ($out | path exists) {
-        let cells = $preset.cells | enumerate | each {|cell|
-            let file = $tmp | path join $"wallpaper-($name)-cell($cell.index).png"
-            (
-                ^magick -size 200x200 $"xc:($cell.item.bg)" -fill $cell.item.fg
-                -draw "polygon 100,12 188,100 100,188 12,100" $file
-            )
-            $file
-        }
-        let tile = $tmp | path join $"wallpaper-($name)-tile.png"
-        (
-            ^magick
-            "(" $cells.0 $cells.1 +append ")"
-            "(" $cells.1 $cells.0 +append ")"
-            -append $tile
-        )
-        ^magick -size 2880x2000 $"tile:($tile)" $out
-    } else if not ($out | path exists) {
-        let blobs = $preset.blobs | each {|blob|
-            [-fill $blob.colour -draw $"circle ($blob.x),($blob.y) ($blob.x + $blob.r),($blob.y)"]
-        } | flatten
-        ^magick -size 64x40 $"xc:($preset.base)" ...$blobs -blur 0x9 -resize 2560x1600! $out
+    if not ($out | path exists) {
+        draw-landscape $preset $tmp $name $out
     }
     $out
+}
+
+# A number in 0..1 that looks random and is the same every run.
+def scatter [n: float]: nothing -> float {
+    let x = ($n | math sin) * 43758.5453
+    $x - ($x | math floor)
+}
+
+# A ridge's outline: 1 at a peak and 0 in a valley, sharp at the peaks, from three waves.
+def ridge-height [x: int, seed: float]: nothing -> float {
+    let t = $x / 2880.0 * 6.2832
+    let a = 1.0 - (($t * 1.3 + $seed | math sin) | math abs)
+    let b = 1.0 - (($t * 3.1 + $seed * 2.7 | math sin) | math abs)
+    let c = 1.0 - (($t * 7.9 + $seed * 5.1 | math sin) | math abs)
+    0.55 * $a + 0.3 * $b + 0.15 * $c
+}
+
+# The landscape a preset describes, to `out`: the sky and everything above the horizon first,
+# then the lake, which is that scene turned upside down, rippled and darkened.
+def draw-landscape [
+    preset: record
+    tmp: path
+    name: string
+    out: path
+] {
+    let width = 2880
+    let height = 2000
+    let horizon = 1240
+    let bands = $preset.sky | window 2
+    let band = ($horizon / ($bands | length)) | math ceil
+    let sky = $bands | each {|pair|
+        ["(" -size $"($width)x($band)" $"gradient:($pair.0)-($pair.1)" ")"]
+    } | flatten
+    let sun = $preset.sun
+    let sun_x = $sun.x * $width | math round
+    let sun_y = $sun.y * $horizon | math round
+    let glow = $tmp | path join $"wallpaper-($name)-glow.png"
+    ^magick -size 1600x1600 $"radial-gradient:rgba\(($sun.glow),0.85\)-rgba\(($sun.glow),0\)" $glow
+    let stars = if $preset.stars > 0 {
+        1..$preset.stars | each {|i|
+            let x = (scatter ($i * 12.9898)) * $width | math round
+            let y = (scatter ($i * 78.233)) * $horizon * 0.6 | math round
+            let r = 1 + (scatter ($i * 3.7)) * 3 | math round
+            [-fill "rgba(255,255,255,0.8)" -draw $"circle ($x),($y) ($x + $r),($y)"]
+        } | flatten
+    } else {
+        []
+    }
+    let ridges = $preset.ridges | each {|ridge|
+        let points = 0..($width // 16) | each {|i|
+            let x = $i * 16
+            let y = $horizon * ($ridge.base - $ridge.amp * (ridge-height $x $ridge.seed)) | math round
+            $"($x),($y)"
+        }
+        let outline = $points | append [$"($width),($horizon)" $"0,($horizon)"] | str join " "
+        [-fill $ridge.colour -draw $"polygon ($outline)"]
+    } | flatten
+    let trees = 0..($width // 11) | each {|i|
+        let x = $i * 11 + ((scatter ($i * 5.31)) * 8 | math round)
+        let tall = 34 + (scatter ($i * 9.17)) * 70 | math round
+        [-fill $preset.trees -draw $"polygon ($x - 9),($horizon + 2) ($x),($horizon - $tall) ($x + 9),($horizon + 2)"]
+    } | flatten
+    let scene = $tmp | path join $"wallpaper-($name)-scene.png"
+    (
+        ^magick ...$sky -append -resize $"($width)x($horizon)!"
+        ...$stars
+        $glow -geometry $"+($sun_x - 800)+($sun_y - 800)" -composite
+        -fill $sun.colour -draw $"circle ($sun_x),($sun_y) ($sun_x + $sun.r),($sun_y)"
+        ...$ridges
+        -fill $preset.trees -draw $"rectangle 0,($horizon - 10) ($width),($horizon)"
+        ...$trees
+        $scene
+    )
+    let lake = $height - $horizon
+    let reflection = $tmp | path join $"wallpaper-($name)-reflection.png"
+    (
+        ^magick $scene -flip -crop $"($width)x($lake)+0+0" +repage
+        -motion-blur 0x28+0 -blur 0x3 -modulate 92,90
+        -fill $preset.water -colorize 18%
+        "(" -size $"($width)x($lake)" gradient:white-#4a4a4a ")" -compose multiply -composite
+        $reflection
+    )
+    (
+        ^magick $scene $reflection -append
+        -attenuate 0.06 +noise Gaussian -depth 8
+        $out
+    )
 }
 
 # One clip: Dupin over the wallpaper, its steps pressed in time, the screen recorded around the
@@ -267,7 +405,7 @@ def record-clip [
             (
                 ^ffmpeg -nostdin -hide_banner -loglevel error -y -f avfoundation -framerate 30
                 -capture_cursor 0 -i "Capture screen 0:none" -t ($seconds | into string) -an
-                -c:v libx264 -preset veryfast -crf 12 -pix_fmt yuv420p -stats_period 0.1
+                -c:v libx264 -preset veryfast -crf 8 -pix_fmt yuv444p -stats_period 0.1
                 -progress $progress $movie
             )
             true | job send 0 --tag 1

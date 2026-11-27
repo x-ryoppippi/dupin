@@ -21,7 +21,7 @@ recent = [
 ]
 
 # What the `glass = true` clips are recorded over, so every tab on the home page shows the same.
-wallpaper = "tiles"
+wallpaper = "dusk"
 
 # Folders end with a slash.
 documents = [
@@ -485,60 +485,10 @@ steps = [{ type = "?" }, { key = "down" }, { key = "down" }, { key = "down" }]
 [[clips]]
 page = "home"
 name = "clipboard"
-# Not `glass`: the real app records copies only once macOS lets it read the clipboard in the
-# background, which a recording must not grant, so this stays headless over Flow.
+glass = true
 fixtures = "scripts/headless/clipboard-images.json"
 backdrop = "flow"
 themes = ["dark"]
 scale = 2
 video = true
 steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
-
-# The Apps tab again over each backdrop shader, for the home page's backdrop switcher: one
-# recording per shader, not every tab over every shader, which would be six times the bytes to
-# show the same thing.
-
-[[clips]]
-page = "home"
-name = "apps-flow"
-backdrop = "flow"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-aurora"
-backdrop = "shaders/aurora.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-embers"
-backdrop = "shaders/embers.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-snow"
-backdrop = "shaders/snow.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
-
-[[clips]]
-page = "home"
-name = "apps-matrix"
-backdrop = "shaders/matrix.wgsl"
-themes = ["dark"]
-scale = 2
-video = true
-steps = [{ type = "a" }, { wait = 0.6 }, { key = "down" }, { key = "down" }, { key = "down" }]
