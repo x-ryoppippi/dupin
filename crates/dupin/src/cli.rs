@@ -486,10 +486,13 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 }));
             }
             crate::out::outln!(
-                "{} {} answers `{}` with {}{}",
+                "{} {} answers {} with {}{}",
                 extension.name,
                 extension.version,
-                extension.keyword,
+                match &extension.keyword {
+                    Some(keyword) => format!("`{keyword}`"),
+                    None => "the main search".into(),
+                },
                 exported.join(" and "),
                 if extension.default_search {
                     ", and the main search with its items"

@@ -1109,7 +1109,7 @@ mod tests {
         let root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
         let extension = super::super::load_folder(&root).unwrap();
-        assert_eq!(extension.keyword, "wc");
+        assert_eq!(extension.keyword.as_deref(), Some("wc"));
         let rows = search(&ExtensionProvider::new(extension), "two words");
         assert_eq!(rows.len(), 1);
         assert_eq!(

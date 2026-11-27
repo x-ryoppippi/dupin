@@ -348,10 +348,12 @@ impl Replayer<'_> {
         let typed = match self.pages.last() {
             Some(page) => page.query.as_str(),
             None => match &self.query {
-                None if main_search => "",
-                None => {
-                    return vec![Press::Type(format!("{} {query}", self.extension.keyword))];
-                }
+                None => match &self.extension.keyword {
+                    Some(keyword) if !main_search => {
+                        return vec![Press::Type(format!("{keyword} {query}"))];
+                    }
+                    _ => "",
+                },
                 Some(typed) => typed.as_str(),
             },
         };

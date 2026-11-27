@@ -82,7 +82,7 @@ pub fn resources(executable: &Path) -> Option<PathBuf> {
 }
 
 /// Each bundled package's folder, with the `name` and keyword in its package.json.
-pub fn packages(bundled: &Path) -> Vec<(PathBuf, String, String)> {
+pub fn packages(bundled: &Path) -> Vec<(PathBuf, String, Option<String>)> {
     let Ok(entries) = std::fs::read_dir(bundled) else {
         return Vec::new();
     };

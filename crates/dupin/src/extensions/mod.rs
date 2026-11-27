@@ -52,7 +52,8 @@ pub struct Extension {
     pub folder_name: String,
     pub name: String,
     pub version: String,
-    pub keyword: String,
+    /// `None` for a package that ships as a built-in answering the main search.
+    pub keyword: Option<String>,
     /// The package's folder, which row icons are relative to.
     pub root: PathBuf,
     /// The package's own icon: its keyword chip's, its heading's in Settings and that of each
@@ -412,14 +413,17 @@ impl Extension {
 
     /// Logs, once, that the package's web searches reach only its own keyword.
     fn note_keyword_only_web_searches(&self) {
+        let Some(keyword) = &self.keyword else {
+            return;
+        };
         if crate::web::reaches_main_search(&self.package)
             || self.web_searches_noted.swap(true, Ordering::Relaxed)
         {
             return;
         }
         crate::log::warn(&format!(
-            "extension {}: its web searches are listed only under its keyword `{}`; only the bundled Web Search package adds aliases and fallbacks to the main search",
-            self.id, self.keyword
+            "extension {}: its web searches are listed only under its keyword `{keyword}`; only the bundled Web Search package adds aliases and fallbacks to the main search",
+            self.id
         ));
     }
 
@@ -1110,7 +1114,7 @@ pub(crate) mod tests {
             id,
             name: name.into(),
             version: "1.0.0".into(),
-            keyword: keyword.into(),
+            keyword: Some(keyword.into()),
             root: PathBuf::from("/fixture"),
             icon: None,
             default_search: false,
@@ -1190,7 +1194,7 @@ pub(crate) mod tests {
             let keywords = catalog
                 .extensions
                 .iter()
-                .map(|extension| extension.keyword.as_str());
+                .filter_map(|extension| extension.keyword.as_deref());
             if keywords.eq(keyword) {
                 assert!(catalog.problems.is_empty(), "{:?}", catalog.problems);
                 return;
@@ -1395,7 +1399,7 @@ pub(crate) mod tests {
         let reloaded = scanner.update(&directory, None).unwrap();
         assert!(Arc::ptr_eq(&updated.extensions[0], &reloaded.extensions[0]));
         assert!(!Arc::ptr_eq(&updated.extensions[1], &reloaded.extensions[1]));
-        assert_eq!(reloaded.extensions[1].keyword, "reloaded");
+        assert_eq!(reloaded.extensions[1].keyword.as_deref(), Some("reloaded"));
         assert!(scanner.update(&directory, None).is_none());
 
         fs::remove_file(directory.join("one/main.js")).unwrap();
@@ -1462,8 +1466,8 @@ pub(crate) mod tests {
         assert_eq!(ids, ["words"]);
         let words = &catalog.extensions[0];
         assert_eq!(
-            (words.name.as_str(), words.keyword.as_str()),
-            ("Word Count", "wc")
+            (words.name.as_str(), words.keyword.as_deref()),
+            ("Word Count", Some("wc"))
         );
         let problems = catalog.problems.join("\n");
         for (folder, reason) in [
