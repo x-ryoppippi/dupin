@@ -86,17 +86,9 @@ https://docs.blacksmith.sh when adding a job or when Blacksmith adds larger runn
 On macOS that is `blacksmith-12vcpu-macos-26`, not the same-sized macOS 27 runner, because
 27 is slower per core. At one commit and one cache state, CI's `build` job took 9–14% longer on
 12 vCPU macOS 27 than on 26, the release build's fat LTO step 12–17% longer and the
-extension-host test build 18–19% longer. `latency`'s parity does not hold on 27 either, but
-not because extensions are slower there: on 12 vCPU runners an extension's whole host call
+extension-host test build 18–19% longer. On 12 vCPU runners an extension's whole host call
 (the socket, the sandboxed helper, QuickJS and the host service) took 560–653 µs at p95 on 27
-and 639–675 µs on 26. A headless run takes a delivery only when its next frame starts, and
-rune paces those frames with `thread::sleep`, whose sub-millisecond wake-ups on the 27 runners
-are late by anything from 0 to 1.1 ms where on 26 they are late by a nearly constant 0.9–1 ms.
-That jitter lands in `merge_ms`, so it widens the p95 of scenarios whose own work is short, as
-the extensions' is, more than the native `search` control's, and the control's scale can't
-absorb it ([Keypress latency](#keypress-latency)). A window wakes on the delivery instead, so
-this is the benchmark's, not the app's; [anomalyco/rune#2602](https://github.com/anomalyco/rune/issues/2602)
-asks rune to wake the headless loop on delivery too. Measure again before moving to a newer macOS.
+and 639–675 µs on 26. Measure again, `latency`'s parity included, before moving to a newer macOS.
 
 After this workflow is available on the repository's default branch, start a box
 from the root of the worktree you want to test:
@@ -358,7 +350,7 @@ For each scenario the results give p50, p95 and p99 of the total, and p50 and p9
 
 - `dispatch_ms`: from the edit to the searches it starts being handed to their providers' workers.
 - `provider_ms`: from there to the last provider's final delivery leaving its worker. `providers` in the raw lines has each one's time.
-- `merge_ms`: from there to the session holding the finished, ranked results. It includes waiting for the UI thread. A headless run's UI thread takes deliveries only when its next frame starts, and frames start at most every `1 / --fps` seconds, paced by `thread::sleep`, so this includes up to a millisecond of waiting at the default 1000 fps, plus however late the sleep wakes.
+- `merge_ms`: from there to the session holding the finished, ranked results. It includes waiting for the UI thread, which a delivery wakes in a headless run as it wakes a window's.
 - `layout_ms`: from there to the next frame being built, laid out and encoded.
 
 `compare` holds a candidate result set against a baseline, scenario by scenario, and fails when the candidate's p95 exceeds the baseline's by more than `--tolerance` percent (10 by default) or `--floor` (1 ms), whichever is larger. `--report` prints the comparison without failing. `--baseline-implementation` and `--candidate-implementation` compare two implementations across result sets.
