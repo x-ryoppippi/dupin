@@ -1,8 +1,15 @@
+use std::path::Path;
+
 use dupin_core::{Action, Effect};
 use rune::Tx;
 use rune::raw_window_handle::RawWindowHandle;
 
 use super::{Busy, Ui, query::mark_session_query};
+
+fn same_bundle_path(path: &Path, running_bundle: &Path) -> bool {
+    let resolved = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_owned());
+    resolved(path) == resolved(running_bundle)
+}
 
 impl Ui {
     pub(super) fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
@@ -99,7 +106,15 @@ impl Ui {
                     Action::Compress(path) => self.compress_file(path),
                     Action::OpenWith { path, application } => self
                         .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
-                    Action::Open(path) => self.run_workspace_action(dupin_mac::workspace::Action::Open(path)),
+                    Action::Open(path) => {
+                        let running_bundle = dupin_mac::bundle::path();
+                        if same_bundle_path(&path, &running_bundle) {
+                            // Launching Dupin itself cannot show a normal window; take the user to Preferences.
+                            self.prepare_settings();
+                        } else {
+                            self.run_workspace_action(dupin_mac::workspace::Action::Open(path));
+                        }
+                    }
                     Action::Reveal(path) => {
                         self.run_workspace_action(dupin_mac::workspace::Action::Reveal(path))
                     }
@@ -165,5 +180,25 @@ impl Ui {
             },
             _ => Err("Couldn't find the launcher view.".into()),
         })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_bundle_path;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn recognizes_the_running_bundle_through_an_application_link() {
+        let directory = tempfile::tempdir().unwrap();
+        let bundle = directory.path().join("Dupin.app");
+        let link = directory.path().join("Applications/Dupin.app");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        symlink(&bundle, &link).unwrap();
+
+        assert!(same_bundle_path(&bundle, &bundle));
+        assert!(same_bundle_path(&link, &bundle));
+        assert!(!same_bundle_path(&directory.path().join("Other.app"), &bundle));
     }
 }
