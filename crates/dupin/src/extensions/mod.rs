@@ -462,11 +462,11 @@ impl Extension {
     }
 }
 
-/// Starts the copies of the fixture `dupin ext render` renders, once the headless launcher's
-/// first frame starts its script.
-pub(crate) fn headless_ready() {
+/// Hands over the copies of the fixture `dupin ext render` renders that the headless
+/// launcher's script `clock` has reached.
+pub(crate) fn play_headless_copies(clock: f64) {
     if let Some(fixture) = fixtures::headless() {
-        fixture.play_events();
+        fixture.play_events(clock);
     }
 }
 

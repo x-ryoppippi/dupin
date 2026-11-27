@@ -402,6 +402,7 @@ impl Ui {
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        crate::extensions::play_headless_copies(clock);
         self.poll_picker(clock, tx);
         let notice_expired = self.notices.expire(clock);
         self.poll_searches(clock, tx) || notice_expired
