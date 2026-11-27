@@ -21,6 +21,7 @@ An extension reaches nothing on its own. It declares the host services it wants 
 | [`calendar`](#calendar)            | `calendar`                                     | Reading events        |                           | Calendars     |
 | [`windows`](#windows)              | `windows:read`, `windows:arrange`              | Reading               | Moving a window           | Accessibility |
 | [`context`](#context)              | `context:frontmost`, `context:document`        | Reading               |                           |               |
+| [`apps`](#apps)                    | `apps:read`, `apps:control`                    | Reading               | Hiding, quitting          |               |
 | [`clipboard`](#clipboard)          | `clipboard:read`, `:write`, `:watch`, `:paste` | Watching              | Reading, writing, pasting | Yes           |
 | [`rows`, `query`](#rows-and-query) | `rows:<kind>`, `query`                         | Filters               | Kind actions              |               |
 
@@ -40,6 +41,7 @@ An extension reaches nothing on its own. It declares the host services it wants 
 	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 },
 	"windows": ["read", "arrange"],
 	"context": ["frontmost", "document"],
+	"apps": ["read", "control"],
 	"rows": { "app": ["title"], "file": ["path"] },
 	"query": ["read"]
 }
@@ -585,6 +587,27 @@ export async function search() {
 	return document ? [{ title: document.path.split('/').at(-1), subtitle: document.path }] : [];
 }
 ```
+
+</details>
+
+## Apps
+
+`"apps": ["read", "control"]` lets an extension list the apps that run now and hide, quit or force quit one. Only apps with a place in the Dock are listed, never background apps or Dupin itself, and a request reaches only an app the list holds.
+
+```js
+const running = await apps.running(); // [{ name: "Safari", bundleId: "com.apple.Safari", pid: 321, path: "/Applications/Safari.app", active: true, hidden: false }, …]
+const outcome = await apps.quit({ path: '/Applications/Safari.app' }); // { app, done: true } or null
+```
+
+<details>
+<summary>What each returns, and what needs an action</summary>
+
+| Access    | Function                                                  | Returns                                                                                                           |
+| --------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `read`    | `apps.running()`                                          | `{ name, bundleId, pid, path, active, hidden }` for each app; `bundleId` and `path` may be `null`.                |
+| `control` | `apps.hide(app)`, `apps.quit(app)`, `apps.forceQuit(app)` | `{ app, done }`, or `null` when no listed app matches. `app` is `{ pid }` or `{ path }`, as an app row's path is. |
+
+Listing may run while you type. Hiding and quitting need an action you chose. `quit` asks the app as the Dock's Quit does, and `forceQuit` stops it as the Force Quit window does; Dupin then waits up to 2 seconds for it to end, and `done` is `false` when it hasn't, as for an app asking whether to save. None needs Automation or any other macOS access. A path may be a link to the bundle, as `/Applications/Safari.app` is.
 
 </details>
 

@@ -113,6 +113,7 @@ fn world_with(
         calendar: Box::new(fixture::Calendar { today: 0 }),
         windows: Box::new(windows.clone()),
         context: Box::new(fixture::Context),
+        apps: Box::new(Arc::new(fixture::Apps::default())),
     };
     let grants = MemoryLocal::default();
     let bridge = Bridge::new(
@@ -242,7 +243,7 @@ const ASKED: HostRequest = HostRequest { run: 0, call: 1 };
 
 fn guest(body: &str) -> String {
     format!(
-        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context }} from 'dupin';\n{REPORT}\n{body}"
+        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context, apps }} from 'dupin';\n{REPORT}\n{body}"
     )
 }
 
@@ -1547,6 +1548,58 @@ fn context_reaches_a_search_only_scope_by_scope_and_only_while_allowed() {
         r#"needs-consent ok {"path":"/Users/me/notes.md"}"#,
         "each scope is allowed on its own"
     );
+}
+
+#[test]
+fn a_search_may_list_running_apps_but_only_a_chosen_action_quits_one() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "apps": ["read", "control"] }),
+        &guest(
+            "const names = async () => (await apps.running()).map((app) => app.name).join(',');
+             export async function search() {
+               return [{ title: `${await report(names)} ${await report(() => apps.quit({ pid: 10 }))}` }];
+             }
+             export const actions = {
+               async quit(data) { return { type: 'toast', text: `${await report(() => apps.quit(data))} ${await report(names)}` }; },
+               async force(data) { return { type: 'toast', text: await report(() => apps.forceQuit(data)) }; },
+               async hide(data) { return { type: 'toast', text: await report(() => apps.hide(data)) }; },
+             };",
+        ),
+    );
+    world.enable();
+    world.grant("apps:read");
+    world.grant("apps:control");
+    assert_eq!(
+        world.first(""),
+        r#"ok "Notes,Editor" needs-activation"#,
+        "with no macOS access of its own, and nothing quits while the user types"
+    );
+    let toast = |name: &str, data: serde_json::Value| {
+        let acted = world.act(name, data).unwrap();
+        match acted.effect {
+            Some(ActionEffect::Toast { text }) => text,
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(
+        toast("hide", serde_json::json!({ "path": "/Applications/Notes.app" })),
+        r#"ok {"app":{"active":false,"bundleId":"com.example.notes","hidden":false,"name":"Notes","path":"/Applications/Notes.app","pid":10},"done":true}"#
+    );
+    assert!(toast("quit", serde_json::json!({ "pid": 10 })).ends_with(r#""done":true} ok "Editor""#));
+    assert_eq!(
+        toast("quit", serde_json::json!({ "pid": 10 })),
+        r#"ok null ok "Editor""#,
+        "it no longer runs"
+    );
+    assert!(toast("force", serde_json::json!({ "pid": 11 })).ends_with(r#""done":true}"#));
+    for invalid in [
+        serde_json::json!({}),
+        serde_json::json!({ "pid": 1, "path": "/a.app" }),
+        serde_json::json!({ "path": "Notes.app" }),
+    ] {
+        assert_eq!(toast("hide", invalid.clone()), "invalid", "{invalid}");
+    }
 }
 
 fn world_with_document() -> World {

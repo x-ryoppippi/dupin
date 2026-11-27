@@ -4,8 +4,8 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::scope::{
-    ClipboardAccess, ContextAccess, DeclaredPath, FilesAccess, FilesKind, MAX_EXEC_OUTPUT_BYTES, Method,
-    Origin, RowKind, Scope, ScopeKey, ScopeName, WindowsAccess,
+    AppsAccess, ClipboardAccess, ContextAccess, DeclaredPath, FilesAccess, FilesKind, MAX_EXEC_OUTPUT_BYTES,
+    Method, Origin, RowKind, Scope, ScopeKey, ScopeName, WindowsAccess,
 };
 
 const MAX_HTTP: usize = 32;
@@ -55,6 +55,7 @@ impl Capabilities {
                     "calendar" => parser.calendar(value, &field),
                     "windows" => parser.windows(value, &field),
                     "context" => parser.context(value, &field),
+                    "apps" => parser.apps(value, &field),
                     "rows" => parser.rows(value, &field),
                     "query" => parser.query(value, &field),
                     _ => {
@@ -63,7 +64,7 @@ impl Capabilities {
                             field,
                             format!("`{name}` isn't a capability"),
                             Some(
-                                "Use http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context, rows or query.",
+                                "Use http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context, apps, rows or query.",
                             ),
                         );
                         Vec::new()
@@ -812,6 +813,26 @@ impl Parser {
         .into_iter()
         .flatten()
         .map(|access| Scope::Windows { access })
+        .collect()
+    }
+
+    fn apps(&mut self, value: &Value, field: &str) -> Vec<Scope> {
+        self.set(value, field, |parser, text, field| match text {
+            "read" => Some(AppsAccess::Read),
+            "control" => Some(AppsAccess::Control),
+            _ => {
+                parser.report(
+                    "invalid-value",
+                    field,
+                    format!("`{text}` isn't an apps access"),
+                    Some("Use read or control."),
+                );
+                None
+            }
+        })
+        .into_iter()
+        .flatten()
+        .map(|access| Scope::Apps { access })
         .collect()
     }
 

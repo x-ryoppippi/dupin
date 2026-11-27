@@ -22,7 +22,7 @@ use dupin_extension_bridge::{
     Revision, Scope,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, context, exec, windows};
+use dupin_host_services::{apps, calendar, context, exec, windows};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
 use serde_json::Value;
@@ -81,6 +81,7 @@ struct State {
     effects: Mutex<Effects>,
     windows: Option<windows::Service<windows::Fixture>>,
     context: Option<context::Service<context::Fixture>>,
+    apps: Option<apps::Service<apps::Fixture>>,
     /// The snippets the fixture hands the package, which its `snippets` calls change.
     snippets: Mutex<Snippets>,
     /// What watches the clipboard, by subscription, which a headless launcher hands the
@@ -194,6 +195,7 @@ impl Replier {
             .with_clock(FixtureClock(now));
         let windows = replies.windows.as_ref().map(window_fixture).transpose()?;
         let context = replies.context.as_ref().map(context_fixture).transpose()?;
+        let apps = replies.apps.as_ref().map(apps_fixture).transpose()?;
         let state = Arc::new(State {
             replies: replies.clone(),
             now,
@@ -203,6 +205,7 @@ impl Replier {
             effects: Mutex::default(),
             windows,
             context,
+            apps,
             snippets: Mutex::new(Snippets::seeded(preferences)),
             watchers: Mutex::default(),
             subscriptions: AtomicU64::default(),
@@ -223,6 +226,7 @@ impl Replier {
             calendar: shared(),
             windows: shared(),
             context: shared(),
+            apps: shared(),
         }
     }
 
@@ -556,6 +560,17 @@ fn context_fixture(reply: &fixture::ContextReply) -> Result<context::Service<con
     }))
 }
 
+/// The apps service a fixture's `replies.apps` describes, read as the service's own shapes.
+fn apps_fixture(reply: &fixture::AppsReply) -> Result<apps::Service<apps::Fixture>, Diagnostic> {
+    let running = serde_json::from_value(reply.running.clone()).map_err(|error| {
+        Diagnostic::new("invalid-fixture", error.to_string()).field("replies.apps.running")
+    })?;
+    Ok(apps::Service::new(apps::Fixture::new(
+        running,
+        reply.refuse.clone(),
+    )))
+}
+
 /// Each record's data, oldest first; blobs are left out.
 fn records(store: &Store) -> Result<Vec<Value>, dupin_storage::Error> {
     let mut records = Vec::new();
@@ -827,6 +842,13 @@ impl Shared {
             .ok_or_else(|| missing("reading or moving windows".into()))
     }
 
+    fn apps(&self) -> Result<&apps::Service<apps::Fixture>, Failure> {
+        self.0
+            .apps
+            .as_ref()
+            .ok_or_else(|| missing("listing or quitting running apps".into()))
+    }
+
     fn context(&self) -> Result<&context::Service<context::Fixture>, Failure> {
         self.0
             .context
@@ -850,6 +872,20 @@ impl services::Windows for Shared {
 
     fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
         encoded(self.windows()?.set_frame(frame)?)
+    }
+}
+
+impl services::Apps for Shared {
+    fn running(&self) -> Result<Value, Failure> {
+        encoded(self.apps()?.running())
+    }
+
+    fn hide(&self, target: &apps::Target) -> Result<Value, Failure> {
+        encoded(self.apps()?.hide(target))
+    }
+
+    fn quit(&self, target: &apps::Target, force: bool) -> Result<Value, Failure> {
+        encoded(self.apps()?.quit(target, force))
     }
 }
 

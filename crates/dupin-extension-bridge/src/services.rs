@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, exec, windows};
+use dupin_host_services::{apps, calendar, exec, windows};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -218,6 +218,15 @@ pub trait Context: Send + Sync {
     fn document(&self) -> Result<Value, Failure>;
 }
 
+pub trait Apps: Send + Sync {
+    /// The regular apps that run now, as a JSON array.
+    fn running(&self) -> Result<Value, Failure>;
+    /// Hides the app `target` names: what it did, or `null` when no such app runs.
+    fn hide(&self, target: &apps::Target) -> Result<Value, Failure>;
+    /// Asks the app to quit, or with `force` stops it: what it did, or `null`.
+    fn quit(&self, target: &apps::Target, force: bool) -> Result<Value, Failure>;
+}
+
 /// What a host service is missing, such as one a headless run has no use for.
 pub struct Unavailable(pub &'static str);
 
@@ -334,6 +343,18 @@ impl Context for Unavailable {
     }
 }
 
+impl Apps for Unavailable {
+    fn running(&self) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn hide(&self, _target: &apps::Target) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn quit(&self, _target: &apps::Target, _force: bool) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+}
+
 impl From<dupin_host_services::ServiceError> for Failure {
     fn from(error: dupin_host_services::ServiceError) -> Self {
         Failure {
@@ -355,6 +376,7 @@ pub struct Services {
     pub calendar: Box<dyn Calendar>,
     pub windows: Box<dyn Windows>,
     pub context: Box<dyn Context>,
+    pub apps: Box<dyn Apps>,
 }
 
 impl Services {
@@ -371,6 +393,7 @@ impl Services {
             calendar: Box::new(Unavailable("calendars aren't available")),
             windows: Box::new(Unavailable("windows aren't available")),
             context: Box::new(Unavailable("what you were using isn't available")),
+            apps: Box::new(Unavailable("the running apps aren't available")),
         }
     }
 }
@@ -598,6 +621,38 @@ pub(crate) mod fixture {
         fn set_frame(&self, frame: super::windows::Frame) -> Result<Value, Failure> {
             self.moves.lock().unwrap().push(frame);
             Ok(serde_json::to_value(frame).unwrap())
+        }
+    }
+
+    /// Notes and an editor running; the editor refuses a plain quit.
+    pub(crate) struct Apps(super::apps::Service<super::apps::Fixture>);
+
+    impl Default for Apps {
+        fn default() -> Self {
+            let app = |name: &str, pid: u32| super::apps::RunningApp {
+                name: name.into(),
+                bundle_id: Some(format!("com.example.{}", name.to_lowercase())),
+                pid,
+                path: Some(format!("/Applications/{name}.app")),
+                active: false,
+                hidden: false,
+            };
+            Self(super::apps::Service::new(super::apps::Fixture::new(
+                vec![app("Notes", 10), app("Editor", 11)],
+                vec![11],
+            )))
+        }
+    }
+
+    impl super::Apps for Arc<Apps> {
+        fn running(&self) -> Result<Value, Failure> {
+            Ok(serde_json::to_value(self.0.running()).unwrap())
+        }
+        fn hide(&self, target: &super::apps::Target) -> Result<Value, Failure> {
+            Ok(serde_json::to_value(self.0.hide(target)).unwrap())
+        }
+        fn quit(&self, target: &super::apps::Target, force: bool) -> Result<Value, Failure> {
+            Ok(serde_json::to_value(self.0.quit(target, force)).unwrap())
         }
     }
 

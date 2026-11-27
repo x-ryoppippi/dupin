@@ -46,6 +46,8 @@ fn scope_keys_round_trip_through_their_written_form() {
         "windows:arrange",
         "context:frontmost",
         "context:document",
+        "apps:read",
+        "apps:control",
     ] {
         assert_eq!(key(written).to_string(), written);
     }
@@ -58,6 +60,8 @@ fn scope_keys_round_trip_through_their_written_form() {
         "context",
         "context:selection",
         "context:Frontmost",
+        "apps",
+        "apps:quit",
         "windows",
         "network",
         "storage:x",
@@ -213,6 +217,37 @@ fn windows_scopes_need_accessibility_and_describe_themselves() {
     let scope = |access| Scope::Windows { access };
     assert!(scope(WindowsAccess::Read).covers(&scope(WindowsAccess::Read)));
     assert!(!scope(WindowsAccess::Arrange).covers(&scope(WindowsAccess::Read)));
+}
+
+#[test]
+fn apps_scopes_need_no_macos_access_and_only_control_needs_an_activation() {
+    let apps = caps(json!({ "apps": ["read", "control"] }));
+    let described: Vec<_> = apps
+        .scopes()
+        .map(|scope| (scope.key().to_string(), scope.to_string(), scope.os_permission()))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            (
+                "apps:read".to_string(),
+                "see which apps are running".to_string(),
+                None
+            ),
+            (
+                "apps:control".to_string(),
+                "hide, quit and force quit running apps".to_string(),
+                None
+            ),
+        ]
+    );
+    let scope = |access| Scope::Apps { access };
+    assert!(
+        !scope(AppsAccess::Read).covers(&scope(AppsAccess::Control)),
+        "seeing the apps never lets a package quit one"
+    );
+    assert!(!Request::Apps(AppsAccess::Read).needs_activation(&scope(AppsAccess::Read)));
+    assert!(Request::Apps(AppsAccess::Control).needs_activation(&scope(AppsAccess::Control)));
 }
 
 #[test]
