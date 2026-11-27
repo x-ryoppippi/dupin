@@ -9,7 +9,7 @@ export const sections = [
 		title: 'Getting started',
 		pages: ['usage.md', 'tutorial.md', 'configuration.md', 'features/keywords.md'],
 	},
-	{ title: 'About', pages: ['philosophy.md', 'faq.md', 'name.md'] },
+	{ title: 'About', pages: ['philosophy.md', 'name.md', 'faq.md'] },
 	{
 		title: 'Built-in features',
 		intro: 'Native to Dupin and always there.',
