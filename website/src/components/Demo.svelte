@@ -68,11 +68,30 @@
 	// recordings over Flow.
 	const captured: Record<string, unknown> = glass.clips;
 
+	// Every tab's clip is in the page at once, stacked in one cell, so a switch never waits on a
+	// request or a new element. The picked tab is `tab`; `shown` is the one on screen, which
+	// follows it once its first frame can be drawn, so the clip before it stays up until then.
 	let tab = $state('apps');
+	let shown = $state('apps');
+	let ready = $state<Record<string, boolean>>({});
+	// Left until the page is idle, so the clips behind the first one load after it.
+	let idle = $state(false);
 
-	const shownTab = $derived(tabs.find((choice) => choice.id === tab) ?? tabs[0]);
-	const recording = $derived(shownTab.recording);
-	const standIn = $derived(!(`home/${tab}` in captured));
+	$effect(() => {
+		const start = () => (idle = true);
+		if ('requestIdleCallback' in window) {
+			const handle = requestIdleCallback(start, { timeout: 3000 });
+			return () => cancelIdleCallback(handle);
+		}
+		const handle = setTimeout(start, 1500);
+		return () => clearTimeout(handle);
+	});
+
+	$effect(() => {
+		if (ready[tab]) shown = tab;
+	});
+
+	const standIn = $derived(!(`home/${shown}` in captured));
 
 	const selectTab = (id: string) => {
 		tab = id;
@@ -130,17 +149,21 @@
 		<a class="more" href="/docs/#features">More features →</a>
 	</div>
 	<div class="stage" id="demo-stage" role="tabpanel" aria-labelledby={`demo-tab-${tab}`}>
-		{#key recording.src}
-			<Clip
-				class="stage-clip"
-				src={recording.src}
-				poster={recording.poster}
-				width={680}
-				height={578}
-				preload="auto"
-				label={recording.label}
-			/>
-		{/key}
+		{#each tabs as choice (choice.id)}
+			<div class="slot" class:shown={shown === choice.id} inert={shown !== choice.id}>
+				<Clip
+					class="stage-clip"
+					src={choice.recording.src}
+					poster={choice.recording.poster}
+					width={680}
+					height={578}
+					preload={shown === choice.id || tab === choice.id || idle ? 'auto' : 'metadata'}
+					active={shown === choice.id}
+					onready={() => (ready[choice.id] = true)}
+					label={choice.recording.label}
+				/>
+			</div>
+		{/each}
 	</div>
 	<p class="note" aria-live="polite">
 		{#if standIn}
@@ -226,6 +249,28 @@
 		position: relative;
 		width: 100%;
 		aspect-ratio: 680 / 578;
+	}
+
+	.slot {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		opacity: 0;
+		/* The clip leaving stays up, under the one arriving, until that has faded in. */
+		transition: opacity 0s linear 0.25s;
+	}
+
+	.slot.shown {
+		z-index: 2;
+		opacity: 1;
+		transition: opacity 0.25s ease;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.slot,
+		.slot.shown {
+			transition: none;
+		}
 	}
 
 	.stage :global(.stage-clip) {
