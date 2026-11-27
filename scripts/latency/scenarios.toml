@@ -147,14 +147,8 @@ package = "repo"
 extensions = "scripts/latency/repo.extensions"
 budget_ms = 5.0
 
-# The main search with Running Apps on, which composes Hide, Quit and Force Quit… onto every app
-# row, held to parity with the main search without it: their availability is checked only when
-# the action screen opens, so a keypress pays only for building three more actions per row. Its
-# keyword lists the running apps from its fixture, held to the keystroke budget.
-[features.search.running-apps]
-extends = "native"
-extensions = "scripts/latency/running-apps.extensions"
-
+# The running apps under Running Apps' keyword, from its fixture, held to the keystroke budget,
+# since nothing native ever answered it.
 [features.running-apps.extension]
 config = "scripts/headless/config/dupin/config.toml"
 provider = "extension.running-apps"
