@@ -257,11 +257,11 @@ impl Ui {
             self.show_script_output(id);
         }
         if show_snapshots {
-            self.snapshots.update(|s, _| s.show());
+            self.prefs.update(|prefs, _| prefs.open_snapshots());
         }
         if show_settings {
             crate::trace::settings("panel closed");
-            self.prefs.open();
+            self.prefs.update(|prefs, _| prefs.open_settings());
         }
         if !show_snapshots && !show_settings && self.relaunch.is_some() {
             // Rune clears the panel's visibility after this callback.
@@ -341,10 +341,7 @@ impl Ui {
     /// Automatic updates wait so a restart does not interrupt work in a visible window.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
         if request == Restart::Update
-            && (self.me.is_visible()
-                || self.prefs.is_visible()
-                || self.snapshots.is_visible()
-                || self.script_output.is_visible())
+            && (self.me.is_visible() || self.prefs.is_visible() || self.script_output.is_visible())
         {
             self.relaunch = Some(request);
         } else if request.waiting_for_work(&self.running, self.runner.activity()) {

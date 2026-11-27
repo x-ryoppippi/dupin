@@ -14,7 +14,7 @@ impl Ui {
             self.snapshots_after_close = true;
             self.dismiss(tx);
         } else {
-            self.snapshots.update(|s, _| s.show());
+            self.prefs.update(|prefs, _| prefs.open_snapshots());
         }
     }
 
@@ -26,10 +26,11 @@ impl Ui {
         }
     }
 
-    /// Opens the Snapshots window, at `id` when given, once the panel has closed for the row
-    /// that asked.
+    /// Opens Settings on the Snapshots page, at `id` when given, once the panel has closed for
+    /// the row that asked.
     pub(super) fn prepare_snapshots(&mut self, id: Option<String>) {
-        self.snapshots.update(move |s, tx| s.reveal(id.as_deref(), tx));
+        self.prefs
+            .update(move |prefs, tx| prefs.snapshots.reveal(id.as_deref(), tx));
         self.snapshots_after_close = true;
     }
 
@@ -40,7 +41,8 @@ impl Ui {
         if self.picker.is_some() {
             call.finish(Err("Busy: picker active".into()));
         } else {
-            self.snapshots.update(move |s, tx| s.accept_open(call, tx));
+            self.prefs
+                .update(move |prefs, tx| prefs.snapshots.accept_open(call, tx));
             self.show_snapshots(tx);
         }
     }
@@ -52,7 +54,7 @@ impl Ui {
                 self.apply(effects, tx);
                 self.show(tx);
             }
-            Err(problem) => self.snapshots.update(move |s, _| s.report(problem)),
+            Err(problem) => self.prefs.update(move |prefs, _| prefs.snapshots.report(problem)),
         }
     }
 
@@ -61,7 +63,8 @@ impl Ui {
             Ok(saved) => {
                 crate::trace::snapshot("capture accepted");
                 let busy = Busy::new(self.running.clone());
-                self.snapshots.update(move |s, _| s.save(saved, busy));
+                self.prefs
+                    .update(move |prefs, _| prefs.snapshots.save(saved, busy));
                 self.snapshot_notice("Saving snapshot…".into(), tx);
             }
             Err(problem) => {

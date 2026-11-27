@@ -7,7 +7,7 @@
 		<div class="arrow" aria-hidden="true"></div>
 		<div class="windows">
 			<div class="box">
-				<span class="label">Snapshots window</span>
+				<span class="label">Snapshots in Settings</span>
 				<span class="note"><kbd>⇧⌘S</kbd> keeps a result to read later.</span>
 			</div>
 			<div class="box">

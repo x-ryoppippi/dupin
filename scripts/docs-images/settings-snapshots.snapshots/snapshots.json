@@ -1,0 +1,75 @@
+[
+	{
+		"version": 1,
+		"id": "invoice-total",
+		"saved_at": 1795687200,
+		"mode": "calculator.evaluate",
+		"explicit": true,
+		"query": "1280 * 1.2",
+		"title": "1280 * 1.2",
+		"views": [
+			{
+				"kind": "pair",
+				"source": "1280 * 1.2",
+				"result": "1,536"
+			}
+		],
+		"state": null
+	},
+	{
+		"version": 1,
+		"id": "serendipity",
+		"saved_at": 1795600800,
+		"mode": "dictionary.lookup",
+		"explicit": true,
+		"query": "serendipity",
+		"title": "serendipity",
+		"views": [
+			{
+				"kind": "detail",
+				"title": "serendipity",
+				"body": "the occurrence and development of events by chance in a happy or beneficial way"
+			},
+			{
+				"kind": "text",
+				"title": "serendipitous",
+				"subtitle": "occurring or discovered by chance in a happy way"
+			}
+		],
+		"state": null
+	},
+	{
+		"version": 1,
+		"id": "word-count",
+		"saved_at": 1795514400,
+		"mode": "extension.word-count",
+		"explicit": true,
+		"query": "the quick brown fox",
+		"title": "4 words",
+		"views": [
+			{
+				"kind": "text",
+				"title": "4 words",
+				"subtitle": "19 characters"
+			}
+		],
+		"state": null
+	},
+	{
+		"version": 1,
+		"id": "lifetimes",
+		"saved_at": 1795082400,
+		"mode": "web.keywords",
+		"explicit": false,
+		"query": "g rust lifetimes",
+		"title": "Search Google for rust lifetimes",
+		"views": [
+			{
+				"kind": "text",
+				"title": "Search Google for rust lifetimes",
+				"subtitle": "g"
+			}
+		],
+		"state": null
+	}
+]
