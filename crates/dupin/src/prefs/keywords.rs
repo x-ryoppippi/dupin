@@ -221,7 +221,7 @@ impl Prefs {
     }
 }
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let mut body = Vec::new();
     if let Some(problem) = &s.keywords.problem {
         body.push(
@@ -234,22 +234,22 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
                 .wrap(),
         );
     }
-    body.push(card(k, hair, command_rows(s, k)));
+    body.push(card(k, command_rows(s, k)));
     body.push(note(
         k,
         "Type a keyword, then Space, in the launcher to enter its command; type ? to list them all. Record a shortcut to reach a row from any app: a command or web search shows the panel in it, and pressing it again hides the panel; an app or file opens.",
     ));
-    body.push(card(k, hair, system_rows(s, k)));
+    body.push(card(k, system_rows(s, k)));
     body.push(note(
         k,
         "A system command's shortcut runs it without showing the panel. Restart, Shut Down, Log Out and Empty Trash show their row instead, for ↩ to ask first.",
     ));
-    body.push(card(k, hair, alias_rows(s, k)));
+    body.push(card(k, alias_rows(s, k)));
     body.push(note(
         k,
         "An alias reaches a command (calendar, dictionary, files, contents, clipboard, snippets, snapshots or an extension's package name), app:<bundle id>, web:<keyword> or file:<path>. Built-in keywords, Dictionary and snippet keywords and web searches keep theirs; an alias goes before extensions' keywords.",
     ));
-    body.push(card(k, hair, keyword_list_rows(s, k)));
+    body.push(card(k, keyword_list_rows(s, k)));
     body
 }
 

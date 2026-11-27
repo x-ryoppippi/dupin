@@ -15,8 +15,8 @@ use super::controls::{DESCRIPTION, ROW_PX, card, note, setting, setting_with_loc
 use crate::extensions::packages::{Kind, Listed};
 use crate::icons;
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let mut rows = vec![card(k, hair, vec![folder_setting(s, k)])];
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
+    let mut rows = vec![card(k, vec![folder_setting(s, k)])];
     rows.extend(skipped(s, k));
     let Some(bridge) = &s.access else {
         return rows;
@@ -26,7 +26,6 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         rows.push(heading(k, "waiting", "Waiting for you"));
         rows.push(card(
             k,
-            hair,
             pending
                 .iter()
                 .enumerate()
@@ -55,7 +54,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
                 }
             ),
         ));
-        rows.push(card(k, hair, package_rows(bridge, k, index, extension)));
+        rows.push(card(k, package_rows(bridge, k, index, extension)));
     }
     for problem in bridge.problems() {
         rows.push(note(k, &problem));

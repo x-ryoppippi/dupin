@@ -371,19 +371,19 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let k = rune_theme_opencode::kit(cx.system_dark());
     let hair = 1.0 / cx.env().scale;
     let rows = match (s.welcome, s.page) {
-        (Some(step), _) => welcome::page(s, k, hair, step),
-        (None, Page::General) => general::page(s, k, hair),
-        (None, Page::Search) => search::page(s, k, hair),
-        (None, Page::Keywords) => keywords::page(s, k, hair),
-        (None, Page::Snippets) => snippets::page(s, k, hair),
+        (Some(step), _) => welcome::page(s, k, step),
+        (None, Page::General) => general::page(s, k),
+        (None, Page::Search) => search::page(s, k),
+        (None, Page::Keywords) => keywords::page(s, k),
+        (None, Page::Snippets) => snippets::page(s, k),
         (None, Page::Appearance) => appearance::page(s, k, cx.system_dark()),
         (None, Page::Extensions) => extensions::problem(s, k)
             .into_iter()
-            .chain(extensions::page(s, k, hair))
+            .chain(extensions::page(s, k))
             .collect(),
-        (None, Page::Permissions) => permissions::page(s, k, hair),
-        (None, Page::Sync) => sync::page(s, k, hair),
-        (None, Page::Updates) => updates::page(s, k, hair),
+        (None, Page::Permissions) => permissions::page(s, k),
+        (None, Page::Sync) => sync::page(s, k),
+        (None, Page::Updates) => updates::page(s, k),
     };
     let title = s.welcome.map_or(s.page.title(), welcome::Step::title);
     let panel = col()

@@ -13,7 +13,7 @@ const DISPLAY: &str = "display";
 const POSITION: &str = "position";
 const INPUT_SOURCE: &str = "input-source";
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let rows = vec![
         hotkey_setting(s, k),
         selection_hotkey_setting(s, k),
@@ -25,9 +25,9 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         telemetry_setting(s, k),
         relaunch_setting(k),
     ];
-    let mut body = vec![card(k, hair, rows)];
+    let mut body = vec![card(k, rows)];
     if !s.config.bindings.is_empty() {
-        body.push(configured_hotkeys(s, k, hair));
+        body.push(configured_hotkeys(s, k));
     }
     body
 }
@@ -425,7 +425,7 @@ fn relaunch_setting(k: &Kit) -> El {
     )
 }
 
-fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
+fn configured_hotkeys(s: &Prefs, k: &Kit) -> El {
     let rows = s
         .config
         .bindings
@@ -467,5 +467,5 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                 .font(k.ty.body_medium)
                 .color(k.c.text_base),
         )
-        .child(card(k, hair, rows))
+        .child(card(k, rows))
 }

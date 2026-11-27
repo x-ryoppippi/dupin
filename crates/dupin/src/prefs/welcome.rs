@@ -57,10 +57,10 @@ fn mark(dir: &Path) -> std::io::Result<()> {
     std::fs::write(dir.join(MARKER), "")
 }
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32, step: Step) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit, step: Step) -> Vec<El> {
     match step {
-        Step::Hotkey => hotkey_step(s, k, hair),
-        Step::Tour => tour_step(s, k, hair),
+        Step::Hotkey => hotkey_step(s, k),
+        Step::Tour => tour_step(s, k),
     }
 }
 
@@ -72,7 +72,7 @@ fn intro(k: &Kit, words: &str) -> El {
         .wrap()
 }
 
-fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+fn hotkey_step(s: &Prefs, k: &Kit) -> Vec<El> {
     let mut rows = vec![hotkey_setting(s, k), login_setting(s, k), telemetry_setting(s, k)];
     if permissions::available() {
         let review = value_button(k, "welcome-permissions", "Review", &icons::SHIELD)
@@ -91,7 +91,7 @@ fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             "Dupin lives in the background and opens from a hotkey in any app. Pick one you can \
              spare; Settings can change it later.",
         ),
-        card(k, hair, rows),
+        card(k, rows),
         note(
             k,
             "⌘Space is Spotlight's shortcut too. To give it to Dupin, turn off Show Spotlight search in \
@@ -102,7 +102,7 @@ fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     ]
 }
 
-fn tour_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+fn tour_step(s: &Prefs, k: &Kit) -> Vec<El> {
     let mode = |glyph, name: &str, detail: &str, keys: &[&str]| {
         setting(k, glyph, name, Some(detail), Keybind::new(keys).build(k))
     };
@@ -148,7 +148,7 @@ fn tour_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             k,
             "Everything starts from the one field. A few keys switch what it searches.",
         ),
-        card(k, hair, rows),
+        card(k, rows),
         note(
             k,
             "⌘, in the panel opens Settings, where Show Welcome brings this guide back. To keep several Macs in step, turn on Settings → Sync whenever you like.",

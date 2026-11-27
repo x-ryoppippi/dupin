@@ -1,4 +1,4 @@
-use rune::{El, Icon, PopupMenu, TextStyle, Tx, col, el, icon, row, text};
+use rune::{El, Icon, PopupMenu, TextStyle, Tx, col, icon, row, rule, text};
 use rune_kit::{Kit, Select, SelectAppearance};
 
 use super::Prefs;
@@ -80,24 +80,22 @@ pub(super) fn value_button(k: &Kit, key: &str, label: &str, glyph: &'static Icon
         .child(icon(glyph, 16.0).color(c.icon_muted))
 }
 
-/// Rows on one raised card, a hairline between each.
-pub(super) fn card(k: &Kit, hair: f32, rows: Vec<El>) -> El {
-    let count = rows.len();
+/// Rows on one raised card, a device-pixel hairline between each, inset to the rows' content.
+pub(super) fn card(k: &Kit, rows: Vec<El>) -> El {
     let mut card = col().key("card").w_full().radius(k.radius.lg).fill(k.c.bg_base);
     for shadow in &k.elevation.raised {
         card = card.box_shadow(*shadow);
     }
     for (i, r) in rows.into_iter().enumerate() {
-        card = card.child(r);
-        if i + 1 < count {
+        if i > 0 {
             card = card.child(
-                el().key(format!("sep{i}"))
-                    .h(hair)
+                rule(0.5, k.c.border_muted)
+                    .key(format!("sep{i}"))
                     .mx(ROW_PX)
-                    .fill(k.c.border_muted)
                     .a11y_hidden(),
             );
         }
+        card = card.child(r);
     }
     card
 }

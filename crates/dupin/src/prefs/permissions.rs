@@ -192,14 +192,14 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, permission: Permission, status: P
     )
 }
 
-pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let rows = used_permissions()
         .zip(&s.permissions)
         .enumerate()
         .map(|(i, (permission, status))| entry_row(s, k, i, permission, *status))
         .collect();
     vec![
-        card(k, hair, rows),
+        card(k, rows),
         note(
             k,
             "Dupin can ask for access when you enable or first use a feature that needs it, \
