@@ -31,18 +31,19 @@ jobs:
       - uses: ./.github/actions/setup-nix-cache
         with:
           cache-scope: autofix
+      - run: nix profile install --inputs-from . nixpkgs#just nixpkgs#nushell nixpkgs#cargo
 
       # Apart from nix fmt below, so a formatter that no longer builds for Linux fails the job
       # instead of hiding behind its continue-on-error.
-      - run: nix build --no-link .#formatter.x86_64-linux
+      - run: just formatter
 
       # Changes nothing, offline, unless the pull request moved Rune's pin.
-      - run: nix shell --inputs-from . nixpkgs#nushell nixpkgs#cargo --command nu scripts/update-rune.nu
+      - run: just update-rune
 
       # After the Rune step, so whatever it rewrites is formatted too. A finding no formatter can
       # fix, such as a typo or a zizmor one, still lets the fixes through; CI's treefmt check fails on it.
       - if: github.event_name == 'pull_request'
-        run: nix fmt
+        run: just fmt
         continue-on-error: true
 
       - if: github.event_name == 'pull_request'
