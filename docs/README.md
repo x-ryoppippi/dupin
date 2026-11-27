@@ -76,4 +76,3 @@ Drive Dupin from a terminal, a script or an AI agent.
 - [Sync design](./design/sync.md): syncing Dupin between Macs through an end-to-end encrypted synced folder
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
 - [Releasing](./releasing.md): tagpr and CI
-
