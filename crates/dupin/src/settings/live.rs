@@ -33,6 +33,14 @@ impl Service {
         Self::watching(paths, crate::watch_source::launcher(), callback)
     }
 
+    /// A service told of changes to the settings files only by its test, through
+    /// [`Service::reread`]: starting an FSEvents stream waits on fseventsd, which on a busy Mac can
+    /// take longer than a test waits for the save it makes.
+    #[cfg(test)]
+    pub(crate) fn told(paths: Paths, callback: impl Fn(Update) + Send + 'static) -> Self {
+        Self::watching(paths, crate::watch_source::manual::Manual::default(), callback)
+    }
+
     /// A service told of changes to the settings files by `source`.
     fn watching(paths: Paths, source: impl Source, callback: impl Fn(Update) + Send + 'static) -> Self {
         let (sender, receiver) = mpsc::channel();
@@ -521,7 +529,6 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{Duration, Instant};
 
     use super::*;
     use crate::settings::overlay::Overlay;
@@ -604,7 +611,7 @@ mod tests {
         assert_eq!(locked, ["hotkey".into(), "theme".into()].into());
         assert_eq!(base.theme.corner_radius, 28);
         assert_eq!(base.file_limit, Config::default().file_limit);
-        let service = Service::new(paths, move |update| updates.send(update).unwrap());
+        let service = Service::told(paths, move |update| updates.send(update).unwrap());
 
         let edit = Config {
             file_limit: 123,
@@ -659,7 +666,7 @@ mod tests {
         let elsewhere: toml::Table = "file_limit = 71".parse().unwrap();
         overlay.write(&elsewhere).unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(paths, move |update| updates.send(update).unwrap());
+        let service = Service::told(paths, move |update| updates.send(update).unwrap());
 
         let conflicting = Config {
             file_limit: 123,
@@ -692,7 +699,7 @@ mod tests {
         let (base, locked, _) = super::super::load(&paths);
         assert!(locked.is_empty());
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(paths, move |update| updates.send(update).unwrap());
+        let service = Service::told(paths, move |update| updates.send(update).unwrap());
         let desired = Config {
             file_limit: 123,
             ..base.clone()
@@ -726,7 +733,7 @@ mod tests {
         let (_, _, problem) = super::super::load(&locked);
         assert!(problem.unwrap().contains("could not read the stored settings"));
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(locked, move |update| updates.send(update).unwrap());
+        let service = Service::told(locked, move |update| updates.send(update).unwrap());
         let desired = Config {
             show_recent: false,
             ..Config::default()
@@ -753,11 +760,12 @@ mod tests {
         }))
     }
 
+    /// The update the worker sends for `revision`. Every save gets one, so this waits for it
+    /// however long the worker's disk takes, and a worker that never answers hangs the test for
+    /// the harness to report.
     fn receive_revision(receiver: &Receiver<Update>, revision: u64) -> Update {
-        let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let update = receiver.recv_timeout(remaining).unwrap();
+            let update = receiver.recv().unwrap();
             if update.revision == revision {
                 return update;
             }
@@ -776,7 +784,7 @@ script = "missing.sh"
 "#;
         fs::write(&config_path, source).unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(config_path.clone()), move |update| {
+        let service = Service::told(base_only(config_path.clone()), move |update| {
             updates.send(update).unwrap()
         });
         send_changed(&service);
@@ -804,7 +812,7 @@ script = "missing.sh"
         let source = "# Mine.\nfile_limit = 37   # few\n\n[bindings.\"alt+cmd+t\"]\ntarget = \"script\"\nscript = \"todo.sh\"\n\n[theme]\n# Wide.\npanel_width = 900\n";
         fs::write(&path, source).unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(path.clone()), move |update| {
+        let service = Service::told(base_only(path.clone()), move |update| {
             updates.send(update).unwrap()
         });
         let base = Config::parse(source).unwrap();
@@ -904,7 +912,7 @@ script = "missing.sh"
         let temp = TempDir::new();
         let path = temp.path().join("config.toml");
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(path.clone()), move |update| {
+        let service = Service::told(base_only(path.clone()), move |update| {
             updates.send(update).unwrap()
         });
         let base = Config::default();
@@ -1208,7 +1216,7 @@ script = "missing.sh"
             ..base.clone()
         };
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(path.clone()), move |update| {
+        let service = Service::told(base_only(path.clone()), move |update| {
             updates.send(update).unwrap()
         });
 
@@ -1226,12 +1234,12 @@ script = "missing.sh"
         let source = "hotkey = \"private-value\n";
         fs::write(&path, source).unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(path.clone()), move |update| {
+        let service = Service::told(base_only(path.clone()), move |update| {
             updates.send(update).unwrap()
         });
 
         send_changed(&service);
-        let invalid = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let invalid = receiver.recv().unwrap();
         let error = invalid.result.unwrap_err();
         assert!(error.contains("line"));
         assert!(!error.contains("private-value"));
@@ -1242,7 +1250,7 @@ script = "missing.sh"
         };
         fs::write(&path, toml::to_string(&expected).unwrap()).unwrap();
         send_changed(&service);
-        let recovered = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let recovered = receiver.recv().unwrap();
         assert_eq!(recovered.result.unwrap(), expected);
         assert_eq!(recovered.revision, invalid.revision);
     }
@@ -1253,30 +1261,15 @@ script = "missing.sh"
         let path = temp.path().join("config.toml");
         fs::write(&path, "file_limit = 50").unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(base_only(path.clone()), move |update| {
+        let service = Service::told(base_only(path.clone()), move |update| {
             updates.send(update).unwrap()
         });
 
         send_changed(&service);
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(5))
-                .unwrap()
-                .result
-                .unwrap()
-                .file_limit,
-            50
-        );
+        assert_eq!(receiver.recv().unwrap().result.unwrap().file_limit, 50);
         fs::remove_file(&path).unwrap();
         send_changed(&service);
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(5))
-                .unwrap()
-                .result
-                .unwrap(),
-            Config::default()
-        );
+        assert_eq!(receiver.recv().unwrap().result.unwrap(), Config::default());
     }
 
     #[test]
@@ -1377,48 +1370,17 @@ script = "missing.sh"
             updates.send(update).unwrap()
         });
         service.activate();
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .result
-                .unwrap()
-                .file_limit,
-            37
-        );
+        assert_eq!(receiver.recv().unwrap().result.unwrap().file_limit, 37);
         fs::rename(&directory, temp.path().join("moved")).unwrap();
         source.changed(&directory);
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .result
-                .unwrap(),
-            Config::default()
-        );
+        assert_eq!(receiver.recv().unwrap().result.unwrap(), Config::default());
         fs::create_dir(&directory).unwrap();
         fs::write(&path, "file_limit = 58").unwrap();
         source.changed(&path);
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .result
-                .unwrap()
-                .file_limit,
-            58
-        );
+        assert_eq!(receiver.recv().unwrap().result.unwrap().file_limit, 58);
         fs::write(&path, "file_limit = 59").unwrap();
         source.changed(&path);
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .result
-                .unwrap()
-                .file_limit,
-            59
-        );
+        assert_eq!(receiver.recv().unwrap().result.unwrap().file_limit, 59);
     }
 
     #[test]
@@ -1433,20 +1395,14 @@ script = "missing.sh"
         });
 
         service.activate();
-        let initial = receiver
-            .recv_timeout(Duration::from_secs(5))
-            .expect("settings watcher did not start");
+        let initial = receiver.recv().expect("settings watcher did not start");
         assert!(initial.watch_problem.is_none(), "{:?}", initial.watch_problem);
         assert_eq!(initial.result.unwrap().position, dupin_core::Position::Center);
 
         fs::write(&path, "position = \"top\"").unwrap();
         source.changed(&path);
-        let deadline = Instant::now() + Duration::from_secs(5);
         let changed = loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let update = receiver
-                .recv_timeout(remaining)
-                .expect("settings watcher did not reload");
+            let update = receiver.recv().expect("settings watcher did not reload");
             if update
                 .result
                 .as_ref()
@@ -1462,8 +1418,6 @@ script = "missing.sh"
             drop(service);
             let _ = done.send(());
         });
-        stopped
-            .recv_timeout(Duration::from_secs(5))
-            .expect("settings watcher did not shut down");
+        stopped.recv().expect("settings watcher did not shut down");
     }
 }
