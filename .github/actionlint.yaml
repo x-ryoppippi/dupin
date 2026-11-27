@@ -2,5 +2,9 @@ self-hosted-runner:
   # Blacksmith runners (docs.blacksmith.sh, "Instance Types").
   labels:
     - blacksmith-2vcpu-ubuntu-2404
+    - blacksmith-32vcpu-ubuntu-2404
     - blacksmith-6vcpu-macos-latest
-    - blacksmith-6vcpu-macos-latest;scheduling=flex
+    - blacksmith-12vcpu-macos-latest
+    - blacksmith-12vcpu-macos-latest;scheduling=flex
+    - blacksmith-12vcpu-macos-26
+    - blacksmith-12vcpu-macos-27
