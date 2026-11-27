@@ -1,5 +1,5 @@
 use dupin_core::{Effect, Intent};
-use rune::{Key, KeyEvent, Tx};
+use rune::{Chord, Key, KeyEvent, Tx};
 
 use super::Ui;
 
@@ -41,6 +41,14 @@ impl Ui {
         if !self.session.command().private_results {
             crate::trace::key(ev);
         }
+        let mapped;
+        let ev = match self.navigation_key(ev, tx) {
+            Some(key) => {
+                mapped = KeyEvent { key, ..ev.clone() };
+                &mapped
+            }
+            None => ev,
+        };
         let flipped;
         let ev = match list_key(&ev.key, self.grows_up()) {
             Some(key) => {
@@ -162,6 +170,21 @@ impl Ui {
         };
         self.apply(effects, tx);
         true
+    }
+
+    /// Optional alternatives to the arrow keys, shared by the result, action and picker lists.
+    fn navigation_key(&self, ev: &KeyEvent, tx: &Tx) -> Option<Key> {
+        if self.script_entry.is_some() || self.script_card.is_some() || self.form_draft().is_some() {
+            return None;
+        }
+        let config = self.configuration.values.borrow();
+        if Chord::parse(&config.navigation_up).is_ok_and(|chord| chord.matches_tx(ev, tx)) {
+            Some(Key::Up)
+        } else if Chord::parse(&config.navigation_down).is_ok_and(|chord| chord.matches_tx(ev, tx)) {
+            Some(Key::Down)
+        } else {
+            None
+        }
     }
 
     /// A click on a result row.

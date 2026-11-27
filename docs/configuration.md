@@ -7,14 +7,18 @@ display = "mouse" # "mouse", "main", or "active"
 position = "center" # "center", "top", or "bottom"
 rows = "auto" # "auto", or a count from 3 to 16
 input_source = "ascii" # "ascii", "keep", or an input source identifier
+navigation_up = "ctrl+k" # optional key or chord; Rune chord syntax
+navigation_down = "ctrl+j" # optional key or chord; Rune chord syntax
 ```
 
-| Key            | Default    | Values                                                                                                                                                          |
-| -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `display`      | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display                                                   |
-| `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top; `"bottom"` near its bottom, with results above it. Settings → General → Position  |
-| `rows`         | `"auto"`   | `"auto"` fills the room the display leaves; a count from `3` to `16` shows that many rows before the list scrolls. See [Rows](#rows). Settings → General → Rows |
-| `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source)                                       |
+| Key               | Default    | Values                                                                                                                                                          |
+| ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `display`         | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display                                                   |
+| `position`        | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top; `"bottom"` near its bottom, with results above it. Settings → General → Position  |
+| `rows`            | `"auto"`   | `"auto"` fills the room the display leaves; a count from `3` to `16` shows that many rows before the list scrolls. See [Rows](#rows). Settings → General → Rows |
+| `input_source`    | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source)                                       |
+| `navigation_up`   | `""`       | Optional key or chord to move to the previous result. Settings → General → Previous result.                                                                     |
+| `navigation_down` | `""`       | Optional key or chord to move to the next result. Settings → General → Next result.                                                                             |
 
 With `position = "bottom"` the panel is laid out as fzf and Telescope lay theirs out: the field sits as far above the bottom of the display as `"top"` puts it below the top, and the results run upwards from it, the best match next to the field. The panel's bottom edge stays put as the results change. <kbd>↑</kbd> moves to the row above, the next match, and <kbd>↓</kbd> back towards the field; the ⌘K actions and pickers follow the same order. Hints and notices sit next to the field, and footers, such as the folder picker's <kbd>↩</kbd> Choose folder line, at the top. Forms and cards keep reading top to bottom above the field. The panel doesn't animate its size in this position, so its edge and the field never slide.
 

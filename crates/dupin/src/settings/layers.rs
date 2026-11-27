@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use dupin_core::Config;
+use rune::Shortcut;
 use toml::Table;
 
 pub type LockedKeys = BTreeSet<String>;
@@ -75,6 +76,7 @@ impl Layers {
                     .map_err(|_| "could not merge the stored settings")?;
             }
         }
+        check_navigation(&config).map_err(|problem| format!("config.toml is invalid: {problem}"))?;
         crate::composition::check(&config.advanced)
             .map_err(|problem| format!("config.toml is invalid: {problem}"))?;
         Ok(Effective {
@@ -83,6 +85,25 @@ impl Layers {
             overlay,
         })
     }
+}
+
+fn check_navigation(config: &Config) -> Result<(), String> {
+    let parse = |key: &str, value: &str| {
+        if value.trim().is_empty() {
+            Ok(None)
+        } else {
+            value
+                .parse::<Shortcut>()
+                .map(Some)
+                .map_err(|_| format!("`{key}` must be a valid key or key chord"))
+        }
+    };
+    let up = parse("navigation_up", &config.navigation_up)?;
+    let down = parse("navigation_down", &config.navigation_down)?;
+    if up.is_some() && up == down {
+        return Err("`navigation_up` and `navigation_down` must use different keys".into());
+    }
+    Ok(())
 }
 
 pub fn load(paths: &Paths) -> (Config, LockedKeys, Option<String>) {

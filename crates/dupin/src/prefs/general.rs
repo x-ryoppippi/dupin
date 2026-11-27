@@ -6,7 +6,9 @@ use rune_kit::{Button, ButtonVariant, Kit, Switch};
 use rune_theme_opencode::icons::{CHEVRON_DOWN, CHEVRON_RIGHT};
 
 use super::Prefs;
-use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button};
+use super::controls::{
+    ROW_PX, card, choose, menu_value, note, setting, setting_with_lock, tilde, value_button,
+};
 use super::shortcut::ShortcutKeycap;
 use crate::hotkey::LauncherShortcut;
 use crate::icons;
@@ -20,6 +22,8 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let rows = vec![
         hotkey_setting(s, k),
         selection_hotkey_setting(s, k),
+        navigation_setting(s, k, 0),
+        navigation_setting(s, k, 1),
         display_setting(s, k),
         position_setting(s, k),
         rows_setting(s, k),
@@ -27,6 +31,7 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
         login_setting(s, k),
     ];
     let mut body = vec![card(k, rows)];
+    body.push(note(k, "Record a key or chord for each direction. Arrow keys always remain available. Control+K / Control+J gives you a Vim-style pair without consuming typed letters; if Control+K is assigned, use ⌘K to open actions. An unmodified letter takes priority over typing, and Tab takes priority over query completion."));
     if !s.config.bindings.is_empty() {
         body.push(configured_hotkeys(s, k));
     }
@@ -146,6 +151,46 @@ fn selection_hotkey_setting(s: &Prefs, k: &Kit) -> El {
             "Search selected text",
             locked,
         ),
+        s.lock_note(locked),
+    )
+}
+
+fn navigation_setting(s: &Prefs, k: &Kit, index: usize) -> El {
+    let (name, key, config_key, shortcut, label) = if index == 0 {
+        (
+            "Previous result",
+            "navigation-up",
+            "navigation_up",
+            &s.navigation_recorders[0],
+            "Move to previous result",
+        )
+    } else {
+        (
+            "Next result",
+            "navigation-down",
+            "navigation_down",
+            &s.navigation_recorders[1],
+            "Move to next result",
+        )
+    };
+    let locked = s.locked(config_key);
+    let editor = ShortcutKeycap::new(key, label, shortcut)
+        .allow_unmodified()
+        .locked(locked)
+        .conflict(Some(
+            "This key is already assigned to the other direction.".into(),
+        ))
+        .build(
+            k,
+            move |s: &mut Prefs| &mut s.navigation_recorders[index],
+            move |s: &mut Prefs, next| s.change_navigation_key(index, next),
+        );
+    setting_with_lock(
+        k,
+        &icons::KEYBOARD,
+        name,
+        Some("An additional shortcut for moving through results"),
+        editor,
         s.lock_note(locked),
     )
 }

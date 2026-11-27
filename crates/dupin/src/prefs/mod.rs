@@ -118,6 +118,7 @@ pub struct Prefs {
     /// The page ⌘, returns to: the last one shown other than Snapshots, which has its own way in.
     settings_page: Page,
     recorders: [ShortcutState; 2],
+    navigation_recorders: [ShortcutState; 2],
     shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
@@ -177,6 +178,10 @@ impl Prefs {
             }
             recorder
         });
+        let navigation_recorders = [
+            ShortcutState::new(parse_navigation_shortcut(&config.navigation_up)),
+            ShortcutState::new(parse_navigation_shortcut(&config.navigation_down)),
+        ];
         let active_radius = config.theme.corner_radius;
         Prefs {
             preview_dark: None,
@@ -192,6 +197,7 @@ impl Prefs {
             page: Page::General,
             settings_page: Page::General,
             recorders,
+            navigation_recorders,
             shortcut_problems: [None, None],
             binding,
             panel,
@@ -309,6 +315,16 @@ impl Prefs {
                 self.shortcut_problems[i] = None;
             }
         }
+        for (recorder, value) in self
+            .navigation_recorders
+            .iter_mut()
+            .zip([&config.navigation_up, &config.navigation_down])
+        {
+            let shortcut = parse_navigation_shortcut(value);
+            if recorder.shortcut() != shortcut.as_ref() {
+                *recorder = ShortcutState::new(shortcut);
+            }
+        }
         self.reflect_launch_hotkey();
         if config != self.config {
             self.keywords.reflect(&config, Some(&self.config));
@@ -383,6 +399,23 @@ impl Prefs {
         Ok(())
     }
 
+    fn change_navigation_key(&mut self, index: usize, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
+        let other = 1 - index;
+        if next.is_some_and(|shortcut| self.navigation_recorders[other].shortcut() == Some(shortcut)) {
+            return Err(ShortcutError::Conflict);
+        }
+        let base = self.current.borrow().clone();
+        self.config = base.clone();
+        let value = next.map(ToString::to_string).unwrap_or_default();
+        match index {
+            0 => self.config.navigation_up = value,
+            1 => self.config.navigation_down = value,
+            _ => return Err(ShortcutError::Backend("invalid navigation key".into())),
+        }
+        self.save(&base);
+        Ok(())
+    }
+
     fn set(&mut self, change: impl FnOnce(&mut Config)) {
         let base = self.current.borrow().clone();
         self.adopt(base.clone());
@@ -422,6 +455,14 @@ fn config_lock_note(settings: &crate::settings::Service) -> &'static str {
         "Managed by Nix"
     } else {
         "Set in config.toml"
+    }
+}
+
+fn parse_navigation_shortcut(value: &str) -> Option<Shortcut> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        value.parse().ok()
     }
 }
 
