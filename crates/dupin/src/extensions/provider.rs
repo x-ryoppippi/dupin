@@ -526,7 +526,7 @@ fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool
     let mut configured = Vec::new();
     let mut configure = |subject: Subject, done: &mut bool| {
         if !std::mem::replace(done, true) {
-            configured.extend(kinds.configured(&subject, Producer::Extension));
+            configured.extend(kinds.configured(&subject, &title, Producer::Extension));
         }
     };
     let (mut texts, mut urls) = (false, false);

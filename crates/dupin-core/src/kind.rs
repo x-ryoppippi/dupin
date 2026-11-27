@@ -8,7 +8,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use crate::config::{KindAction, KindActions, KindConfig};
 use crate::item::Transfer;
-use crate::{Action, Item, ItemAction, Payload, ShareTarget};
+use crate::{Action, Condition, Item, ItemAction, Payload, ShareTarget};
 
 /// The ID of the action that shows a file in Quick Look, which ⌘Y runs.
 pub const QUICK_LOOK: &str = "quick-look";
@@ -36,7 +36,7 @@ pub(crate) const APP_ACTIONS: [&str; 3] = ["open", "reveal", QUICK_LOOK];
 
 /// The kinds Dupin registers: `text`, `url`, `file` and `app`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KindName {
+pub enum KindName {
     Text,
     Url,
     File,
@@ -78,6 +78,49 @@ pub enum Producer {
     Dupin,
     /// An extension's rows never reach another extension's kind actions.
     Extension,
+}
+
+/// What must hold of a row before a package's kind action is offered on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Availability {
+    /// The app the row stands for is running.
+    Running,
+}
+
+/// A kind action a package that runs now provides, as its manifest declares it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Provided {
+    pub kind: KindName,
+    pub package: String,
+    pub name: String,
+    /// What the action screen calls it when Dupin composes it by default.
+    pub title: Option<String>,
+    /// Ask before running it, wherever it is composed.
+    pub confirm: bool,
+    pub availability: Option<Availability>,
+    /// Composed onto every row of its kind, unless config.toml adds it itself.
+    pub default: bool,
+}
+
+impl Provided {
+    fn is(&self, kind: KindName, package: &str, name: &str) -> bool {
+        self.kind == kind && self.package == package && self.name == name
+    }
+
+    /// `action` as this declaration asks for it on the row `subject`, titled `title`.
+    fn shape(&self, action: ItemAction, subject: &Subject, title: &str) -> ItemAction {
+        let mut action = action;
+        if self.confirm {
+            let verb = action.title.trim_end_matches('…').to_owned();
+            action = action.confirm(&format!("{verb} “{title}”?"), &verb);
+        }
+        match (self.availability, subject) {
+            (Some(Availability::Running), Subject::App(path)) => {
+                action.when(Condition::Running(path.clone()))
+            }
+            _ => action,
+        }
+    }
 }
 
 impl Subject {
@@ -128,6 +171,8 @@ pub struct Kinds {
     app: Arc<dyn Kind>,
     /// What `[advanced.kinds]` adds, shared by every clone so a reload reaches each source.
     configured: Arc<RwLock<KindActions>>,
+    /// The kind actions the packages that run now provide, shared as `configured` is.
+    provided: Arc<RwLock<Vec<Provided>>>,
 }
 
 impl Kinds {
@@ -139,6 +184,7 @@ impl Kinds {
             file: Arc::new(FileKind { share }),
             app: Arc::new(AppKind),
             configured: Arc::default(),
+            provided: Arc::default(),
         }
     }
 
@@ -151,6 +197,15 @@ impl Kinds {
         changed
     }
 
+    /// Hand over the kind actions the packages that run now provide, for rows resolved from now
+    /// on. Whether they differ from the ones before.
+    pub fn provide(&self, provided: Vec<Provided>) -> bool {
+        let mut current = self.provided.write().unwrap_or_else(PoisonError::into_inner);
+        let changed = *current != provided;
+        *current = provided;
+        changed
+    }
+
     fn get(&self, name: KindName) -> &Arc<dyn Kind> {
         match name {
             KindName::Text => &self.text,
@@ -160,17 +215,19 @@ impl Kinds {
         }
     }
 
-    /// The actions of a row Dupin produced for `subject`: its kind's own, then the ones
-    /// config.toml adds, arranged by the kind's `hide` and `order`.
+    /// The actions of a row Dupin produced for `subject`, titled `title`: its kind's own, then
+    /// the ones config.toml adds, then the ones packages compose by default, arranged by the
+    /// kind's `hide` and `order`.
     fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
         let mut resolved = self.get(subject.kind()).actions(subject, title);
         let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
+        let provided = self.provided.read().unwrap_or_else(PoisonError::into_inner);
         let config = kind_config(&configured, subject.kind());
         let mut named: Vec<_> = std::mem::take(&mut resolved.actions)
             .into_iter()
             .map(|action| (Some(action.id.clone()), action))
             .collect();
-        named.extend(composed(config, subject, Producer::Dupin));
+        named.extend(composed(config, &provided, subject, title, Producer::Dupin));
         resolved.actions = arrange(named, config);
         resolved
     }
@@ -183,14 +240,22 @@ impl Kinds {
         resolved.actions.into_iter().find(|action| action.id == primary)
     }
 
-    /// The actions config.toml adds for `subject`, which follow its kind's own. A row
-    /// `producer` made takes an extension's kind action only when Dupin produced it.
-    pub fn configured(&self, subject: &Subject, producer: Producer) -> Vec<ItemAction> {
+    /// The actions config.toml adds for `subject`, titled `title`, which follow its kind's own,
+    /// then the ones packages compose by default. A row `producer` made takes a package's kind
+    /// action only when Dupin produced it.
+    pub fn configured(&self, subject: &Subject, title: &str, producer: Producer) -> Vec<ItemAction> {
         let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
-        composed(kind_config(&configured, subject.kind()), subject, producer)
-            .into_iter()
-            .map(|(_, action)| action)
-            .collect()
+        let provided = self.provided.read().unwrap_or_else(PoisonError::into_inner);
+        composed(
+            kind_config(&configured, subject.kind()),
+            &provided,
+            subject,
+            title,
+            producer,
+        )
+        .into_iter()
+        .map(|(_, action)| action)
+        .collect()
     }
 
     /// A file or folder row, as every native file source shows one.
@@ -230,21 +295,58 @@ fn kind_config(configured: &KindActions, kind: KindName) -> &KindConfig {
     }
 }
 
-/// The actions `config` adds for `subject`, each with the name `hide` and `order` know it by:
-/// a package's kind action is `<package>/<action>`, and a script or URL action has none, since
-/// its place in `actions` already says where it goes.
-fn composed(config: &KindConfig, subject: &Subject, producer: Producer) -> Vec<(Option<String>, ItemAction)> {
+/// The actions `config` adds for `subject`, titled `title`, then the ones `provided` composes
+/// by default that `config` doesn't add itself, each with the name `hide` and `order` know it
+/// by: a package's kind action is `<package>/<action>`, and a script or URL action has none,
+/// since its place in `actions` already says where it goes.
+fn composed(
+    config: &KindConfig,
+    provided: &[Provided],
+    subject: &Subject,
+    title: &str,
+    producer: Producer,
+) -> Vec<(Option<String>, ItemAction)> {
     let kind = subject.kind();
-    config
+    let declared = |reference: Option<&str>| {
+        let (package, name) = crate::config::contribution(reference?)?;
+        provided.iter().find(|found| found.is(kind, package, name))
+    };
+    let mut actions: Vec<_> = config
         .actions
         .iter()
         .enumerate()
         .filter(|(_, action)| producer == Producer::Dupin || action.extension.is_none())
         .filter_map(|(index, action)| {
             let item = configured_action(action, &configured_id(kind.as_str(), index), subject)?;
+            let item = match declared(action.extension.as_deref()) {
+                Some(declaration) => declaration.shape(item, subject, title),
+                None => item,
+            };
             Some((action.extension.clone(), item))
         })
-        .collect()
+        .collect();
+    if producer == Producer::Dupin {
+        actions.extend(
+            provided
+                .iter()
+                .filter(|declaration| declaration.kind == kind && declaration.default)
+                .filter(|declaration| !added(config, &declaration.package, &declaration.name))
+                .filter_map(|declaration| {
+                    let item = package_action(
+                        &provided_id(kind.as_str(), &declaration.package, &declaration.name),
+                        declaration.title.as_deref()?,
+                        &declaration.package,
+                        &declaration.name,
+                        subject,
+                    );
+                    Some((
+                        Some(format!("{}/{}", declaration.package, declaration.name)),
+                        declaration.shape(item, subject, title),
+                    ))
+                }),
+        );
+    }
+    actions
 }
 
 /// `actions` with the ones `config.order` names first, in its order, then the rest in theirs,
@@ -277,6 +379,37 @@ pub fn configured_id(kind: &str, index: usize) -> String {
     format!("configured-{kind}-{index}")
 }
 
+/// The ID of the kind action `package` provides as `name` and Dupin composes by default.
+fn provided_id(kind: &str, package: &str, name: &str) -> String {
+    format!("provided-{kind}-{package}-{name}")
+}
+
+/// Whether config.toml's `actions` already add `package`'s `name` to this kind, under a title
+/// of its own, so its default isn't added twice.
+fn added(config: &KindConfig, package: &str, name: &str) -> bool {
+    config
+        .actions
+        .iter()
+        .filter_map(|action| action.extension.as_deref())
+        .any(|reference| crate::config::contribution(reference) == Some((package, name)))
+}
+
+/// The kind action `package` provides as `name`, run on `subject`.
+fn package_action(id: &str, title: &str, package: &str, name: &str, subject: &Subject) -> ItemAction {
+    ItemAction::new(
+        id,
+        title,
+        Action::Extension {
+            extension: package.to_owned(),
+            request: crate::ExtensionRequest::Kind {
+                action: name.to_owned(),
+                subject: subject.clone(),
+            },
+        },
+    )
+    .keep_open()
+}
+
 /// `action` for `subject`, or none when the subject has no value the action can take: a path
 /// that isn't UTF-8 would reach a script or a URL as some other path.
 fn configured_action(action: &KindAction, id: &str, subject: &Subject) -> Option<ItemAction> {
@@ -295,20 +428,7 @@ fn configured_action(action: &KindAction, id: &str, subject: &Subject) -> Option
         },
         (None, None) => {
             let (package, name) = crate::config::contribution(action.extension.as_deref()?)?;
-            return Some(
-                ItemAction::new(
-                    id,
-                    &action.title,
-                    Action::Extension {
-                        extension: package.to_owned(),
-                        request: crate::ExtensionRequest::Kind {
-                            action: name.to_owned(),
-                            subject: subject.clone(),
-                        },
-                    },
-                )
-                .keep_open(),
-            );
+            return Some(package_action(id, &action.title, package, name, subject));
         }
         (None, Some(template)) => {
             let encode = dupin_plugin_protocol::web_search::percent_encode;
@@ -716,6 +836,133 @@ mod tests {
             )]
         );
         assert_eq!(url.primary.as_deref(), Some("open"));
+    }
+
+    fn running_apps(name: &str, title: &str, confirm: bool, default: bool) -> Provided {
+        Provided {
+            kind: KindName::App,
+            package: "running-apps".into(),
+            name: name.into(),
+            title: Some(title.into()),
+            confirm,
+            availability: Some(Availability::Running),
+            default,
+        }
+    }
+
+    #[test]
+    fn a_packages_default_kind_actions_follow_configured_ones_and_hide_and_order_arrange_them() {
+        let kinds = kinds();
+        let path = PathBuf::from("/Applications/Safari.app");
+        let app = |kinds: &Kinds| kinds.app(path.clone(), "Safari".into(), vec![]);
+        let native = ids(&app(&kinds).actions).len();
+        assert!(kinds.provide(vec![
+            running_apps("hide", "Hide", false, true),
+            running_apps("quit", "Quit", false, true),
+            running_apps("quit_forcibly", "Force Quit…", true, true),
+            running_apps("details", "Details", false, false),
+        ]));
+        let same = kinds.provided.read().unwrap().clone();
+        assert!(!kinds.provide(same));
+        let item = app(&kinds);
+        assert_eq!(
+            ids(&item.actions)[native..],
+            [
+                "provided-app-running-apps-hide",
+                "provided-app-running-apps-quit",
+                "provided-app-running-apps-quit_forcibly"
+            ]
+        );
+        let force = item
+            .item_action("provided-app-running-apps-quit_forcibly")
+            .unwrap();
+        assert_eq!(force.title, "Force Quit…");
+        let confirmation = force.confirmation().unwrap();
+        assert_eq!(
+            (confirmation.prompt.as_str(), confirmation.button.as_str()),
+            ("Force Quit “Safari”?", "Force Quit")
+        );
+        assert_eq!(force.condition(), Some(&Condition::Running(path.clone())));
+        assert_eq!(
+            force.action,
+            Action::Extension {
+                extension: "running-apps".into(),
+                request: crate::ExtensionRequest::Kind {
+                    action: "quit_forcibly".into(),
+                    subject: Subject::App(path.clone()),
+                },
+            }
+        );
+        assert!(
+            item.item_action("provided-app-running-apps-quit")
+                .unwrap()
+                .confirmation()
+                .is_none()
+        );
+        assert!(
+            kinds
+                .configured(&Subject::App(path.clone()), "Safari", Producer::Extension)
+                .is_empty(),
+            "an extension's rows never take a package's action"
+        );
+        assert!(
+            ids(&kinds.file("/a.txt".into(), "a.txt".into(), vec![], false).actions)
+                .iter()
+                .all(|id| !id.starts_with("provided-")),
+            "an app action stays on app rows"
+        );
+
+        kinds.configure(&configured(
+            r#"
+[advanced.kinds.app]
+hide = ["running-apps/hide"]
+order = ["open", "running-apps/quit"]
+"#,
+        ));
+        assert_eq!(
+            listed(&app(&kinds).actions),
+            [
+                "open",
+                "provided-app-running-apps-quit",
+                "reveal",
+                QUICK_LOOK,
+                "provided-app-running-apps-quit_forcibly"
+            ],
+            "`hide` and `order` arrange a default action as they do a native one"
+        );
+
+        kinds.configure(&configured(
+            r#"
+[[advanced.kinds.app.actions]]
+title = "Force Quit Now"
+extension = "running-apps/quit_forcibly"
+"#,
+        ));
+        let item = app(&kinds);
+        assert_eq!(
+            ids(&item.actions)[native..],
+            [
+                configured_id("app", 0).as_str(),
+                "provided-app-running-apps-hide",
+                "provided-app-running-apps-quit"
+            ],
+            "an action config.toml adds under its own title isn't added again by default"
+        );
+        let own = item.item_action(&configured_id("app", 0)).unwrap();
+        assert_eq!(
+            own.confirmation().unwrap().prompt,
+            "Force Quit Now “Safari”?",
+            "what the package declares holds wherever it is composed"
+        );
+        assert_eq!(own.condition(), Some(&Condition::Running(path.clone())));
+
+        kinds.configure(&KindActions::default());
+        assert!(kinds.provide(Vec::new()));
+        assert_eq!(
+            ids(&app(&kinds).actions).len(),
+            native,
+            "a package that stops takes its defaults with it"
+        );
     }
 
     fn configured(source: &str) -> KindActions {

@@ -7,6 +7,15 @@ use super::{ICON_SIZE, Ui};
 
 pub const SEND_TO: &str = "Send to…";
 
+/// Leave out the actions whose condition doesn't hold now: an app's that need it running, by
+/// `running`. They are checked as the action screen opens, never as rows are built.
+fn offered(actions: &mut Vec<ItemAction>, running: impl Fn(&std::path::Path) -> bool) {
+    actions.retain(|action| match action.condition() {
+        None => true,
+        Some(dupin_core::Condition::Running(path)) => running(path),
+    });
+}
+
 pub struct ActionScreen {
     pub key: String,
     pub item: dupin_core::Item,
@@ -210,7 +219,14 @@ impl Ui {
         else {
             return;
         };
-        if let Some(screen) = ActionScreen::new(id, item.clone(), confirmation) {
+        let mut item = item.clone();
+        if item.actions.iter().any(|action| action.condition().is_some()) {
+            let running = crate::features::apps::running();
+            offered(&mut item.actions, |path| {
+                dupin_mac::running_apps::is_running(&running, path)
+            });
+        }
+        if let Some(screen) = ActionScreen::new(id, item, confirmation) {
             self.action_screen = Some(screen);
         }
     }
@@ -610,6 +626,26 @@ mod action_screen_tests {
             stage: ActionStage::List,
         };
         (session, screen)
+    }
+
+    #[test]
+    fn an_action_that_needs_its_app_running_is_offered_only_while_it_runs() {
+        use dupin_core::{Action, Condition, ItemAction};
+        let safari = PathBuf::from("/Applications/Safari.app");
+        let actions = || {
+            vec![
+                ItemAction::new("open", "Open", Action::Open(safari.clone())),
+                ItemAction::new("hide", "Hide", Action::Open(safari.clone()))
+                    .when(Condition::Running(safari.clone())),
+            ]
+        };
+        let ids = |actions: Vec<ItemAction>| actions.into_iter().map(|action| action.id).collect::<Vec<_>>();
+        let mut running = actions();
+        offered(&mut running, |path| path == safari);
+        assert_eq!(ids(running), ["open", "hide"]);
+        let mut quit = actions();
+        offered(&mut quit, |_| false);
+        assert_eq!(ids(quit), ["open"]);
     }
 
     #[test]

@@ -190,6 +190,14 @@ pub struct Confirmation {
     pub button: String,
 }
 
+/// What must hold for an action to be offered, which Dupin checks when the action screen
+/// opens rather than as each row is built, so typing never pays for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Condition {
+    /// The app bundle at this path has a running process.
+    Running(PathBuf),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemAction {
     pub id: String,
@@ -199,6 +207,7 @@ pub struct ItemAction {
     pub(crate) confirmation: Option<Confirmation>,
     /// Left out of the action screen; its route and shortcut still run it.
     pub(crate) hidden: bool,
+    condition: Option<Condition>,
 }
 
 impl ItemAction {
@@ -210,12 +219,23 @@ impl ItemAction {
             disposition: ActionDisposition::Dismiss,
             confirmation: None,
             hidden: false,
+            condition: None,
         }
     }
 
     /// Whether the action screen lists it.
     pub fn is_listed(&self) -> bool {
         !self.hidden
+    }
+
+    /// Offer this action only while `condition` holds.
+    pub fn when(mut self, condition: Condition) -> Self {
+        self.condition = Some(condition);
+        self
+    }
+
+    pub fn condition(&self) -> Option<&Condition> {
+        self.condition.as_ref()
     }
 
     /// Leave the current search open after this action runs.

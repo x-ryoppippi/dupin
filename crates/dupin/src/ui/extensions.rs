@@ -278,9 +278,10 @@ impl Ui {
     ) -> bool {
         let current = self.session.command_id().clone();
         let installed = self.extensions.install(registration, &current);
-        self.composition
-            .guests()
-            .set_extensions(self.extensions.active.clone());
+        let kinds_changed = self.composition.set_extensions(self.extensions.active.clone());
+        if kinds_changed {
+            self.extensions.forget_catalogues();
+        }
         for id in &installed.dropped {
             self.searchers.remove(id);
             self.deadlines.remove(id);
@@ -295,7 +296,7 @@ impl Ui {
             prefs.reflect_extensions(listing, problems);
             prefs.reflect_extension_access(bridge);
         });
-        installed.current_changed
+        installed.current_changed || kinds_changed
     }
 
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
@@ -503,7 +504,12 @@ impl Ui {
             );
         };
         let kind = crate::composition::row_kind(subject);
-        let Some(&field) = extension.provides.kinds.get(&(kind, action.clone())) else {
+        let Some(field) = extension
+            .provides
+            .kinds
+            .get(&(kind, action.clone()))
+            .map(|provision| provision.field)
+        else {
             return self.show_notice(
                 format!(
                     "{} provides no {} action called {action}.",
