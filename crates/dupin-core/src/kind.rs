@@ -6,12 +6,33 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use crate::config::{KindAction, KindActions};
+use crate::config::{KindAction, KindActions, KindConfig};
 use crate::item::Transfer;
 use crate::{Action, Item, ItemAction, Payload, ShareTarget};
 
-/// The ID of the action that shows a file in Quick Look, which Space runs.
+/// The ID of the action that shows a file in Quick Look, which ⌘Y runs.
 pub const QUICK_LOOK: &str = "quick-look";
+
+/// The IDs of the file kind's own actions, in the order its rows list them: `browse` only on
+/// a folder, and the actions from `rename` to `compress` only on a name that is UTF-8.
+/// `[advanced.kinds.file]` `hide` and `order` name them.
+pub(crate) const FILE_ACTIONS: [&str; 12] = [
+    "open",
+    "browse",
+    "open-with",
+    "reveal",
+    QUICK_LOOK,
+    "copy-name",
+    "rename",
+    "move-to",
+    "copy-to",
+    "duplicate",
+    "compress",
+    "trash",
+];
+
+/// The IDs of the app kind's own actions, in the order its rows list them.
+pub(crate) const APP_ACTIONS: [&str; 3] = ["open", "reveal", QUICK_LOOK];
 
 /// The kinds Dupin registers: `text`, `url`, `file` and `app`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,7 +102,7 @@ impl Subject {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Resolved {
     /// In the order the action menu lists them.
-    pub actions: Vec<ItemAction>,
+    pub(crate) actions: Vec<ItemAction>,
     /// The action ID Enter runs.
     pub(crate) primary: Option<String>,
     /// The action ID ⌘Enter runs.
@@ -121,8 +142,8 @@ impl Kinds {
         }
     }
 
-    /// Give each kind the actions `actions` lists for it after its own, for rows resolved from
-    /// now on. Whether they differ from the ones it had.
+    /// Give each kind the actions `actions` lists for it after its own, arranged by its `hide`
+    /// and `order`, for rows resolved from now on. Whether they differ from the ones it had.
     pub fn configure(&self, actions: &KindActions) -> bool {
         let mut configured = self.configured.write().unwrap_or_else(PoisonError::into_inner);
         let changed = *configured != *actions;
@@ -139,30 +160,36 @@ impl Kinds {
         }
     }
 
-    pub fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
+    /// The actions of a row Dupin produced for `subject`: its kind's own, then the ones
+    /// config.toml adds, arranged by the kind's `hide` and `order`.
+    fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
         let mut resolved = self.get(subject.kind()).actions(subject, title);
-        resolved.actions.extend(self.configured(subject, Producer::Dupin));
+        let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
+        let config = kind_config(&configured, subject.kind());
+        let mut named: Vec<_> = std::mem::take(&mut resolved.actions)
+            .into_iter()
+            .map(|action| (Some(action.id.clone()), action))
+            .collect();
+        named.extend(composed(config, subject, Producer::Dupin));
+        resolved.actions = arrange(named, config);
         resolved
+    }
+
+    /// The kind's own action Enter runs on a row of `subject`, as an extension's row that
+    /// copies or opens borrows it.
+    pub fn primary(&self, subject: &Subject, title: &str) -> Option<ItemAction> {
+        let resolved = self.get(subject.kind()).actions(subject, title);
+        let primary = resolved.primary?;
+        resolved.actions.into_iter().find(|action| action.id == primary)
     }
 
     /// The actions config.toml adds for `subject`, which follow its kind's own. A row
     /// `producer` made takes an extension's kind action only when Dupin produced it.
     pub fn configured(&self, subject: &Subject, producer: Producer) -> Vec<ItemAction> {
         let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
-        let kind = subject.kind();
-        let actions = match kind {
-            KindName::Text => &configured.text.actions,
-            KindName::Url => &configured.url.actions,
-            KindName::File => &configured.file.actions,
-            KindName::App => &configured.app.actions,
-        };
-        actions
-            .iter()
-            .enumerate()
-            .filter(|(_, action)| producer == Producer::Dupin || action.extension.is_none())
-            .filter_map(|(index, action)| {
-                configured_action(action, &configured_id(kind.as_str(), index), subject)
-            })
+        composed(kind_config(&configured, subject.kind()), subject, producer)
+            .into_iter()
+            .map(|(_, action)| action)
             .collect()
     }
 
@@ -192,6 +219,56 @@ impl Kinds {
             .flat_map(|name| self.get(name).send_to(payload))
             .collect()
     }
+}
+
+fn kind_config(configured: &KindActions, kind: KindName) -> &KindConfig {
+    match kind {
+        KindName::Text => &configured.text,
+        KindName::Url => &configured.url,
+        KindName::File => &configured.file,
+        KindName::App => &configured.app,
+    }
+}
+
+/// The actions `config` adds for `subject`, each with the name `hide` and `order` know it by:
+/// a package's kind action is `<package>/<action>`, and a script or URL action has none, since
+/// its place in `actions` already says where it goes.
+fn composed(config: &KindConfig, subject: &Subject, producer: Producer) -> Vec<(Option<String>, ItemAction)> {
+    let kind = subject.kind();
+    config
+        .actions
+        .iter()
+        .enumerate()
+        .filter(|(_, action)| producer == Producer::Dupin || action.extension.is_none())
+        .filter_map(|(index, action)| {
+            let item = configured_action(action, &configured_id(kind.as_str(), index), subject)?;
+            Some((action.extension.clone(), item))
+        })
+        .collect()
+}
+
+/// `actions` with the ones `config.order` names first, in its order, then the rest in theirs,
+/// and the ones `config.hide` names left out of the action screen. A hidden action keeps its
+/// route and shortcut: Enter, ⌘Enter and ⌘Y still find it.
+fn arrange(actions: Vec<(Option<String>, ItemAction)>, config: &KindConfig) -> Vec<ItemAction> {
+    if config.hide.is_empty() && config.order.is_empty() {
+        return actions.into_iter().map(|(_, action)| action).collect();
+    }
+    let mut placed: Vec<_> = actions
+        .into_iter()
+        .map(|(name, mut action)| {
+            let name = name.as_deref();
+            let place = name
+                .and_then(|name| config.order.iter().position(|ordered| ordered == name))
+                .unwrap_or(config.order.len());
+            if name.is_some_and(|name| config.hide.iter().any(|hidden| hidden == name)) {
+                action.hidden = true;
+            }
+            (place, action)
+        })
+        .collect();
+    placed.sort_by_key(|(place, _)| *place);
+    placed.into_iter().map(|(_, action)| action).collect()
 }
 
 /// The ID of the `index`th action config.toml adds to `kind`, which no source's own action
@@ -750,6 +827,144 @@ url = "https://web.archive.org/save/{url}"
                 },
                 paths: payload.paths.clone()
             }
+        );
+    }
+
+    #[test]
+    fn every_native_action_has_its_documented_id_in_the_documented_order() {
+        let folder = kinds().file("/fixture/folder".into(), "folder".into(), vec![], true);
+        assert_eq!(ids(&folder.actions), FILE_ACTIONS);
+        let file = kinds().file("/fixture/a.txt".into(), "a.txt".into(), vec![], false);
+        let without_browse: Vec<_> = FILE_ACTIONS.into_iter().filter(|id| *id != "browse").collect();
+        assert_eq!(ids(&file.actions), without_browse);
+        let app = kinds().app("/Applications/Safari.app".into(), "Safari".into(), vec![]);
+        assert_eq!(ids(&app.actions), APP_ACTIONS);
+    }
+
+    fn listed(actions: &[ItemAction]) -> Vec<&str> {
+        actions
+            .iter()
+            .filter(|action| action.is_listed())
+            .map(|action| action.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn hide_and_order_arrange_the_list_and_keep_routes_and_shortcuts() {
+        let kinds = kinds();
+        let path = PathBuf::from("/fixture/a.txt");
+        let before = kinds.file(path.clone(), "a.txt".into(), vec![], false);
+        kinds.configure(&configured(
+            r#"
+[advanced.kinds.file]
+hide = ["quick-look", "open", "duplicate"]
+order = ["trash", "reveal"]
+
+[advanced.kinds.app]
+order = ["quick-look"]
+"#,
+        ));
+        let item = kinds.file(path.clone(), "a.txt".into(), vec![], false);
+        assert_eq!(
+            listed(&item.actions),
+            [
+                "trash",
+                "reveal",
+                "open-with",
+                "copy-name",
+                "rename",
+                "move-to",
+                "copy-to",
+                "compress"
+            ]
+        );
+        assert_eq!(item.actions.len(), before.actions.len(), "hidden, not removed");
+        assert_eq!(
+            (item.primary.as_deref(), item.alternate.as_deref()),
+            (Some("open"), Some("reveal"))
+        );
+        assert_eq!(item.action("open"), Some(&Action::Open(path.clone())));
+        assert_eq!(item.action(QUICK_LOOK), Some(&Action::Preview(path)));
+        assert!(item.has_actions());
+
+        let folder = kinds.file("/fixture/folder".into(), "folder".into(), vec![], true);
+        assert_eq!(
+            listed(&folder.actions)[..4],
+            ["trash", "reveal", "browse", "open-with"]
+        );
+        let app = kinds.app("/Applications/Safari.app".into(), "Safari".into(), vec![]);
+        assert_eq!(listed(&app.actions), [QUICK_LOOK, "open", "reveal"]);
+        assert_eq!(
+            listed(&kinds.resolve(&Subject::Text("x".into()), "x").actions),
+            ["copy"]
+        );
+
+        kinds.configure(&KindActions::default());
+        assert_eq!(
+            kinds.file("/fixture/a.txt".into(), "a.txt".into(), vec![], false),
+            before
+        );
+    }
+
+    #[test]
+    fn order_places_a_packages_kind_action_and_leaves_script_and_url_actions_in_theirs() {
+        let kinds = kinds();
+        kinds.configure(&configured(
+            r#"
+[advanced.kinds.app]
+order = ["uploader/upload", "reveal"]
+hide = ["uploader/send"]
+
+[[advanced.kinds.app.actions]]
+title = "Run"
+script = "run"
+
+[[advanced.kinds.app.actions]]
+title = "Upload"
+extension = "uploader/upload"
+
+[[advanced.kinds.app.actions]]
+title = "Send"
+extension = "uploader/send"
+
+[[advanced.kinds.app.actions]]
+title = "Search"
+url = "https://search.example/?q={name}"
+"#,
+        ));
+        let app = kinds.app("/Applications/Safari.app".into(), "Safari".into(), vec![]);
+        assert_eq!(
+            listed(&app.actions),
+            [
+                &configured_id("app", 1),
+                "reveal",
+                "open",
+                QUICK_LOOK,
+                &configured_id("app", 0),
+                &configured_id("app", 3),
+            ]
+        );
+        assert!(
+            app.item_action(&configured_id("app", 2))
+                .is_some_and(|action| !action.is_listed())
+        );
+    }
+
+    #[test]
+    fn an_extensions_copy_borrows_the_kinds_own_action_whatever_the_order() {
+        let kinds = kinds();
+        kinds.configure(&configured(
+            "[[advanced.kinds.text.actions]]\ntitle = \"Translate\"\nurl = \"https://translate.example/?q={text}\"",
+        ));
+        assert_eq!(
+            kinds.primary(&Subject::Text("x".into()), "x"),
+            Some(ItemAction::new("copy", "Copy", Action::Copy("x".into())))
+        );
+        assert_eq!(
+            kinds
+                .primary(&Subject::Url("https://example.com".into()), "Example")
+                .map(|action| action.id),
+            Some("open".into())
         );
     }
 }

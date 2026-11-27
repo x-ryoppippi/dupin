@@ -250,9 +250,11 @@
               file_limit = 100;
               aliases = { c = "calendar"; ff = "app:org.mozilla.firefox"; };
               bindings."cmd+shift+v" = { target = "dupin"; command = "clipboard"; };
-              advanced.kinds.file.actions = [
-                { title = "Open in Zed"; script = "open-in-zed"; }
-              ];
+              advanced.kinds.file = {
+                actions = [ { title = "Open in Zed"; script = "open-in-zed"; } ];
+                hide = [ "quick-look" ];
+                order = [ "reveal" ];
+              };
             }
           '';
           description = ''
