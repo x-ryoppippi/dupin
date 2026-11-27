@@ -1,4 +1,4 @@
-use dupin_core::{Action, Effect};
+use dupin_core::{Action, CommandId, Effect, Session};
 use rune::Tx;
 use rune::raw_window_handle::RawWindowHandle;
 
@@ -6,6 +6,16 @@ use super::{Busy, Ui, query::mark_session_query};
 
 impl Ui {
     pub(super) fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
+        // Rune animates a key's commit but lands typing and what no key in the panel caused (a
+        // hotkey, an extension's answer, a search's results) at once; entering or leaving a
+        // command moves the same way whatever caused it, up to its first results.
+        if entered(&mut self.entered, &self.session) {
+            self.entering = self.on_screen();
+            if self.entering {
+                self.entered_at = tx.clock();
+                tx.animated();
+            }
+        }
         for effect in effects {
             match effect {
                 Effect::ShowActions { id, confirmation, .. } => self.show_action_screen(id, confirmation),
@@ -165,5 +175,102 @@ impl Ui {
             },
             _ => Err("Couldn't find the launcher view.".into()),
         })?
+    }
+}
+
+/// Whether the session shows another command than `shown`, which it then becomes.
+fn entered(shown: &mut CommandId, session: &Session) -> bool {
+    if session.command_id() == shown {
+        return false;
+    }
+    shown.clone_from(session.command_id());
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use dupin_core::searcher::Delivery;
+    use dupin_core::{Config, History, Intent, Item};
+
+    use super::*;
+
+    fn session() -> Session {
+        let config = Config::parse("[calendar]\nenabled = true").unwrap();
+        Session::new(
+            History::default(),
+            crate::commands::configured(&config).unwrap().registry,
+        )
+        .unwrap()
+    }
+
+    /// The main search for `query`, answered by one app.
+    fn typed(session: &mut Session, query: &str) {
+        let generation = session
+            .set_query(query)
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command.as_str() == crate::features::apps::APPS => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        let app = Item::path(
+            "/Applications/Calculator.app".into(),
+            "Calculator".into(),
+            Vec::new(),
+        );
+        let apps = CommandId::new(crate::features::apps::APPS).unwrap();
+        session.deliver_from(
+            apps.clone(),
+            Delivery::Batch {
+                generation,
+                items: vec![app],
+            },
+        );
+        session.deliver_from(apps, Delivery::Done { generation });
+    }
+
+    /// What the panel moves between as `enter` takes it into a command: whether it animates the
+    /// change, and the commands whose results lists, keyed by command, it swaps.
+    fn transition(enter: impl FnOnce(&mut Session)) -> (bool, CommandId, CommandId) {
+        let mut session = session();
+        let mut shown = session.command_id().clone();
+        let from = shown.clone();
+        enter(&mut session);
+        (entered(&mut shown, &session), from, session.command_id().clone())
+    }
+
+    #[test]
+    fn enter_on_a_lower_command_row_moves_as_keyword_and_space_do() {
+        let space = transition(|session| {
+            typed(session, "cal");
+            session.intent(Intent::Space).unwrap();
+        });
+        let row = transition(|session| {
+            typed(session, "ca");
+            assert_eq!(session.items()[0].display_title(), "Calculator");
+            session.intent(Intent::Down).unwrap();
+            assert_eq!(session.selected_item().unwrap().display_title(), "Calendar");
+            session.intent(Intent::Open).unwrap();
+        });
+        assert_eq!(row, space);
+        let (animates, from, to) = space;
+        assert!(animates);
+        assert_ne!(from, to);
+    }
+
+    #[test]
+    fn refining_the_query_keeps_the_list_in_place() {
+        let mut session = session();
+        let mut shown = session.command_id().clone();
+        typed(&mut session, "ca");
+        typed(&mut session, "cal");
+        assert!(!entered(&mut shown, &session));
+        session.intent(Intent::Space).unwrap();
+        assert!(entered(&mut shown, &session));
+        assert!(!entered(&mut shown, &session), "only the change into it moves");
+        session.intent(Intent::Backspace).unwrap();
+        assert!(entered(&mut shown, &session), "⌫ out of it moves back");
     }
 }
