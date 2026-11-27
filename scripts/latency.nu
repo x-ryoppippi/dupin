@@ -20,6 +20,31 @@ def main []: nothing -> nothing {
     help main
 }
 
+# The implementations of `features` to measure, `implementation` alone when it is given, grouped
+# by the display each simulates. Each is resolved against its whole feature before the grouping,
+# since one may extend an implementation that another display's group, or no group, holds.
+export def display-groups [features: record, implementation?: string]: nothing -> list<record> {
+    let chosen = $features
+    | items {|feature, implementations|
+        $implementations
+        | columns
+        | where {|label| $implementation == null or $label == $implementation }
+        | each {|label|
+            let setup = resolve $implementations $label
+            {feature: $feature, label: $label, display: ($setup.display? | default ""), setup: $setup}
+        }
+    }
+    | flatten
+    $chosen | get display | uniq | each {|display|
+        let features = $chosen
+        | where display == $display
+        | group-by feature
+        | items {|feature, group| {$feature: ($group | each {|it| {$it.label: $it.setup} } | into record)} }
+        | into record
+        {display: $display, features: $features}
+    }
+}
+
 # `measure-all` once for each display the implementations simulate, with
 # `DUPIN_HEADLESS_DISPLAY` set to it; an implementation's `display` (`<width>x<height>` points of
 # usable area) sizes the panel's list as such a display would, and one without it gets the
@@ -32,18 +57,9 @@ def measure-displays [
     --only: string
     --implementation: string
 ]: nothing -> list<record> {
-    let wanted = {|label| $implementation == null or $label == $implementation }
-    let groups = $catalogue.features
-    | items {|feature, implementations|
-        $implementations | columns | where {|label| do $wanted $label } | each {|label|
-            {feature: $feature, label: $label, display: (resolve $implementations $label | get display? | default "")}
-        }
-    }
-    | flatten
-    let measured = $groups | get display | uniq | each {|display|
-        let features = $groups | where display == $display | group-by feature | items {|feature, chosen|
-            {$feature: ($catalogue.features | get $feature | select ...($chosen | get label))}
-        } | into record
+    let measured = display-groups $catalogue.features $implementation | each {|group|
+        let display = $group.display
+        let features = $group.features
         let scenarios = $catalogue.scenarios | where {|scenario|
             ($scenario.feature in ($features | columns)) and ($only == null or ($scenario.id | str contains $only))
         }

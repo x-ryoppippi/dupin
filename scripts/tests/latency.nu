@@ -7,6 +7,7 @@ use ../latency.nu [
     against-main
     checked-main
     checked-results
+    display-groups
     render
     parity-pairs
     stale
@@ -407,6 +408,40 @@ def main [] {
         settings: {snippets: {sort: "name", enabled: false}, extensions: true}
         extensions: "ports"
     }
+
+    # Choosing one implementation keeps what it extends, so a variant of native measures alone
+    # with native's config and provider, and each group of a display carries resolved setups.
+    let features = {
+        search: {
+            native: {config: "native.toml", provider: apps.search}
+            running-apps: {
+                extends: native
+                enables: ["bundled:running-apps"]
+            }
+            tall: {extends: native, display: "1728x2560"}
+        }
+    }
+    assert equal (display-groups $features running-apps) [
+        {
+            display: ""
+            features: {
+                search: {
+                    running-apps: {
+                        config: "native.toml"
+                        provider: apps.search
+                        enables: ["bundled:running-apps"]
+                        settings: {}
+                    }
+                }
+            }
+        }
+    ]
+    assert equal (display-groups $features tall | get 0.display) "1728x2560"
+    assert equal (display-groups $features | each {|group| $group.features.search | columns }) [
+        [native running-apps]
+        [tall]
+    ]
+    assert equal (display-groups $features absent) []
 
     # Every implementation in the catalogue resolves, and every scenario names a feature it has.
     let catalogue = open ($env.FILE_PWD | path dirname | path join latency scenarios.toml)
