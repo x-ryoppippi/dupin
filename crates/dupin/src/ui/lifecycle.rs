@@ -261,7 +261,7 @@ impl Ui {
         }
         if show_settings {
             crate::trace::settings("panel closed");
-            self.prefs.open();
+            self.prefs.update(|prefs, _| prefs.open_settings());
         }
         if !show_snapshots && !show_settings && self.relaunch.is_some() {
             // Rune clears the panel's visibility after this callback.

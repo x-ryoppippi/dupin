@@ -60,6 +60,7 @@ Other keys: [Keys](../usage.md#keys).
 - Snapshots hold what you typed and the results shown, so they are kept only in [encrypted storage](./storage.md) and stay on this Mac: they never sync.
 - Storage accepts up to 100 entries, 512 KiB per entry and 8 MiB in total; a save that exceeds a limit reports an error and removes nothing.
 - Viewing a snapshot never runs its saved actions. Editing the search field never deletes saved content.
+- <kbd>⌘,</kbd> opens Settings on the last settings page you used, not on Snapshots; <kbd>⇧⌘O</kbd> opens Snapshots.
 - Settings opens at 960 × 640 points the first time, smaller if the screen is, and then where you left it, at the size you left it. A window left on a display that has since gone, or larger than the screen it opens on, is moved and shrunk to fit.
 
 ## Configuration

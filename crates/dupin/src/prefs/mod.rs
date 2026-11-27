@@ -115,6 +115,8 @@ pub struct Prefs {
     config: Config,
     current: Rc<RefCell<Config>>,
     page: Page,
+    /// The page ⌘, returns to: the last one shown other than Snapshots, which has its own way in.
+    settings_page: Page,
     recorders: [ShortcutState; 2],
     shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
@@ -188,6 +190,7 @@ impl Prefs {
             config,
             current,
             page: Page::General,
+            settings_page: Page::General,
             recorders,
             shortcut_problems: [None, None],
             binding,
@@ -222,6 +225,9 @@ impl Prefs {
     fn show(&mut self, page: Page) {
         self.welcome = None;
         self.page = page;
+        if page != Page::Snapshots {
+            self.settings_page = page;
+        }
         self.refresh_permissions();
         if page == Page::Sync {
             self.sync_ask(crate::control::SyncAction::Status {});
@@ -231,6 +237,15 @@ impl Prefs {
     /// The panel opened on another display.
     pub fn reflect_panel_screen(&mut self, screen: Option<crate::ui::PanelScreen>) {
         self.panel_screen = screen;
+    }
+
+    /// Opens Settings as ⌘, does: on the page last shown, unless that was Snapshots, which
+    /// ⇧⌘O opens instead, so Settings comes back to the settings page left before it.
+    pub fn open_settings(&mut self) {
+        if self.welcome.is_none() && self.page == Page::Snapshots {
+            self.show(self.settings_page);
+        }
+        self.me.open();
     }
 
     /// Shows the Snapshots page, opening Settings if it isn't.
@@ -1042,6 +1057,36 @@ mod tests {
         runtime.frame(0.0);
         assert!(has_label(&runtime, "The meaning of petrichor"));
         assert!(!has_label(&runtime, "The meaning of serendipity"));
+    }
+
+    #[test]
+    fn settings_opened_after_snapshots_comes_back_to_the_settings_page_tab_reaches() {
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Keywords);
+        state.show(Page::Snapshots);
+        // ⌘, opens Settings itself; ⇧⌘O is the way to Snapshots.
+        state.open_settings();
+        assert!(state.page == Page::Keywords);
+        state.show(Page::General);
+        state.show(Page::Snapshots);
+        state.open_settings();
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.on_key = Some(Prefs::key);
+        runtime.frame(0.0);
+        runtime.key(rune::KeyEvent {
+            key: rune::Key::Tab,
+            mods: Default::default(),
+        });
+        runtime.frame(0.0);
+        let focused: Vec<_> = runtime
+            .elements()
+            .into_iter()
+            .filter(|element| element.focused)
+            .filter_map(|element| element.key)
+            .collect();
+        assert_eq!(focused, ["page-general"]);
     }
 
     #[test]
