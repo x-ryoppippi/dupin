@@ -53,8 +53,8 @@ On macOS that is `blacksmith-12vcpu-macos-26`, not the same-sized macOS 27 runne
 12 vCPU macOS 27 than on 26, the release build's fat LTO step 12–17% longer and the
 extension-host test build 18–19% longer. `latency`'s parity does not hold on 27 either, but
 not because extensions are slower there: on 12 vCPU runners an extension's whole host call
-(the socket, the sandboxed helper, QuickJS and the host service) took 560 µs at p95 on 27
-against 675 µs on 26. A headless run takes a delivery only when its next frame starts, and
+(the socket, the sandboxed helper, QuickJS and the host service) took 560–653 µs at p95 on 27
+and 639–675 µs on 26. A headless run takes a delivery only when its next frame starts, and
 rune paces those frames with `thread::sleep`, whose sub-millisecond wake-ups on the 27 runners
 are late by anything from 0 to 1.1 ms where on 26 they are late by a nearly constant 0.9–1 ms.
 That jitter lands in `merge_ms`, so it widens the p95 of scenarios whose own work is short, as
