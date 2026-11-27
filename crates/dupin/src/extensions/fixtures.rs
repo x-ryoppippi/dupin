@@ -141,7 +141,7 @@ fn fixture_host(name: &str, fixture: &Fixture) -> Result<Host, Diagnostic> {
         command.env("TZ", &zone);
         Ok(command)
     });
-    Ok(Host::replaying(launch, guest_environment(fixture)))
+    Ok(Host::replaying(launch, Some(guest_environment(fixture))))
 }
 
 fn guest_environment(fixture: &Fixture) -> dupin_js_runtime::Environment {
