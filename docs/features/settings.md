@@ -9,8 +9,8 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 ## What you see
 
 - A sidebar of pages: General, Search, Keywords, Snippets, Appearance, Permissions, Sync, Updates and more.
-- At the foot of the sidebar: **Open config.toml**, **Open Config Folder**, **Show Welcome** and **Acknowledgements**.
-- At the foot of General, **Advanced** shows the rows you rarely change: System Command Automation, the anonymous usage ping, Relaunch, and config.toml and its folder.
+- At the foot of the sidebar: **Show Welcome**, **Open Snapshots** and **Acknowledgements**.
+- At the foot of General, **Advanced** shows the rows you rarely change: System Command Automation, the anonymous usage ping, Relaunch and Configuration.
 - Rows a read-only `config.toml` sets are locked and marked **Managed by Nix** or **Set in config.toml**.
 
 <picture>
@@ -34,8 +34,8 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 | **Launch at login**                                        | Starts Dupin at login; see [Launch at login](#launch-at-login)                                                                                                                        |
 | **Anonymous usage ping**                                   | Turns off the one anonymous ping a day an official release sends; **Details** opens [Telemetry](./telemetry.md)                                                                       |
 | **Relaunch**                                               | Restarts Dupin, installing a staged update first                                                                                                                                      |
-| **Open config.toml**                                       | Opens the file in its default editor                                                                                                                                                  |
-| **Open Config Folder**                                     | Shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist                                                                   |
+| General → Advanced → Configuration → **Open file**         | Opens config.toml in its default editor                                                                                                                                               |
+| General → Advanced → Configuration → **Open folder**       | Shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist                                                                   |
 | **Show Welcome**                                           | Brings back the [first-run](#first-run) welcome                                                                                                                                       |
 | **Acknowledgements**                                       | Opens the licences and copyright notices of the open-source code and data Dupin includes                                                                                              |
 

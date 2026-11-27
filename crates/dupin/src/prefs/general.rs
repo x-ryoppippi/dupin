@@ -38,7 +38,7 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
                 relaunch_setting(k),
             ],
         ));
-        body.push(card(k, vec![config_file_setting(k), config_folder_setting(k)]));
+        body.push(card(k, vec![configuration_setting(k)]));
     }
     body
 }
@@ -69,22 +69,25 @@ fn advanced_disclosure(s: &Prefs, k: &Kit) -> El {
         .child(icon(glyph, 16.0).color(c.icon_muted))
 }
 
-fn config_file_setting(k: &Kit) -> El {
+/// config.toml's path, and buttons that open it and the folder holding it.
+fn configuration_setting(k: &Kit) -> El {
     let path = crate::settings::path().map(|path| tilde(&path.display().to_string()));
-    let open = value_button(k, "advanced-open-config", "Open", &CHEVRON_RIGHT)
-        .on_press(|_: &mut Prefs| super::open_config_file());
-    setting(k, &icons::FILES, "config.toml", path.as_deref(), open)
-}
-
-fn config_folder_setting(k: &Kit) -> El {
-    let open = value_button(k, "advanced-open-config-folder", "Open", &CHEVRON_RIGHT)
-        .on_press(|_: &mut Prefs| super::open_config_folder());
+    let open = Button::new("Open file")
+        .variant(ButtonVariant::Ghost)
+        .on_press(|_: &mut Prefs| super::open_config_file())
+        .build(k)
+        .key("open-config");
+    let folder = Button::new("Open folder")
+        .variant(ButtonVariant::Ghost)
+        .on_press(|_: &mut Prefs| super::open_config_folder())
+        .build(k)
+        .key("open-config-folder");
     setting(
         k,
-        &icons::FOLDER,
-        "Config folder",
-        Some("Holds config.toml, extensions/ and shaders/"),
-        open,
+        &icons::FILES,
+        "Configuration",
+        path.as_deref(),
+        row().gap(4.0).center_y().child(open).child(folder),
     )
 }
 

@@ -517,10 +517,6 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         }
         pages = pages.child(item);
     }
-    let config =
-        footer_link(k, "open-config", "Open config.toml").on_press(|_: &mut Prefs| open_config_file());
-    let folder = footer_link(k, "open-config-folder", "Open Config Folder")
-        .on_press(|_: &mut Prefs| open_config_folder());
     col()
         .key("sidebar")
         .role("navigation")
@@ -541,8 +537,6 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             footer_link(k, "open-snapshots", "Open Snapshots")
                 .on_press(|s: &mut Prefs| s.panel.update(crate::ui::Ui::show_snapshots)),
         )
-        .child(config)
-        .child(folder)
         .children(crate::notices::path().map(|path| {
             footer_link(k, "open-acknowledgements", "Acknowledgements").on_press(move |_: &mut Prefs| {
                 std::thread::spawn(move || dupin_mac::workspace::open(path));
