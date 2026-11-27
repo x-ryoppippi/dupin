@@ -52,16 +52,16 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-nix-cache
+      - run: nix profile install --inputs-from . nixpkgs#just nixpkgs#nushell
 
-      - run: nix build .#dupin-latency --out-link result-latency
+      - run: just latency-build
 
       # A baseline is of native implementations; a commit's ports may not run in its own build.
       - name: Measure
         env:
           IMPLEMENTATION: ${{ inputs.ref && 'native' || '' }}
         run: >-
-          nix shell --inputs-from . nixpkgs#nushell --command
-          nu scripts/latency.nu run --bin result-latency/bin/dupin --out "$RUNNER_TEMP/latency/results.json"
+          just latency-measure --out "$RUNNER_TEMP/latency/results.json"
           ${IMPLEMENTATION:+--implementation "$IMPLEMENTATION"}
 
       # Comparing with main is informational, so none of its steps can fail the job: a pull
@@ -72,10 +72,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          nix shell --inputs-from . nixpkgs#nushell --command
-          nu --no-config-file scripts/latency.nu fetch-main "$GITHUB_REPOSITORY" "$GITHUB_SHA"
-          --out "$RUNNER_TEMP/latency/main.json"
+        run: just latency-fetch-main "$GITHUB_REPOSITORY" "$GITHUB_SHA" --out "$RUNNER_TEMP/latency/main.json"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -93,13 +90,10 @@ jobs:
           if [[ -f $RUNNER_TEMP/latency/main.json ]]; then
             main=("$RUNNER_TEMP/latency/main.json")
           fi
-          nix shell --inputs-from . nixpkgs#nushell --command nu --no-config-file scripts/latency.nu report \
-            "$RUNNER_TEMP/latency/results.json" "${main[@]}" --repo "$GITHUB_REPOSITORY" --commit "$HEAD" \
-            >> "$GITHUB_STEP_SUMMARY"
+          just latency-report "$RUNNER_TEMP/latency/results.json" "${main[@]}" \
+            --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
 
       # A baseline run measures only native implementations, so it has no port to hold.
       - name: Hold extensions to native parity
         if: ${{ !inputs.ref }}
-        run: >-
-          nix shell --inputs-from . nixpkgs#nushell --command
-          nu scripts/latency.nu parity "$RUNNER_TEMP/latency/results.json" --summary "$GITHUB_STEP_SUMMARY"
+        run: just latency-parity "$RUNNER_TEMP/latency/results.json" --summary "$GITHUB_STEP_SUMMARY"

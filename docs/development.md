@@ -38,6 +38,28 @@ Dev builds keep full debug info for the workspace's own crates only; dependencie
 
 For rebuild times and the sccache decision, see [Build caching](#build-caching).
 
+## What CI runs
+
+Every workflow step that builds, tests, measures or formats calls a `just` recipe, so the same command runs locally from the development shell. A workflow passes only what belongs to its runner, such as `$RUNNER_TEMP` paths and the commit; the rest lives in the justfile. Jobs outside the development shell install `just` (and Nushell where a recipe needs it) with `nix profile install --inputs-from .`; the jobs that already enter it run `nix develop --command just …`.
+
+| Workflow and job          | Recipes                                                                                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CI `check`                | `just ci-check`: every flake check except the Rust builds                                                                                           |
+| CI `build`                | `just ci-build` (clippy, tests, Hawk, the app bundle, its extensions' scopes), `just bundle-archive <out>`, `just size-measure`, `just size-report` |
+| CI `extension-host`       | `just extension-host-test`                                                                                                                          |
+| CI `search-quality`       | `just search-quality-build`, `just search-quality-measure`, `just search-quality-report`                                                            |
+| CI `e2e-tests`            | `just e2e <Dupin.app> --record`                                                                                                                     |
+| CI `telemetry`            | `just telemetry::test`, `just telemetry::typecheck`, `just telemetry::build`                                                                        |
+| Latency (CI's `latency`)  | `just latency-build`, `just latency-measure`, `just latency-fetch-main`, `just latency-report`, `just latency-parity`                               |
+| Website                   | `just website::check` (build, lint and test), `just website::deploy`                                                                                |
+| Telemetry                 | `just telemetry::test`, `just telemetry::typecheck`, `just telemetry::deploy`                                                                       |
+| autofix.ci                | `just formatter`, `just update-rune`, `just fmt`                                                                                                    |
+| Docs glass                | `just build`, `just docs-glass`                                                                                                                     |
+| Package (stable, nightly) | `just package-release <channel>`                                                                                                                    |
+| Testbox dev               | `just warm-tests`                                                                                                                                   |
+
+`ci-check`, `ci-build` and `formatter` build for the current system, `nix eval --impure --raw --expr builtins.currentSystem`; `just system=<system> ci-check` picks another. The `*-measure`, `*-report`, `*-fetch-main` and `latency-parity` recipes pass their arguments to the script they name, so run without any they take its local defaults. What stays inline in a workflow is GitHub's own plumbing: the `changes` job's path filter, the signing keychain, publishing releases and the comment workflows.
+
 ## Remote development with Testbox
 
 The development shell includes Blacksmith CLI 0.5.3. The manually dispatched

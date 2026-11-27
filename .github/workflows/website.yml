@@ -42,8 +42,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-nix-cache
       - run: nix profile install --inputs-from . nixpkgs#nodejs nixpkgs#pnpm_12 nixpkgs#just
-      - run: just website::build
-      - run: just website::lint
+      - run: just website::check
 
       # Until the repository has the credentials, main skips the deployment and says why
       # instead of failing.

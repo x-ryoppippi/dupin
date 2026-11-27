@@ -22,6 +22,13 @@ preview: install
 lint: install
     pnpm run lint
 
+# Run the tests: docs links, published pages and Open Graph cards
+test: install
+    pnpm run test
+
+# Build, lint and test, as the Website workflow does
+check: build lint test
+
 # Build and deploy the static site
 deploy: install
     pnpm run deploy
