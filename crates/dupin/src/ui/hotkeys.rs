@@ -145,7 +145,7 @@ impl Ui {
         let busy = super::Busy::new(self.running.clone());
         std::thread::spawn(move || {
             let call = bridge.call(&extension.package, dupin_extension_bridge::Trigger::Activation);
-            let deadline = std::time::Instant::now() + crate::extensions::QUERY_DEADLINE;
+            let deadline = crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE);
             let found = crate::extensions::catalogue_row(&extension, &row, deadline, &call);
             me.update(move |ui, tx| match found {
                 Ok(Some(item)) => ui.run_bound_row(extension, item, tx),

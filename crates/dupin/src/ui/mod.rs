@@ -164,6 +164,9 @@ pub struct Ui {
     pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
     pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
+    /// Extension actions a headless run's frames wait for, which haven't handed over their
+    /// results yet.
+    headless_acting: usize,
     extensions: Extensions,
     calendar_access: dupin_mac::privacy::CalendarAccess,
     _apps_watcher: Option<AppsWatcher>,
@@ -357,6 +360,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
+            headless_acting: 0,
             extensions: Extensions::new(bridge, registration.ports),
             calendar_access,
             _apps_watcher: apps_watcher,

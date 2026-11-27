@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use dupin_core::{Anchor, CommandId, ExtensionRequest, Navigated, Page, Provider};
 use dupin_extension_bridge::{Bridge, Notice, PackageId, ScopeKey, Trigger};
@@ -332,7 +331,7 @@ impl Ui {
                     return;
                 };
                 let call = bridge_for_watch.call(&id_for_watch, Trigger::Background);
-                let deadline = Instant::now() + crate::extensions::QUERY_DEADLINE;
+                let deadline = crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE);
                 match extension.event("clipboard", &event, deadline, &call.services) {
                     // Only a search that lists this catalogue runs again: any other would run
                     // its package's `search` on this package's events.
@@ -594,7 +593,7 @@ impl Ui {
         let anchor = self.session.anchor();
         let page = self.page_context(&extension);
         let bridge = self.extensions.bridge.clone();
-        let me = self.me.clone();
+        let acting = self.on_acted();
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
             let call = bridge.call(&extension.package, Trigger::Activation);
@@ -602,11 +601,11 @@ impl Ui {
                 &action,
                 &data,
                 &page,
-                Instant::now() + ACTION_DEADLINE,
+                crate::extensions::deadline_in(ACTION_DEADLINE),
                 &call.services,
             );
             let stale = !bridge.is_current(&extension.package, call.generation);
-            me.update(move |ui, tx| {
+            acting.acted(move |ui, tx| {
                 ui.form_answered(&anchor);
                 if stale {
                     ui.show_notice(

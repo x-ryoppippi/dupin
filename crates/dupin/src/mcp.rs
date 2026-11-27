@@ -558,7 +558,7 @@ fn extension_tool(
                 query,
                 None,
                 dupin_js_runtime::MAX_ROWS,
-                std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE),
                 cancelled.clone(),
                 &dupin_extension_bridge::Call::none(),
             )

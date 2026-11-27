@@ -374,7 +374,7 @@ impl Provider for WebProvider {
             };
             searches.clone()
         };
-        let deadline = Instant::now() + QUERY_DEADLINE;
+        let deadline = crate::extensions::deadline_in(QUERY_DEADLINE);
         let rows = if self.fallback {
             fallback_items(&searches, &request.query, request.limit, deadline)
         } else {
@@ -672,7 +672,7 @@ mod tests {
             None,
             "Send to never offers searches from other settings"
         );
-        let refreshed = sources.searches(Instant::now() + QUERY_DEADLINE);
+        let refreshed = sources.searches(crate::extensions::deadline_in(QUERY_DEADLINE));
         assert_eq!(sources.held().as_ref(), Some(&refreshed));
 
         // config.toml's searches reach only the package Dupin shipped, not one in the

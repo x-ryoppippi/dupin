@@ -416,7 +416,7 @@ impl Ui {
         let running = self.running.clone();
         running.fetch_add(1, Ordering::AcqRel);
         std::thread::spawn(move || {
-            let searches = web.searches(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE);
+            let searches = web.searches(crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE));
             me.update(move |ui, _| ui.web_receivers_found(&key, &web, &searches));
             running.fetch_sub(1, Ordering::AcqRel);
         });
