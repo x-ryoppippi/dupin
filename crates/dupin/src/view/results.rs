@@ -1,6 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use dupin_core::{Accessory, Item, RowState, View};
+use dupin_core::{Accessory, Item, RowState, Rows, View};
 use rune::tok::type_;
 use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Span, TextStyle, col, el, rich, row, text};
 
@@ -17,14 +17,44 @@ pub(super) const LIST_PAD: f32 = 6.0;
 /// Between the list's end and the display's edge: the list's padding, its divider and a gap.
 const LIST_MARGIN: f32 = 2.0 * LIST_PAD + 1.0 + 24.0;
 
-/// The height the result list takes before it scrolls, from the `room` the display leaves on
-/// its side of the query field.
-pub fn list_budget(room: f32) -> f32 {
-    (room - LIST_MARGIN).clamp(DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET)
+/// The share of the room on the list's side of the field that a recommended row count fills,
+/// leaving the rest of the display around the panel in view.
+const RECOMMENDED_SHARE: f32 = 0.75;
+
+/// How the result list fits a display.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ListFit {
+    /// The height the list takes before it scrolls.
+    pub budget: f32,
+    /// The row count Settings recommends for the display.
+    pub recommended: u8,
+}
+
+/// How the result list fits the `room` a display leaves on its side of the query field, or
+/// `None` where the panel knows no display, for `rows` of `row_height` points.
+pub fn list_fit(room: Option<f32>, rows: Rows, row_height: f32) -> ListFit {
+    let space = room.map(|room| room - LIST_MARGIN);
+    let (fewest, most) = (f32::from(Rows::MIN), f32::from(Rows::MAX));
+    let recommended = (space.map_or(DEFAULT_LIST_BUDGET, |space| space * RECOMMENDED_SHARE) / row_height)
+        .floor()
+        .clamp(fewest, most);
+    let budget = match rows {
+        Rows::Auto => space.map_or(DEFAULT_LIST_BUDGET, |space| {
+            space.clamp(DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET)
+        }),
+        Rows::Count(count) => {
+            let fits = space.map_or(most, |space| (space / row_height).floor());
+            f32::from(count).min(fits).max(fewest) * row_height
+        }
+    };
+    ListFit {
+        budget,
+        recommended: recommended as u8,
+    }
 }
 
 /// Rows shown before the list scrolls.
-pub(super) fn visible_rows(budget: f32, row_height: f32) -> usize {
+pub(crate) fn visible_rows(budget: f32, row_height: f32) -> usize {
     ((budget / row_height).floor() as usize).max(1)
 }
 
@@ -600,7 +630,9 @@ pub fn row_key(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET, list_budget, list_order, result_range, visible_rows};
+    use dupin_core::Rows;
+
+    use super::{DEFAULT_LIST_BUDGET, MAX_LIST_BUDGET, list_fit, list_order, result_range, visible_rows};
 
     #[test]
     fn a_list_that_runs_upwards_puts_the_first_match_next_to_the_field() {
@@ -628,14 +660,73 @@ mod tests {
         assert_eq!(visible_rows(DEFAULT_LIST_BUDGET, 1000.0), 1);
     }
 
+    fn budget(room: Option<f32>, rows: Rows) -> f32 {
+        list_fit(room, rows, 52.0).budget
+    }
+
+    fn recommended(room: Option<f32>, row_height: f32) -> u8 {
+        list_fit(room, Rows::Auto, row_height).recommended
+    }
+
     #[test]
     fn more_room_shows_more_rows_up_to_a_limit() {
-        assert_eq!(list_budget(0.0), DEFAULT_LIST_BUDGET);
-        assert_eq!(list_budget(300.0), DEFAULT_LIST_BUDGET);
-        let roomy = list_budget(700.0);
+        assert_eq!(budget(None, Rows::Auto), DEFAULT_LIST_BUDGET);
+        assert_eq!(budget(Some(0.0), Rows::Auto), DEFAULT_LIST_BUDGET);
+        assert_eq!(budget(Some(300.0), Rows::Auto), DEFAULT_LIST_BUDGET);
+        let roomy = budget(Some(700.0), Rows::Auto);
         assert!(roomy > DEFAULT_LIST_BUDGET && roomy < 700.0);
         assert!(visible_rows(roomy, 52.0) > visible_rows(DEFAULT_LIST_BUDGET, 52.0));
-        assert_eq!(list_budget(5000.0), MAX_LIST_BUDGET);
+        assert_eq!(budget(Some(5000.0), Rows::Auto), MAX_LIST_BUDGET);
         assert_eq!(visible_rows(MAX_LIST_BUDGET, 52.0), 16);
+    }
+
+    #[test]
+    fn a_row_count_holds_where_it_fits_and_shrinks_to_the_display_where_it_does_not() {
+        // 52-point rows: 600 points of room leave 563 for rows, ten of them.
+        assert_eq!(budget(Some(600.0), Rows::Count(5)), 5.0 * 52.0);
+        assert_eq!(budget(Some(600.0), Rows::Count(10)), 10.0 * 52.0);
+        assert_eq!(budget(Some(600.0), Rows::Count(16)), 10.0 * 52.0);
+        assert_eq!(budget(Some(5000.0), Rows::Count(16)), 16.0 * 52.0);
+        // A display too short for the fewest rows still gets them.
+        assert_eq!(budget(Some(0.0), Rows::Count(8)), f32::from(Rows::MIN) * 52.0);
+        // Without a display, nothing shrinks it.
+        assert_eq!(budget(None, Rows::Count(16)), 16.0 * 52.0);
+        for count in [Rows::MIN, 9, Rows::MAX] {
+            let fit = list_fit(Some(5000.0), Rows::Count(count), 72.0);
+            assert_eq!(visible_rows(fit.budget, 72.0), usize::from(count));
+        }
+        assert_eq!(
+            visible_rows(list_fit(Some(600.0), Rows::Count(16), 72.0).budget, 72.0),
+            7
+        );
+    }
+
+    #[test]
+    fn the_recommendation_fills_three_quarters_of_the_room_in_whole_rows() {
+        // A 982-point MacBook Pro with the menu bar: 944 points visible. Centred, 403 of the
+        // 440 points under the field hold rows; three quarters of that is 302, five rows.
+        assert_eq!(recommended(Some(440.0), 52.0), 5);
+        // At the top the same display leaves 700 points: 663 for rows, nine of them.
+        assert_eq!(recommended(Some(700.0), 52.0), 9);
+        assert_eq!(recommended(Some(700.0), 72.0), 6);
+        assert_eq!(recommended(Some(700.0), 100.0), 4);
+        // A 1440-point display at the top: never more than a count may ask for.
+        assert_eq!(recommended(Some(1171.0), 52.0), Rows::MAX);
+        // Too short a display still recommends the fewest.
+        assert_eq!(recommended(Some(100.0), 52.0), Rows::MIN);
+        // Without a display, the default list's rows.
+        assert_eq!(recommended(None, 52.0), 8);
+        assert_eq!(recommended(None, 100.0), 4);
+        for room in [400.0, 700.0, 1000.0] {
+            for row_height in [52.0, 72.0, 100.0] {
+                let count = recommended(Some(room), row_height);
+                let fit = list_fit(Some(room), Rows::Count(count), row_height);
+                assert_eq!(
+                    visible_rows(fit.budget, row_height),
+                    usize::from(count),
+                    "the recommendation for {room} points of room fits it"
+                );
+            }
+        }
     }
 }

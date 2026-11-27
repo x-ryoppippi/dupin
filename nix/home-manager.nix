@@ -245,6 +245,7 @@
             {
               hotkey = "alt+space";
               position = "top";
+              rows = 10;
               input_source = "ascii";
               file_limit = 100;
               aliases = { c = "calendar"; ff = "app:org.mozilla.firefox"; };

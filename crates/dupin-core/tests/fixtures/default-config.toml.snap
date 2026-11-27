@@ -11,6 +11,7 @@ snippet_keywords = ["snip"]
 snippet_paste = false
 display = "mouse"
 position = "center"
+rows = "auto"
 input_source = "ascii"
 auto_update = true
 telemetry = true

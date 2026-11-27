@@ -15,7 +15,7 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/settings/general-dark.png" />
-<img alt="Settings → General: hotkey, selection hotkey, display, position, input source and launch at login, with Advanced collapsed below them and the pages in the sidebar." src="../images/settings/general-light.png" width="760" />
+<img alt="Settings → General: hotkey, selection hotkey, display, position, rows, input source and launch at login, with Advanced collapsed below them and the pages in the sidebar." src="../images/settings/general-light.png" width="760" />
 </picture>
 
 <picture>
@@ -25,19 +25,20 @@ Press <kbd>⌘,</kbd> in the panel, or type `dupin settings` and press <kbd>↩<
 
 ## What you can do
 
-| Key / action                                               | What it does                                                                                                                                                                          |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <kbd>⌘,</kbd> in the panel                                 | Opens Settings                                                                                                                                                                        |
-| Type a pane's name, such as `bluetooth`, then <kbd>↩</kbd> | Opens that pane in System Settings                                                                                                                                                    |
-| Settings → Keywords                                        | Lists every keyword, records the [shortcut](./keywords.md#shortcuts) that opens each command, and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords |
-| Settings → Snippets                                        | Lists every [snippet](./snippets.md#adding-and-editing), adds, edits and deletes the ones stored in Dupin, and shows `config.toml`'s read-only                                        |
-| **Launch at login**                                        | Starts Dupin at login; see [Launch at login](#launch-at-login)                                                                                                                        |
-| **Anonymous usage ping**                                   | Turns off the one anonymous ping a day an official release sends; **Details** opens [Telemetry](./telemetry.md)                                                                       |
-| **Relaunch**                                               | Restarts Dupin, installing a staged update first                                                                                                                                      |
-| General → Advanced → Configuration → **Open file**         | Opens config.toml in its default editor                                                                                                                                               |
-| General → Advanced → Configuration → **Open folder**       | Shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist                                                                   |
-| **Show Welcome**                                           | Brings back the [first-run](#first-run) welcome                                                                                                                                       |
-| **Acknowledgements**                                       | Opens the licences and copyright notices of the open-source code and data Dupin includes                                                                                              |
+| Key / action                                               | What it does                                                                                                                                                                                   |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <kbd>⌘,</kbd> in the panel                                 | Opens Settings                                                                                                                                                                                 |
+| Type a pane's name, such as `bluetooth`, then <kbd>↩</kbd> | Opens that pane in System Settings                                                                                                                                                             |
+| Settings → Keywords                                        | Lists every keyword, records the [shortcut](./keywords.md#shortcuts) that opens each command, and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords          |
+| Settings → Snippets                                        | Lists every [snippet](./snippets.md#adding-and-editing), adds, edits and deletes the ones stored in Dupin, and shows `config.toml`'s read-only                                                 |
+| **Rows**                                                   | Sets how many result rows the panel shows before its list scrolls, or **Auto**; **Use N** picks the count recommended for the display the panel opens on. See [Rows](../configuration.md#rows) |
+| **Launch at login**                                        | Starts Dupin at login; see [Launch at login](#launch-at-login)                                                                                                                                 |
+| **Anonymous usage ping**                                   | Turns off the one anonymous ping a day an official release sends; **Details** opens [Telemetry](./telemetry.md)                                                                                |
+| **Relaunch**                                               | Restarts Dupin, installing a staged update first                                                                                                                                               |
+| General → Advanced → Configuration → **Open file**         | Opens config.toml in its default editor                                                                                                                                                        |
+| General → Advanced → Configuration → **Open folder**       | Shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist                                                                            |
+| **Show Welcome**                                           | Brings back the [first-run](#first-run) welcome                                                                                                                                                |
+| **Acknowledgements**                                       | Opens the licences and copyright notices of the open-source code and data Dupin includes                                                                                                       |
 
 ## Notes
 

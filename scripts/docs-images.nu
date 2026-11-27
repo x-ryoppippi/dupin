@@ -14,6 +14,8 @@ const CLIP_SCALE = 1.25
 export const CLIP_FPS = 10
 # Clips render this many points tall, more than the panel ever is, and are cut to it.
 const CLIP_HEIGHT = 720
+# A window image's content is measured this many points tall, more than any page grows to.
+const MEASURE_HEIGHT = 4000
 # Room below the panel for the captions, so they never cover a row.
 export const CAPTION_SPACE = 60
 # How tall the website's home demo frame is, in points, for a width of 680. A home clip is at
@@ -337,7 +339,11 @@ def render-scenario [
     let size = if $image.window? == null {
         $"680x(open $tree | panel-height)"
     } else {
-        $"($image.width)x(open $tree | content-height)"
+        # Measured again at the image's width, where text wraps as it will in the image, and far
+        # taller than any page, so nothing scrolls out of the measurement.
+        let tall = $tmp | path join $"(image-id $image | str replace --all / -)-tall.json"
+        headless-in $environment $bin ...$script --theme dark --tree $tall --size $"($image.width)x($MEASURE_HEIGHT)"
+        $"($image.width)x([(open $tree | get viewport.1) (open $tall | content-height)] | math max | math ceil)"
     }
     image-paths $image | zip (image-themes $image) | each {|pair|
         (
@@ -692,11 +698,17 @@ export def scratch-environment [
     $environment
 }
 
-# How tall a window must be to show all of its content, in points: the lowest edge of any laid
-# out element, with the window's own margin below it.
+# How tall a window must be to show all of its content, in points, from a tree laid out
+# `MEASURE_HEIGHT` tall: the lowest edge of any element in the top half, with a gap and the
+# window's own margin below it. What reaches the bottom half is pinned to the window's bottom
+# edge (a sidebar, its footer, a page's scroll view), not content.
 def content-height []: record -> int {
-    let bottom = $in.elements | where rect? != null | each {|element| $element.rect.1 + $element.rect.3 } | math max
-    $bottom + 16 | math ceil
+    let bottom = $in.elements
+    | where rect? != null
+    | each {|element| $element.rect.1 + $element.rect.3 }
+    | where $it < $MEASURE_HEIGHT / 2
+    | math max
+    $bottom + 24 | math ceil
 }
 
 # A usage history in which the home opened `recent`, the first most often, each an hour before

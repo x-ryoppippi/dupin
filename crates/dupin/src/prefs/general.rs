@@ -1,5 +1,5 @@
 use dupin_core::config::HotkeyTarget;
-use dupin_core::{DisplaySelection, InputSource, Position};
+use dupin_core::{DisplaySelection, InputSource, Position, Rows};
 use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
 use rune::{El, Shortcut, Tx, col, icon, row, text};
 use rune_kit::{Button, ButtonVariant, Kit, Switch};
@@ -13,6 +13,7 @@ use crate::icons;
 
 const DISPLAY: &str = "display";
 const POSITION: &str = "position";
+const ROWS: &str = "rows";
 const INPUT_SOURCE: &str = "input-source";
 
 pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
@@ -21,6 +22,7 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
         selection_hotkey_setting(s, k),
         display_setting(s, k),
         position_setting(s, k),
+        rows_setting(s, k),
         input_source_setting(s, k),
         login_setting(s, k),
     ];
@@ -191,6 +193,7 @@ fn pick_display(s: &mut Prefs, tx: &mut Tx) {
         |s, id| {
             if let Some(value) = CHOICES.into_iter().find(|value| display_option(*value).0 == id) {
                 s.set(|config| config.display = value);
+                s.panel_screen = crate::ui::PanelScreen::current(value);
             }
         },
     );
@@ -250,6 +253,81 @@ fn position_title(position: Position) -> &'static str {
         Position::Center => "Center",
         Position::Top => "Top",
         Position::Bottom => "Bottom",
+    }
+}
+
+/// The row count recommended for the panel's display, and how many rows the configured count
+/// shows there.
+fn row_fit(s: &Prefs) -> (u8, usize) {
+    let room = s
+        .panel_screen
+        .map(|screen| screen.list_room(s.config.theme.panel_width, s.config.position));
+    let row_height = f32::from(s.config.theme.row_height);
+    let fit = crate::view::list_fit(room, s.config.rows, row_height);
+    (fit.recommended, crate::view::visible_rows(fit.budget, row_height))
+}
+
+fn rows_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked(ROWS);
+    let (recommended, shown) = row_fit(s);
+    let detail = match s.config.rows {
+        Rows::Count(count) if shown < usize::from(count) => {
+            format!("This display fits {shown}. Recommended for this display: {recommended}")
+        }
+        _ => format!("Recommended for this display: {recommended}"),
+    };
+    let rows = menu_value(locked, k, ROWS, "Rows", &rows_title(s.config.rows), pick_rows);
+    let mut control = row().gap(8.0).center_y();
+    if s.config.rows != Rows::Count(recommended) {
+        control = control.child(
+            Button::new(format!("Use {recommended}"))
+                .variant(ButtonVariant::Ghost)
+                .disabled(locked)
+                .on_press(move |s: &mut Prefs| s.set(|c| c.rows = Rows::Count(recommended)))
+                .build(k)
+                .key("use-recommended-rows"),
+        );
+    }
+    setting_with_lock(
+        k,
+        &icons::PANEL,
+        "Rows",
+        Some(&detail),
+        control.child(rows),
+        s.lock_note(locked),
+    )
+}
+
+fn pick_rows(s: &mut Prefs, tx: &mut Tx) {
+    let (recommended, _) = row_fit(s);
+    let options = std::iter::once(("auto".to_owned(), rows_title(Rows::Auto)))
+        .chain((Rows::MIN..=Rows::MAX).map(|count| {
+            let title = rows_title(Rows::Count(count));
+            let title = if count == recommended {
+                format!("{title} (recommended)")
+            } else {
+                title
+            };
+            (count.to_string(), title)
+        }))
+        .collect();
+    let selected = match s.config.rows {
+        Rows::Auto => "auto".to_owned(),
+        Rows::Count(count) => count.to_string(),
+    };
+    choose(tx, ROWS, options, &selected, |s, id| {
+        let rows = match id.parse() {
+            Ok(count) => Rows::Count(count),
+            Err(_) => Rows::Auto,
+        };
+        s.set(|c| c.rows = rows);
+    });
+}
+
+fn rows_title(rows: Rows) -> String {
+    match rows {
+        Rows::Auto => "Auto".to_owned(),
+        Rows::Count(count) => count.to_string(),
     }
 }
 
