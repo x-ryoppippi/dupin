@@ -33,7 +33,7 @@ fn manifest(name: &str, extra: Value) -> String {
 
 fn control() -> dupin_js_runtime::Control {
     dupin_js_runtime::Control {
-        deadline: Instant::now() + Duration::from_secs(2),
+        deadline: (Instant::now() + Duration::from_secs(2)).into(),
         is_cancelled: Box::new(|| false),
     }
 }

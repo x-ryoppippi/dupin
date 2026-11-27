@@ -414,7 +414,6 @@ impl services::Exec for Programs {
 #[cfg(test)]
 mod tests {
     use std::os::unix::process::ExitStatusExt;
-    use std::time::Instant;
 
     use dupin_js_runtime::{ActionEffect, PageContext};
     use serde_json::json;
@@ -459,7 +458,7 @@ mod tests {
                     name,
                     &data,
                     &PageContext::default(),
-                    Instant::now() + ACTION_DEADLINE,
+                    crate::extensions::deadline_in(ACTION_DEADLINE),
                     &call.services,
                 )
                 .unwrap();

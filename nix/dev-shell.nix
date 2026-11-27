@@ -39,7 +39,7 @@
         # The captions' typeface, the same on every Mac.
         DUPIN_CAPTION_FONT = "${pkgs.inter}/share/fonts/truetype/InterVariable.ttf";
         # Installs the pre-commit and pre-push hooks from nix/git-hooks.nix.
-        shellHook = config.pre-commit.shellHook;
+        shellHook = config.gitHooks.shellHook;
       };
     };
 }

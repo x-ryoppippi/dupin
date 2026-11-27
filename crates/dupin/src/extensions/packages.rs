@@ -32,7 +32,8 @@ pub enum Kind {
 pub struct Listed {
     pub package: PackageId,
     pub title: String,
-    pub keyword: String,
+    /// `None` for a package that ships as a built-in answering the main search.
+    pub keyword: Option<String>,
     /// The package's own icon.
     pub icon: Option<dupin_core::Icon>,
     pub kind: Kind,

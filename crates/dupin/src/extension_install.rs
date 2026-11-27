@@ -270,11 +270,14 @@ fn delete_data(storage: Option<&Arc<Storage>>, name: &str, launcher: Launcher<'_
 
 /// Who already answers a keyword in the launcher: a bundled extension, or a command of the
 /// effective configuration.
-fn routed_keywords(bundled: Vec<(PathBuf, String, String)>) -> impl Fn(&str) -> Option<String> {
+fn routed_keywords(bundled: Vec<(PathBuf, String, Option<String>)>) -> impl Fn(&str) -> Option<String> {
     let (config, ..) = crate::settings::load(&crate::settings::Paths::discover());
     let commands = crate::commands::configured(&config).ok();
     move |keyword| {
-        if let Some((_, name, _)) = bundled.iter().find(|(.., bundled)| bundled == keyword) {
+        if let Some((_, name, _)) = bundled
+            .iter()
+            .find(|(.., bundled)| bundled.as_deref() == Some(keyword))
+        {
             return Some(format!("the bundled `{name}` extension"));
         }
         let commands = commands.as_ref()?;

@@ -705,7 +705,7 @@ impl Provider for ExtensionProvider {
         } else {
             self.role
         };
-        let deadline = Instant::now() + QUERY_DEADLINE;
+        let deadline = crate::extensions::deadline_in(QUERY_DEADLINE);
         let id = &self.extension.package;
         // A main search the package may not see runs nothing, and asks nothing while typing.
         let seen = if role == Role::MainSearch {
@@ -1109,7 +1109,7 @@ mod tests {
         let root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
         let extension = super::super::load_folder(&root).unwrap();
-        assert_eq!(extension.keyword, "wc");
+        assert_eq!(extension.keyword.as_deref(), Some("wc"));
         let rows = search(&ExtensionProvider::new(extension), "two words");
         assert_eq!(rows.len(), 1);
         assert_eq!(

@@ -82,7 +82,7 @@ pub fn resources(executable: &Path) -> Option<PathBuf> {
 }
 
 /// Each bundled package's folder, with the `name` and keyword in its package.json.
-pub fn packages(bundled: &Path) -> Vec<(PathBuf, String, String)> {
+pub fn packages(bundled: &Path) -> Vec<(PathBuf, String, Option<String>)> {
     let Ok(entries) = std::fs::read_dir(bundled) else {
         return Vec::new();
     };
@@ -209,6 +209,26 @@ mod tests {
         }
     }
 
+    /// Dupin reads `name`, `version` and `dupin` from package.json and ignores the rest, so a
+    /// bundled package says anything else in its README, where someone reads it.
+    #[test]
+    fn a_bundled_package_json_holds_only_what_dupin_or_npm_reads() {
+        let packages = packages(&directory().unwrap());
+        assert!(!packages.is_empty());
+        for (folder, name, _) in packages {
+            let package: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_slice(&std::fs::read(folder.join("package.json")).unwrap()).unwrap();
+            let ignored: Vec<_> = package
+                .keys()
+                .filter(|key| !["name", "version", "private", "dupin"].contains(&key.as_str()))
+                .collect();
+            assert!(
+                ignored.is_empty(),
+                "{name}'s package.json has {ignored:?}, which Dupin ignores"
+            );
+        }
+    }
+
     #[test]
     fn a_folder_the_build_did_not_seal_is_refused() {
         let bundled = tempfile::tempdir().unwrap();
@@ -241,7 +261,7 @@ mod tests {
             .query(
                 "report",
                 10,
-                std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                crate::extensions::deadline_in(crate::extensions::QUERY_DEADLINE),
                 || false,
                 &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )

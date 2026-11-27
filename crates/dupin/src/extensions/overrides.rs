@@ -308,13 +308,16 @@ impl Override {
                 None,
                 "a built-in copy's own keyword is ignored"
             );
-            // A built-in in the main search has no keyword, and the copy takes none.
-            let keyword =
-                (crate::features::ported_role(self.name) == super::Role::Keyword).then_some(&self.command);
+            // A built-in in the main search has no keyword, and its package declares none.
+            let expected = (crate::features::ported_role(self.name) == super::Role::Keyword)
+                .then_some(Some(&self.command));
             assert_eq!(
-                configured.registry.keyword(&original.keyword),
-                keyword,
-                "it answers the built-in's keyword"
+                original
+                    .keyword
+                    .as_deref()
+                    .map(|keyword| configured.registry.keyword(keyword)),
+                expected,
+                "it declares the keyword the built-in answers, and only then"
             );
         } else {
             assert_eq!(configured.registry.keyword(EDITED_KEYWORD), Some(&self.command));

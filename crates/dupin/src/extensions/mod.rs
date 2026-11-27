@@ -52,7 +52,8 @@ pub struct Extension {
     pub folder_name: String,
     pub name: String,
     pub version: String,
-    pub keyword: String,
+    /// `None` for a package that ships as a built-in answering the main search.
+    pub keyword: Option<String>,
     /// The package's folder, which row icons are relative to.
     pub root: PathBuf,
     /// The package's own icon: its keyword chip's, its heading's in Settings and that of each
@@ -312,7 +313,7 @@ impl Extension {
             .name(format!("catalogue-{}", self.id))
             .spawn(move || {
                 let never = || false;
-                let deadline = Instant::now() + QUERY_DEADLINE;
+                let deadline = crate::extensions::deadline_in(QUERY_DEADLINE);
                 let refreshed = extension.catalogue.refresh_stale(
                     &settings,
                     generation,
@@ -412,14 +413,17 @@ impl Extension {
 
     /// Logs, once, that the package's web searches reach only its own keyword.
     fn note_keyword_only_web_searches(&self) {
+        let Some(keyword) = &self.keyword else {
+            return;
+        };
         if crate::web::reaches_main_search(&self.package)
             || self.web_searches_noted.swap(true, Ordering::Relaxed)
         {
             return;
         }
         crate::log::warn(&format!(
-            "extension {}: its web searches are listed only under its keyword `{}`; only the bundled Web Search package adds aliases and fallbacks to the main search",
-            self.id, self.keyword
+            "extension {}: its web searches are listed only under its keyword `{keyword}`; only the bundled Web Search package adds aliases and fallbacks to the main search",
+            self.id
         ));
     }
 
@@ -462,22 +466,32 @@ impl Extension {
     }
 }
 
-/// Starts the copies of the fixture `dupin ext render` renders, once the headless launcher's
-/// first frame starts its script.
-pub(crate) fn headless_ready() {
+/// Hands over the copies of the fixture `dupin ext render` renders that the headless
+/// launcher's script `clock` has reached.
+pub(crate) fn play_headless_copies(clock: f64) {
     if let Some(fixture) = fixtures::headless() {
-        fixture.play_events();
+        fixture.play_events(clock);
     }
 }
 
 /// The one extension host every JavaScript extension shares, which starts a trust domain's
 /// helper on that domain's first query. Every bundled package's calls queue for one helper, and
-/// the wait counts against each call's deadline.
+/// the wait counts against each call's deadline. A headless run renders as a fixture replays, so
+/// its host replays too, holding guests to the processor time they spend.
 fn host() -> &'static Host {
     launcher_wide!(
         Host,
-        Host::fixed(Box::new(helper_command), headless_environment())
+        match headless_environment() {
+            Some(environment) => Host::replaying(Box::new(helper_command), environment),
+            None => Host::new(Box::new(helper_command)),
+        }
     )
+}
+
+/// The moment `within` from now on the extension host's clock, which every deadline of a call
+/// to an extension is measured against.
+pub fn deadline_in(within: std::time::Duration) -> Instant {
+    host().now() + within
 }
 
 /// The process ID and processor time of the helper that runs `extension`'s searches.
@@ -510,6 +524,11 @@ impl Clock {
             fixed: Some(now),
             ..Self::launcher()
         }
+    }
+
+    /// Whether it stands at one moment, as the guests' clock does in a fixture.
+    pub(crate) fn is_fixed(self) -> bool {
+        self.fixed.is_some()
     }
 
     /// Unix milliseconds.
@@ -778,7 +797,7 @@ pub(crate) fn load_bundled(folder: &Path) -> Result<Arc<Extension>, Diagnostic> 
 pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     let extension = load_folder(folder)?;
     extension
-        .check(Instant::now() + QUERY_DEADLINE)
+        .check(crate::extensions::deadline_in(QUERY_DEADLINE))
         .map_err(|error| match error {
             RunError::Failed(diagnostic) => diagnostic,
             RunError::Cancelled => Diagnostic::new("cancelled", "the check was cancelled"),
@@ -1110,7 +1129,7 @@ pub(crate) mod tests {
             id,
             name: name.into(),
             version: "1.0.0".into(),
-            keyword: keyword.into(),
+            keyword: Some(keyword.into()),
             root: PathBuf::from("/fixture"),
             icon: None,
             default_search: false,
@@ -1190,7 +1209,7 @@ pub(crate) mod tests {
             let keywords = catalog
                 .extensions
                 .iter()
-                .map(|extension| extension.keyword.as_str());
+                .filter_map(|extension| extension.keyword.as_deref());
             if keywords.eq(keyword) {
                 assert!(catalog.problems.is_empty(), "{:?}", catalog.problems);
                 return;
@@ -1395,7 +1414,7 @@ pub(crate) mod tests {
         let reloaded = scanner.update(&directory, None).unwrap();
         assert!(Arc::ptr_eq(&updated.extensions[0], &reloaded.extensions[0]));
         assert!(!Arc::ptr_eq(&updated.extensions[1], &reloaded.extensions[1]));
-        assert_eq!(reloaded.extensions[1].keyword, "reloaded");
+        assert_eq!(reloaded.extensions[1].keyword.as_deref(), Some("reloaded"));
         assert!(scanner.update(&directory, None).is_none());
 
         fs::remove_file(directory.join("one/main.js")).unwrap();
@@ -1462,8 +1481,8 @@ pub(crate) mod tests {
         assert_eq!(ids, ["words"]);
         let words = &catalog.extensions[0];
         assert_eq!(
-            (words.name.as_str(), words.keyword.as_str()),
-            ("Word Count", "wc")
+            (words.name.as_str(), words.keyword.as_deref()),
+            ("Word Count", Some("wc"))
         );
         let problems = catalog.problems.join("\n");
         for (folder, reason) in [
@@ -1704,7 +1723,7 @@ pub(crate) mod tests {
             .query(
                 "",
                 10,
-                Instant::now() + QUERY_DEADLINE,
+                crate::extensions::deadline_in(QUERY_DEADLINE),
                 || false,
                 &(Arc::new(dupin_extension_host::NoServices) as _),
             )

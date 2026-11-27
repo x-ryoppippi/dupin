@@ -217,7 +217,7 @@ fn a_request_nobody_answers_ends_at_the_deadline_and_cancelling_ends_it_quietly(
         flag.store(true, Ordering::Relaxed);
     });
     let control = Control {
-        deadline: Instant::now() + DEADLINE,
+        deadline: (Instant::now() + DEADLINE).into(),
         is_cancelled: Box::new(move || cancelled.load(Ordering::Relaxed)),
     };
     assert_eq!(

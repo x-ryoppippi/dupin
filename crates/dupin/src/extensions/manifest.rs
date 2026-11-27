@@ -41,7 +41,8 @@ pub(super) struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
-    pub keyword: String,
+    /// `None` only for a package that ships as a built-in answering the main search.
+    pub keyword: Option<String>,
     /// What its keyword chip, Settings and its rows without an icon of their own show.
     pub icon: Option<PackageIcon>,
     /// Relative to the folder: a JavaScript or TypeScript module.
@@ -377,7 +378,7 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         id: required(package, "name", "name", ID_HINT)?,
         name: required(dupin, "title", "dupin.title", TITLE_HINT)?,
         version: required(package, "version", "version", VERSION_HINT)?,
-        keyword: required(dupin, "keyword", "dupin.keyword", KEYWORD_HINT)?,
+        keyword: string(dupin, "keyword", "dupin.keyword", KEYWORD_HINT)?,
         icon: string(dupin, "icon", "dupin.icon", ICON_HINT)?
             .map(|icon| parse_icon(&icon))
             .transpose()?,
@@ -495,12 +496,18 @@ fn validate(manifest: &Manifest) -> Result<(), Diagnostic> {
             VERSION_HINT,
         ));
     }
-    if manifest.keyword.is_empty() || manifest.keyword.len() > 32 || !unspaced(&manifest.keyword) {
-        return Err(invalid(
-            "dupin.keyword",
-            "must be 1–32 bytes without spaces",
-            KEYWORD_HINT,
-        ));
+    match &manifest.keyword {
+        Some(keyword) if keyword.is_empty() || keyword.len() > 32 || !unspaced(keyword) => {
+            return Err(invalid(
+                "dupin.keyword",
+                "must be 1–32 bytes without spaces",
+                KEYWORD_HINT,
+            ));
+        }
+        None if crate::features::ported_role(id) != super::Role::MainSearch => {
+            return Err(invalid("dupin.keyword", "is missing", KEYWORD_HINT));
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -552,10 +559,10 @@ mod tests {
                 manifest.id.as_str(),
                 manifest.name.as_str(),
                 manifest.version.as_str(),
-                manifest.keyword.as_str(),
+                manifest.keyword.as_deref(),
                 manifest.entry.as_str()
             ),
-            ("word-count", "Word Count", "0.1.0", "wc", "main.js")
+            ("word-count", "Word Count", "0.1.0", Some("wc"), "main.js")
         );
         let manifest = read_folder(&[(
             PACKAGE_JSON,
@@ -580,6 +587,24 @@ mod tests {
     }
 
     #[test]
+    fn only_a_package_that_answers_the_main_search_as_a_built_in_declares_no_keyword() {
+        let keywordless = |name: &str| {
+            read_folder(&[(
+                PACKAGE_JSON,
+                &format!(r#"{{"name": "{name}", "version": "0.1.0", "dupin": {{"title": "W"}}}}"#),
+            )])
+        };
+        assert_eq!(keywordless("calculator").unwrap().keyword, None);
+        for name in ["dictionary", "word-count"] {
+            assert_eq!(
+                keywordless(name).err().unwrap().field.as_deref(),
+                Some("dupin.keyword"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn package_json_problems_name_the_field_at_fault() {
         for (dupin, code, field) in [
             (
@@ -588,6 +613,7 @@ mod tests {
                 "dupin.entry",
             ),
             (r#"{"keyword": "wc"}"#, "invalid-manifest", "dupin.title"),
+            (r#"{"title": "W"}"#, "invalid-manifest", "dupin.keyword"),
             (
                 r#"{"title": "W", "keyword": "w c"}"#,
                 "invalid-manifest",

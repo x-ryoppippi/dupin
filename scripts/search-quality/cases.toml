@@ -293,6 +293,12 @@ query = "find my"
 tags = ["prefix"]
 
 [[cases]]
+id = "prefix.finder"
+intent = "app:Finder"
+query = "finder"
+tags = ["prefix"]
+
+[[cases]]
 id = "prefix.final-cut"
 intent = "app:Final Cut Pro"
 query = "final cut"
@@ -711,6 +717,13 @@ tags = ["prefix", "keyword"]
 id = "fresh.safari"
 intent = "app:Safari"
 query = "safari"
+history = []
+tags = ["prefix", "fresh"]
+
+[[cases]]
+id = "fresh.finder"
+intent = "app:Finder"
+query = "finder"
 history = []
 tags = ["prefix", "fresh"]
 
@@ -1334,12 +1347,6 @@ query = "cal"
 tags = ["keyword"]
 
 [[cases]]
-id = "keyword.calc"
-intent = "command:calculator.evaluate"
-query = "calc"
-tags = ["keyword"]
-
-[[cases]]
 id = "keyword.d"
 intent = "command:dictionary.lookup"
 query = "d"
@@ -1417,12 +1424,6 @@ id = "keyword.calendar-app-over-cal"
 intent = "app:Calendar"
 query = "cale"
 tags = ["keyword", "prefix", "history"]
-
-[[cases]]
-id = "keyword.calculator-app-over-calc"
-intent = "app:Calculator"
-query = "calcu"
-tags = ["keyword", "prefix"]
 
 [[cases]]
 id = "alias.vs"
