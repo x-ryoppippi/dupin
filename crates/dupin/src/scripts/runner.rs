@@ -23,6 +23,9 @@ pub struct Start {
 
 type Notify = Arc<dyn Fn(RunId, bool) + Send + Sync>;
 type Signal = Arc<dyn Fn(i32, i32) + Send + Sync>;
+/// What a run's timeout and its grace after a cancel are measured on: the wall clock, unless a
+/// test moves the time itself.
+type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
 const EXIT_DRAIN: Duration = Duration::from_millis(100);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
 const POLL_INTERVAL_MS: i32 = 20;
@@ -98,6 +101,7 @@ struct Group {
 struct Lifecycle {
     state: Mutex<LifecycleState>,
     signal: Signal,
+    clock: Clock,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -208,11 +212,16 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(home: PathBuf, notify: Notify) -> Self {
+        Self::timed(home, notify, Arc::new(Instant::now))
+    }
+
+    fn timed(home: PathBuf, notify: Notify, clock: Clock) -> Self {
         Self {
             inner: Arc::new(Inner {
                 lifecycle: Lifecycle {
                     state: Mutex::default(),
                     signal: Arc::new(signal_group),
+                    clock,
                 },
                 runs: Mutex::default(),
                 next: AtomicU64::new(1),
@@ -434,7 +443,7 @@ impl exec::Spawn for Runner {
                 .envs(variables.iter().map(|(name, value)| (name, value)));
         }
         let id = inner.next.fetch_add(1, Ordering::Relaxed);
-        let deadline = Instant::now() + launch.timeout;
+        let deadline = (inner.lifecycle.clock)() + launch.timeout;
         let mut output = BoundedOutput {
             limit: launch.output_bytes,
             ..BoundedOutput::default()
@@ -455,7 +464,7 @@ impl exec::Spawn for Runner {
             Status::Exited(Some(code)) => exec::Exit::Code(code),
             Status::Exited(None) => exec::Exit::Signal,
             Status::Cancelled if cancel.load(Ordering::Acquire) => exec::Exit::Cancelled,
-            Status::Cancelled if Instant::now() >= deadline => exec::Exit::TimedOut,
+            Status::Cancelled if (inner.lifecycle.clock)() >= deadline => exec::Exit::TimedOut,
             Status::Cancelled => return Err("Dupin is shutting down.".into()),
             Status::Failed(problem) => return Err(problem),
             Status::Running => unreachable!("execute returns only after the process is reaped"),
@@ -719,11 +728,10 @@ fn execute(
     let mut notified = Instant::now();
     loop {
         if exited.is_none() {
-            if cancelled.load(Ordering::Acquire)
-                || bounds.deadline.is_some_and(|deadline| Instant::now() >= deadline)
-            {
-                let started = cancel_at.get_or_insert_with(Instant::now);
-                let force = started.elapsed() >= CANCEL_GRACE;
+            let now = (lifecycle.clock)();
+            if cancelled.load(Ordering::Acquire) || bounds.deadline.is_some_and(|deadline| now >= deadline) {
+                let started = *cancel_at.get_or_insert(now);
+                let force = now.saturating_duration_since(started) >= CANCEL_GRACE;
                 lifecycle.cancel(id, force);
             }
             match lifecycle.reap(id, leader_exited, || child.try_wait()) {
@@ -819,6 +827,7 @@ mod tests {
         let lifecycle = Arc::new(Lifecycle {
             state: Mutex::default(),
             signal: Arc::new(move |pgid, signal| lock(&captured).push((pgid, signal))),
+            clock: Arc::new(Instant::now),
         });
         (lifecycle, signals)
     }
@@ -1371,13 +1380,33 @@ mod tests {
     #[test]
     fn extension_timeouts_kill_the_whole_process_group() {
         let fixture = Fixture::new("sleep 60 &\nprintf '%s\\n' $! > child\nwait\n");
-        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        // The run's time passes its timeout once its child has started, and never reaches the
+        // grace after which the group is killed, so the timeout's terminate alone must end it.
+        let passed = Arc::new(AtomicBool::new(false));
+        let start = Instant::now();
         let mut run = launch(fixture.0.join("run"), &[]);
         run.timeout = Duration::from_millis(500);
-        let started = Instant::now();
-        assert_eq!(spawn(&runner, &run).unwrap().exit, exec::Exit::TimedOut);
-        assert!(started.elapsed() >= run.timeout);
-        assert!(started.elapsed() < run.timeout + CANCEL_GRACE);
+        let timeout = run.timeout;
+        let clock: Clock = {
+            let passed = passed.clone();
+            Arc::new(move || {
+                start
+                    + if passed.load(Ordering::Acquire) {
+                        timeout
+                    } else {
+                        Duration::ZERO
+                    }
+            })
+        };
+        let runner = Runner::timed(fixture.0.clone(), Arc::new(|_, _| {}), clock);
+        let completion = thread::scope(|scope| {
+            scope.spawn(|| {
+                fixture.wait_for_line("child");
+                passed.store(true, Ordering::Release);
+            });
+            spawn(&runner, &run).unwrap()
+        });
+        assert_eq!(completion.exit, exec::Exit::TimedOut);
         assert_gone(&fixture, "child");
         assert_eq!(runner.inner.running_extension_commands.load(Ordering::Acquire), 0);
         assert!(lock(&runner.inner.lifecycle.state).groups.is_empty());

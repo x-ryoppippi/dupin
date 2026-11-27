@@ -348,7 +348,9 @@ impl Cached {
         drop(held);
         let weight = |shared: &Shared| shared.bytes.load(Ordering::Relaxed);
         let mut total = weight(&self.shared) + others.iter().map(|shared| weight(shared)).sum::<usize>();
-        others.sort_by_key(|shared| shared.used.load(Ordering::Relaxed));
+        // Searches on other threads mark catalogues used while this sorts, so each is ordered by
+        // when it was used as read once: a key that moves mid-sort isn't a total order.
+        others.sort_by_cached_key(|shared| shared.used.load(Ordering::Relaxed));
         for other in others {
             if total <= BUDGET_BYTES {
                 return;
