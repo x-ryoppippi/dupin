@@ -72,10 +72,14 @@ export def --wrapped headless [bin: path, ...args: string]: nothing -> nothing {
     }
 }
 
-# Run Dupin headless with exactly `environment`, inheriting none of this shell's, as
-# `dupin ext render` runs its own: a variable left over from the shell, such as `DO_NOT_TRACK`,
-# would otherwise change what a render draws.
+# The arguments to `/usr/bin/env` that start a command with exactly `environment`, inheriting
+# none of this shell's, as `dupin ext render` starts its own: a variable left over from the shell,
+# such as `DO_NOT_TRACK`, would otherwise change what a render or recording draws.
+export def only-env [environment: record]: nothing -> list<string> {
+    $environment | transpose name value | each {|variable| $"($variable.name)=($variable.value)" } | prepend "-i"
+}
+
+# Run Dupin headless with exactly `environment`.
 export def --wrapped headless-in [environment: record, bin: path, ...args: string]: nothing -> nothing {
-    let variables = $environment | transpose name value | each {|variable| $"($variable.name)=($variable.value)" }
-    headless /usr/bin/env -i ...$variables $bin ...$args
+    headless /usr/bin/env ...(only-env $environment) $bin ...$args
 }
