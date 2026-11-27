@@ -15,6 +15,7 @@ use docs-images.nu [
     scratch-environment
 ]
 use e2e/keys.nu key-script
+use headless-config.nu only-env
 
 const STAGE = path self docs-glass/Stage.swift
 # Wallpaper around the panel, in points, so the glass's edge shows against it.
@@ -363,6 +364,30 @@ def draw-landscape [
     )
 }
 
+# The whole environment a clip's Dupin is launched with, and nothing of this shell's: the scratch
+# home and configuration the headless clips use, a runtime directory of its own for its control
+# socket, and `DUPIN_RECORDING`, so that it lists only the fixture apps and keeps its history in a
+# scratch store, as a headless run does. The window server is reached through the session the
+# process inherits, not a variable. Telemetry is off whatever the build, so a recording never
+# sends a ping or shows its notice.
+export def recording-environment [clip: record, manifest: record, tmp: path]: nothing -> record {
+    let name = image-id $clip | str replace --all / -
+    # Glass is the panel with no backdrop shader.
+    let environment = scratch-environment ($clip.fixtures? | default ($tmp | path join none.json)) ($clip | reject --optional backdrop) $manifest $tmp
+    let config = $environment.XDG_CONFIG_HOME | path join dupin config.toml
+    # No hotkey, so it never takes the one a Dupin already running here holds: `dupin open`
+    # shows its panel instead.
+    open $config | upsert hotkey "" | upsert auto_update false | to toml | save --force $config
+    let runtime = $tmp | path join $"($name)-runtime"
+    mkdir $runtime
+    ^chmod 700 $runtime
+    $environment | merge {
+        XDG_RUNTIME_DIR: $runtime
+        DUPIN_RECORDING: "1"
+        DUPIN_TELEMETRY_DISABLED: "1"
+    }
+}
+
 # One clip: Dupin over the wallpaper, its steps pressed in time, the screen recorded around the
 # panel with the captions below it.
 def record-clip [
@@ -377,21 +402,12 @@ def record-clip [
     let name = $id | str replace --all / -
     print --stderr $"recording ($id)"
     let timeline = clip-timeline $clip.steps
-    # Glass is the panel with no backdrop shader.
-    let environment = scratch-environment ($clip.fixtures? | default ($tmp | path join none.json)) ($clip | reject --optional backdrop) $manifest $tmp
-    let config = $environment.XDG_CONFIG_HOME | path join dupin config.toml
-    # No hotkey, so it never takes the one a Dupin already running here holds: `dupin open`
-    # shows its panel instead.
-    open $config | upsert hotkey "" | upsert auto_update false | to toml | save --force $config
-    let runtime = $tmp | path join $"($name)-runtime"
-    mkdir $runtime
-    ^chmod 700 $runtime
-    # A launch with this scratch home lists only the fixture apps and keeps its history in a
-    # scratch store, as a headless run does, so nothing of this Mac shows.
-    let environment = $environment | merge {XDG_RUNTIME_DIR: $runtime, DUPIN_RECORDING: "1"}
+    let environment = recording-environment $clip $manifest $tmp
+    let launch = only-env $environment
+    let runtime = $environment.XDG_RUNTIME_DIR
     let log = $tmp | path join $"($name).log"
     let backdrop = job spawn { ^$stage wallpaper $wallpaper }
-    let dupin = job spawn { with-env $environment { ^$binary o+e> $log } }
+    let dupin = job spawn { ^/usr/bin/env ...$launch $binary o+e> $log }
     let outcome = try {
         # Its control socket is there once it has started.
         wait-for $"($id) to start; see ($log)" {
@@ -417,7 +433,7 @@ def record-clip [
         let started = (date now) - ($written * 1us)
         wait-for $"($id) to open; see ($log)" {
             (
-                with-env $environment { ^$binary open | complete }
+                ^/usr/bin/env ...$launch $binary open | complete
             ).exit_code == 0
         }
         let pid = dupin-pid $binary
