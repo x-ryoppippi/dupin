@@ -512,6 +512,11 @@ impl Clock {
         }
     }
 
+    /// Whether it stands at one moment, as the guests' clock does in a fixture.
+    pub(crate) fn is_fixed(self) -> bool {
+        self.fixed.is_some()
+    }
+
     /// Unix milliseconds.
     pub(crate) fn now_ms(self) -> u64 {
         self.fixed
