@@ -737,7 +737,7 @@ mod tests {
         let current = Rc::new(RefCell::new(Config::default()));
         let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
         let state = state(current, settings, false);
-        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        let mut runtime = rune::Runtime::new(state, view, (SIZE.0, SIZE.1 + 240.0), rune::Env::default());
         let controls = [
             ("hotkey", "Show Dupin", Role::Button),
             ("selection_hotkey", "Search selected text", Role::Button),
