@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path id="body" fill="#14282F" d="M 330 100 H 694 C 854 100 924 170 924 330 V 694 C 924 854 854 924 694 924 H 330 C 170 924 100 854 100 694 V 330 C 100 170 170 100 330 100 Z"/>
+  <g id="spectacles" fill="none" stroke="#F2ECD9" stroke-width="38" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 198 452 L 238 484 M 786 484 L 826 452 M 454 501 Q 512 461 570 501"/>
+    <circle cx="346" cy="524" r="113" fill="#70B88D"/>
+    <circle cx="678" cy="524" r="113" fill="#70B88D"/>
+  </g>
+</svg>

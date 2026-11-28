@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path id="body" fill="#F2ECD9" d="M 330 100 H 694 C 854 100 924 170 924 330 V 694 C 924 854 854 924 694 924 H 330 C 170 924 100 854 100 694 V 330 C 100 170 170 100 330 100 Z"/>
+  <g id="spectacles" stroke="#14282F" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+    <path fill="none" d="M 202 450 L 250 478 M 774 478 L 822 450 M 456 498 Q 512 453 568 498"/>
+    <path fill="#428862" d="M 246 481 C 246 441 448 441 458 481 C 483 578 435 614 353 614 C 279 614 246 576 246 481 Z M 778 481 C 778 441 576 441 566 481 C 541 578 589 614 671 614 C 745 614 778 576 778 481 Z"/>
+  </g>
+</svg>

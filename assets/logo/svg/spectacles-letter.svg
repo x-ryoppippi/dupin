@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path id="body" fill="#14282F" d="M 330 100 H 694 C 854 100 924 170 924 330 V 694 C 924 854 854 924 694 924 H 330 C 170 924 100 854 100 694 V 330 C 100 170 170 100 330 100 Z"/>
+  <path id="letter" fill="#F2ECD9" d="M 270 333 L 733 301 L 765 708 L 302 740 Z"/>
+  <path id="fold" fill="none" stroke="#C7C2AC" stroke-width="22" stroke-linejoin="round" d="M 287 355 L 518 501 L 720 331"/>
+  <g id="spectacles" fill="#70B88D" stroke="#14282F" stroke-width="32" stroke-linecap="round" stroke-linejoin="round">
+    <path fill="none" d="M 233 520 L 274 548 M 750 548 L 791 520 M 463 565 Q 512 529 561 565"/>
+    <circle cx="367" cy="584" r="100"/>
+    <circle cx="657" cy="584" r="100"/>
+  </g>
+</svg>
