@@ -138,13 +138,13 @@ const CASES = [
 function search(query, _ctx) {
 	const input = query.trim();
 	if (!input) return [];
-	return CASES.map(([name, convert]) => {
+	return CASES.flatMap(([name, convert]) => {
 		const converted = convert(input);
-		return {
+		return converted ? [{
 			title: converted,
 			subtitle: name,
 			text: converted
-		};
+		}] : [];
 	});
 }
 export { search };

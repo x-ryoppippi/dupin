@@ -12,8 +12,8 @@ const CASES = [
 export function search(query: string, _ctx: SearchContext): Item[] {
 	const input = query.trim();
 	if (!input) return [];
-	return CASES.map(([name, convert]) => {
+	return CASES.flatMap(([name, convert]) => {
 		const converted = convert(input);
-		return { title: converted, subtitle: name, text: converted };
+		return converted ? [{ title: converted, subtitle: name, text: converted }] : [];
 	});
 }
