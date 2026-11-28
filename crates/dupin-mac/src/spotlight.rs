@@ -2,6 +2,9 @@
 //! names and streaming results as Spotlight gathers them.
 
 use std::collections::HashSet;
+use std::ffi::{CStr, CString, OsStr};
+use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -11,7 +14,7 @@ use dupin_core::file_query::{FileKind, FileQuery};
 use dupin_core::file_rank::{self, FileDates};
 use dupin_core::fuzzy;
 use dupin_core::kind::Kinds;
-use dupin_core::{Item, Provider, ProviderError, Request};
+use dupin_core::{Batch, Item, Provider, ProviderError, Request};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
@@ -23,6 +26,9 @@ use objc2_foundation::{
 /// How long the worker's run loop turns between looks at the query: short enough that a
 /// cancel lands within a frame or two and the first results show at once, long enough not to spin.
 const SLICE: Duration = Duration::from_millis(16);
+
+/// Shown in place of "No matches" when the searched disk has Spotlight indexing turned off.
+const INDEXING_OFF: &str = "Spotlight indexing is off here  ·  type ~/ in app search to browse folders";
 
 /// What a Spotlight search matches the query words against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +67,14 @@ impl SpotlightProvider {
 
 impl Provider for SpotlightProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        self.search_batches(request, &mut |batch| {
+            if !batch.items.is_empty() {
+                emit(batch.items);
+            }
+        })
+    }
+
+    fn search_batches(&self, request: &Request, emit: &mut dyn FnMut(Batch)) -> Result<(), ProviderError> {
         let file_query = match FileQuery::parse(&request.query) {
             Ok(query) => query,
             Err(_) => return Ok(()),
@@ -94,8 +108,69 @@ impl Provider for SpotlightProvider {
             now,
             kinds: &self.kinds,
         };
-        autoreleasepool(|_| run_query(request, emit, &job))
+        let mut found = false;
+        let outcome = autoreleasepool(|_| {
+            run_query(
+                request,
+                &mut |items| {
+                    found = true;
+                    emit(items.into());
+                },
+                &job,
+            )
+        });
+        // With indexing off, a query finds nothing or fails to start, which would otherwise
+        // read as "No matches" or a failure without a reason.
+        let searched = folder.as_deref().or(home.as_deref()).unwrap_or(Path::new("/"));
+        if !found
+            && !request.is_cancelled()
+            && mount_point(searched).is_some_and(|volume| indexing_off(&volume))
+        {
+            emit(Batch {
+                empty_text: Some(INDEXING_OFF.into()),
+                ..Batch::default()
+            });
+            return Ok(());
+        }
+        outcome
     }
+}
+
+fn mount_point(path: &Path) -> Option<PathBuf> {
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat = MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: `path` is NUL-terminated and `stat` is a writable statfs buffer.
+    if unsafe { libc::statfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: statfs succeeded, so it filled the buffer.
+    let stat = unsafe { stat.assume_init() };
+    // SAFETY: statfs NUL-terminates `f_mntonname` within its fixed-size array.
+    let name = unsafe { CStr::from_ptr(stat.f_mntonname.as_ptr()) };
+    Some(PathBuf::from(OsStr::from_bytes(name.to_bytes())))
+}
+
+/// macOS has no public API for a volume's indexing state; `mdutil -s` reports it.
+fn indexing_off(volume: &Path) -> bool {
+    dupin_spawn::Command::new("/usr/bin/mdutil")
+        .arg("-s")
+        .arg(volume)
+        .output()
+        .is_ok_and(|output| {
+            let mut status = String::from_utf8_lossy(&output.stdout).into_owned();
+            status.push_str(&String::from_utf8_lossy(&output.stderr));
+            reports_indexing_off(&status)
+        })
+}
+
+/// The states `mdutil -s` reports when Spotlight can't answer for the volume. An unknown or
+/// error state claims nothing.
+fn reports_indexing_off(status: &str) -> bool {
+    status.lines().map(str::trim).any(|line| {
+        line.starts_with("Indexing disabled.")
+            || line.starts_with("Indexing and searching disabled")
+            || line == "Spotlight server is disabled."
+    })
 }
 
 struct SearchJob<'a> {
@@ -482,6 +557,35 @@ mod tests {
             query_string(Target::Contents, &FileQuery::parse("quarterly rep").unwrap()).unwrap(),
             "kMDItemTextContent == \"quarterly*\"cdw && kMDItemTextContent == \"rep*\"cdw"
         );
+    }
+
+    #[test]
+    fn reads_indexing_state_from_mdutil_status() {
+        assert!(!reports_indexing_off(
+            "/System/Volumes/Data:\n\tIndexing enabled. \n"
+        ));
+        assert!(reports_indexing_off(
+            "/System/Volumes/Data:\n\tIndexing disabled.\n"
+        ));
+        assert!(reports_indexing_off(
+            "/Volumes/X:\n\tIndexing and searching disabled.\n"
+        ));
+        assert!(reports_indexing_off("/:\n\tSpotlight server is disabled.\n"));
+        assert!(!reports_indexing_off(
+            "/Users/me:\n\tError: unknown indexing state.\n"
+        ));
+        assert!(!reports_indexing_off(
+            "/Volumes/Share:\n\tServer search enabled.\n"
+        ));
+        assert!(!reports_indexing_off(
+            "/Volumes/Indexing disabled.:\n\tIndexing enabled. \n"
+        ));
+    }
+
+    #[test]
+    fn finds_the_volume_a_path_is_on() {
+        assert_eq!(mount_point(Path::new("/")), Some(PathBuf::from("/")));
+        assert!(mount_point(Path::new("/no/such/path")).is_none());
     }
 
     #[test]
