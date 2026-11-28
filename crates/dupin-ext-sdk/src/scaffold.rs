@@ -126,7 +126,7 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
 
     let mut files = vec![
         (MANIFEST_FILE, manifest),
-        ("dupin.d.ts", DECLARATIONS.to_owned()),
+        (crate::DECLARATIONS_FILE, DECLARATIONS.to_owned()),
         (
             "fixtures/search.json",
             include_str!("../templates/fixture.json").to_owned(),

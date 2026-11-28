@@ -64,7 +64,7 @@ Other keys work as everywhere in the panel; see [Keys](../usage.md#keys).
 | Settings → Extensions → **Allow**, **Revoke**                     | Allows or revokes one scope. A files or exec scope that doesn't name its file, folder or program is allowed here, where you pick it. |
 | `dupin ext install`, `list`, `update`, `remove`, `sync`, `search` | Install and manage packages.                                                                                                         |
 | `dupin ext eject NAME`                                            | See [Overriding a built-in](#overriding-a-built-in).                                                                                 |
-| `dupin ext new`, `dev`, `check`, `run`, `test`, `render`          | See [Developing and testing extensions](./extension-testing.md).                                                                     |
+| `dupin ext new`, `dev`, `check`, `run`, `test`, `render`, `types` | See [Developing and testing extensions](./extension-testing.md).                                                                     |
 
 </details>
 
