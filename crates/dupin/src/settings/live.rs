@@ -16,7 +16,6 @@ pub struct Update {
     pub revision: u64,
     pub locked_keys: Option<LockedKeys>,
     pub result: Result<Config, String>,
-    pub config_warning: Option<String>,
     pub watch_problem: Option<String>,
     pub save_problem: Option<String>,
     pub save_notice: Option<String>,
@@ -263,24 +262,14 @@ where
 
     fn emit_snapshot(&mut self, revision: u64) {
         let layers = self.paths.read();
-        let (result, locked_keys, config_warning) =
-            match layers.as_ref().map_err(String::clone).and_then(Layers::effective) {
-                Ok(effective) => {
-                    let warning = (!effective.unknown_keys.is_empty()).then(|| {
-                        format!(
-                            "Unknown configuration keys ignored: {}",
-                            effective.unknown_keys.join(", ")
-                        )
-                    });
-                    (Ok(effective.config), Some(effective.locked_keys), warning)
-                }
-                Err(error) => (Err(error), None, None),
-            };
+        let (result, locked_keys) = match layers.as_ref().map_err(String::clone).and_then(Layers::effective) {
+            Ok(effective) => (Ok(effective.config), Some(effective.locked_keys)),
+            Err(error) => (Err(error), None),
+        };
         let update = Update {
             revision,
             locked_keys,
             result,
-            config_warning,
             watch_problem: self.watch_problem.clone(),
             save_problem: self.save_problem.clone(),
             save_notice: self.save_notice.clone(),
@@ -667,6 +656,20 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(target).unwrap(), base_source);
         assert!(fs::symlink_metadata(link).unwrap().is_symlink());
+    }
+
+    #[test]
+    fn an_invalid_read_only_base_still_launches_with_what_both_layers_set() {
+        let temp = TempDir::new();
+        let (paths, _, overlay) = linked_base(&temp, "hotkey = \"alt+space\"\nfuture_setting = true\n");
+        overlay.write(&"file_limit = 71".parse().unwrap()).unwrap();
+        let (config, locked, problem) = super::super::load(&paths);
+        assert!(problem.unwrap().starts_with("config.toml is invalid at line 2"));
+        assert_eq!(locked, ["future_setting".into(), "hotkey".into()].into());
+        assert_eq!(
+            config,
+            Config::parse("hotkey = \"alt+space\"\nfile_limit = 71").unwrap()
+        );
     }
 
     #[test]

@@ -6,8 +6,6 @@ export def launcher-stage [out: path] {
     press $out press-hotkey alt+space | ignore
     let focused = {|r| is-focused-match $r }
     poll $out field $focused find --app $DUPIN --role textfield --first
-    let warning = {|r| $r.ok and ($r.data | to json --raw | str contains 'dupin_e2e_future_setting') }
-    poll $out unknown-config-warning $warning snapshot --app $DUPIN
     # Past the backdrop's fade-in, so the screenshot shows the shader.
     sleep 500ms
     evidence $out summoned

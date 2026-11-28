@@ -21,12 +21,12 @@ With `position = "bottom"` the panel is laid out as fzf and Telescope lay theirs
 Each feature's keys are on its own page; see [Feature configuration](#feature-configuration).
 
 > [!TIP]
-> If the file has an error, Dupin keeps working with the defaults (at launch) or the previous configuration (on reload), and shows the error in Settings and the next time the panel opens.
+> If the file has an error, Dupin keeps working with the settings it can read (at launch) or the previous configuration (on reload), and shows the error in Settings and the next time the panel opens.
 
 <details>
 <summary>Errors and reloads</summary>
 
-At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error.
+At launch, a parse error makes Dupin report the problem and use the defaults for what it can't read: each top-level key or table that is unknown or invalid falls back on its own, and the rest of the file still applies, so a key from a newer Dupin doesn't cost your hotkey. The file stays invalid until it's fixed, and Settings saves nothing to it meanwhile. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error.
 
 Dupin reloads changes while it runs, including atomic replacements and symlink retargets.
 
