@@ -184,8 +184,7 @@ impl Ui {
         let pinned = window.with_raw_handle(|handle| match handle.as_raw() {
             RawWindowHandle::AppKit(appkit) => {
                 // SAFETY: Rune lends this live view only for this main-thread callback.
-                unsafe { dupin_mac::window::pin_bottom_edge(appkit.ns_view, bottom) };
-                true
+                unsafe { dupin_mac::window::pin_bottom_edge(appkit.ns_view, bottom) }
             }
             _ => false,
         });
