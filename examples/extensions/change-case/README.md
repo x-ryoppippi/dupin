@@ -7,10 +7,11 @@ It is `dupin ext new change-case --bundle` with [`change-case`](https://github.c
 ## Develop
 
 ```sh
+bun install
 dupin ext dev .
 ```
 
-`dev` bundles `src/main.ts` with Rolldown, checks the package and publishes a development copy to Dupin's extensions folder whenever a file changes. Turn on **Extensions** in Settings → Search to try it in the launcher. A change that fails to build or check is reported here, and Dupin keeps the last good copy.
+`dev` bundles `src/main.ts` with Rolldown, checks the package and publishes a development copy to Dupin's extensions folder whenever a file changes. Turn on **Extensions folder** in Settings → Extensions to try it in the launcher. A change that fails to build or check is reported here, and Dupin keeps the last good copy.
 
 ```sh
 dupin ext build .
@@ -37,7 +38,7 @@ dupin ext render . fixtures/search.json search.png
 dupin ext build .
 ```
 
-Run `bun install` once first: it installs the Rolldown that `package.json` pins and writes `bun.lock`, which you commit. `build` runs that Rolldown with `rolldown.config.ts`, bundling `src/main.ts` and its npm dependencies into one module at `dist/main.js`, and fails if a dependency needs a Node built-in. Commit `dist/main.js`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds it with the same configuration and commits it on every push to `main`, installing only what `bun.lock` pins.
+Run `bun install` once first: it installs the Rolldown that `package.json` pins and writes `bun.lock`, which you commit. `build` runs that Rolldown with `rolldown.config.ts`, bundling `src/main.ts` and its npm dependencies into one module at `dist/main.js`, and fails if a dependency needs a Node built-in. Commit `dist/main.js`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds it with the same configuration whenever a push to `main` changes its sources, installing only what `bun.lock` pins, and commits it if it changed.
 
 ## Share
 

@@ -21,7 +21,7 @@ The installer reads the package as the [extension platform design](../design/ext
 
 `dupin ext build <dir> [--sourcemap]` bundles a package with `source` into a single ES module at `dupin.main`, with its npm dependencies, by [Rolldown](https://rolldown.rs). A package without `source` runs as written, JavaScript or TypeScript, and needs no build; `build` only checks it.
 
-Start a package that uses npm packages with the `--bundle` scaffold. It pins Rolldown, writes the configuration, and adds a workflow that rebuilds `dist/main.js` and commits it on every push to `main` ([The `--bundle` scaffold](./extension-testing.md#creating-a-package)). [`examples/extensions/change-case`](../../examples/extensions/change-case) is one, with a single dependency.
+Start a package that uses npm packages with the `--bundle` scaffold. It pins Rolldown, writes the configuration, and adds a workflow that rebuilds `dist/main.js` and commits it when a push to `main` changes its sources ([The `--bundle` scaffold](./extension-testing.md#creating-a-package)). [`examples/extensions/change-case`](../../examples/extensions/change-case) is one, with a single dependency.
 
 ```sh
 dupin ext new my-extension --bundle
@@ -30,7 +30,7 @@ bun add some-package    # then import it from src/main.ts
 dupin ext build .
 ```
 
-To convert an existing package, add `"source": "src/main.ts"` to `package.json`, point `dupin.main` at a JavaScript file such as `dist/main.js`, add Rolldown with `bun add -d rolldown` (or `pnpm add -D rolldown`), and run `dupin ext build .`. It needs no Rolldown configuration of its own: without one it uses the scaffold's. To rebuild in CI, copy the scaffold's `rolldown.config.ts` and `.github/workflows/build.yml` too, since the workflow runs Rolldown without Dupin.
+To convert an existing package, add `"source": "src/main.ts"` to `package.json`, point `dupin.main` at a JavaScript file such as `dist/main.js`, add Rolldown with `bun add -d rolldown` (or `pnpm add -D rolldown`), and run `dupin ext build .`. It needs no Rolldown configuration of its own: without one it uses the scaffold's. To rebuild in CI, copy the scaffold's `rolldown.config.ts` and `.github/workflows/build.yml` too, since the workflow runs Rolldown without Dupin. That workflow installs from `bun.lock`, watches `src/`, and uploads and commits `dist/main.js`, so use Bun, or change those paths to match your package.
 
 Dupin uses the package's own `node_modules/.bin/rolldown`, or else `rolldown` on `PATH`. It never downloads it; with neither, the build fails and says how to add it. Rolldown's CLI runs on Node.js.
 

@@ -453,7 +453,7 @@ export function search(query) {
 }
 ```
 
-Type `wc two words` to see **2 words**. Enter copies `2`. To start your own, run `dupin ext new word-count --ts` (or `--bundle` to [use npm packages](./extension-distribution.md#building-a-bundle)), then `dupin ext dev word-count` to keep a live copy while you edit.
+Type `wc two words` to see **2 words**. Enter copies `2`. To start your own, run `dupin ext new word-count --ts` (or `--bundle` to [use npm packages](./extension-distribution.md#building-a-bundle), then `bun install`), then `dupin ext dev word-count` to keep a live copy while you edit.
 
 Reference: [manifest](./extension-manifest.md), [API](./extension-api.md), [capabilities](./extension-permissions.md), [developing and testing](./extension-testing.md), [distributing](./extension-distribution.md).
 
