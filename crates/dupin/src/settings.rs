@@ -208,6 +208,33 @@ script = "missing.sh"
     }
 
     #[test]
+    fn an_unknown_key_at_launch_is_reported_and_costs_only_itself() {
+        let dir = scratch("unknown-key");
+        let path = dir.join("config.toml");
+        let source = "hotkey = \"alt+space\"\nfuture_setting = true\n[theme]\ncorner_radius = 28\n";
+        std::fs::write(&path, source).unwrap();
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(
+            config,
+            Config::parse("hotkey = \"alt+space\"\n[theme]\ncorner_radius = 28").unwrap()
+        );
+        let problem = problem.unwrap();
+        assert!(
+            problem.starts_with("config.toml is invalid at line 2"),
+            "{problem}"
+        );
+        assert!(
+            check(source)
+                .unwrap_err()
+                .contains("unknown field `future_setting`")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_composition_naming_what_dupin_lacks_is_invalid_where_it_is_read() {
         let dir = scratch("invalid-composition");
         let path = dir.join("config.toml");
@@ -217,7 +244,7 @@ script = "missing.sh"
             base: Some(path),
             overlay: None,
         });
-        assert_eq!(config, Config::default());
+        assert_eq!(config, Config::parse("file_limit = 37").unwrap());
         let problem = problem.unwrap();
         assert!(
             problem.starts_with(
@@ -243,7 +270,7 @@ script = "missing.sh"
             base: Some(path),
             overlay: None,
         });
-        assert_eq!(config, Config::default());
+        assert_eq!(config, Config::parse("file_limit = 37").unwrap());
         assert!(problem.unwrap().starts_with("config.toml is invalid at line 2"));
         let problem = check(source).unwrap_err();
         assert!(
