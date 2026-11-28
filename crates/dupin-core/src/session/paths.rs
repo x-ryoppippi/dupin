@@ -63,11 +63,11 @@ fn walk<'a>(from: Option<&Path>, text: &'a str, browsable: Browsable) -> Option<
         }
     };
     while let Some((name, after)) = rest.split_once('/') {
-        if name.is_empty() {
+        if name.is_empty() && !steps.is_empty() {
             rest = after;
             continue;
         }
-        if name == "." || name == ".." {
+        if name.is_empty() || name == "." || name == ".." {
             break;
         }
         let Some(next) = browsable(&folder.join(name)) else {
@@ -155,6 +155,11 @@ mod tests {
             "a package opens rather than browses"
         );
         assert_eq!(filter(root, "../"), None);
+        assert_eq!(
+            filter(root, "/Dev/"),
+            None,
+            "a leading slash is not relative to the folder"
+        );
     }
 
     #[test]
