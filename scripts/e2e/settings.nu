@@ -259,6 +259,8 @@ def record-navigation-key [
     )
     let clicked = ad $out $'navigation-start-($config_key)' click $button.data.match.ref_id
     if not $clicked.ok { error make {msg: $'Could not start recording ($label)'} }
+    # AXPress returns before the settings window has processed the recorder's state change.
+    sleep 500ms
     press $out $'navigation-press-($config_key)' $chord | ignore
     let path = $out | path join config dupin config.toml
     for _ in 1..20 {
