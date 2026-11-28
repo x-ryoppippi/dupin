@@ -722,3 +722,44 @@ fn update_types_replaces_a_symlinked_copy_instead_of_writing_through_it() {
         crate::DECLARATIONS
     );
 }
+
+#[test]
+fn check_types_compares_bytes_and_leaves_the_manifest_to_the_launcher() {
+    let dir = tempfile::tempdir().unwrap();
+    // No package.json: `ext check` has already let the launcher judge it.
+    assert_eq!(crate::check_types(dir.path()).unwrap(), crate::Types::Missing);
+    let declarations = dir.path().join(crate::DECLARATIONS_FILE);
+    let utf16: Vec<u8> = crate::DECLARATIONS
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    std::fs::write(&declarations, utf16).unwrap();
+    assert_eq!(
+        crate::check_types(dir.path()).unwrap(),
+        crate::Types::Different(None)
+    );
+    assert_eq!(
+        crate::package_types(dir.path()).unwrap_err().code,
+        "missing-manifest"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn update_types_never_writes_through_a_planted_staging_file() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("greeter");
+    scaffold(&dir, Template::TypeScript).unwrap();
+    std::fs::write(dir.join(crate::DECLARATIONS_FILE), "// old\n").unwrap();
+    let outside = root.path().join("outside.txt");
+    write(&outside, "untouched\n");
+    let staged = dir.join(format!(
+        ".{}.{}.tmp",
+        crate::DECLARATIONS_FILE,
+        std::process::id()
+    ));
+    std::os::unix::fs::symlink(&outside, &staged).unwrap();
+
+    assert_eq!(crate::update_types(&dir).unwrap_err().code, "unwritable");
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "untouched\n");
+}

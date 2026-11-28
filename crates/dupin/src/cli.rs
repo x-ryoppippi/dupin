@@ -671,7 +671,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             let current = dupin_ext_sdk::api_version();
             let file = dupin_ext_sdk::DECLARATIONS_FILE;
             if check {
-                let types = dupin_ext_sdk::check_types(dir)?;
+                let types = dupin_ext_sdk::package_types(dir)?;
                 if types != dupin_ext_sdk::Types::Current {
                     return Err(Failure::Diagnostic(
                         dupin_js_runtime::Diagnostic::new("types-outdated", describe_types(types))

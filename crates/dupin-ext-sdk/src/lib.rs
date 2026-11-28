@@ -15,7 +15,7 @@ pub use build::{BuildOptions, Built, Rolldown, build};
 pub use dupin_js_runtime::Diagnostic;
 pub use manifest::PackageInfo;
 pub use scaffold::{Template, scaffold};
-pub use types::{DECLARATIONS_FILE, Types, api_version, check_types, update_types};
+pub use types::{DECLARATIONS_FILE, Types, api_version, check_types, package_types, update_types};
 
 /// The declarations `dupin ext new` copies into a package, for the API version the host's
 /// `dupin` module reports.

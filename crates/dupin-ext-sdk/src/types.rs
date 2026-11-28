@@ -34,12 +34,14 @@ pub fn api_version() -> u32 {
     declared_api_version(DECLARATIONS).expect("sdk/dupin.d.ts declares apiVersion")
 }
 
-/// Compares the package's `dupin.d.ts` with this Dupin's.
+/// Compares the package's `dupin.d.ts` with this Dupin's. It doesn't judge `package.json`, which
+/// the launcher's own check has the last word on.
 pub fn check_types(dir: &Path) -> Result<Types, Diagnostic> {
-    read_package(dir)?;
-    match std::fs::read_to_string(dir.join(DECLARATIONS_FILE)) {
-        Ok(text) if text == DECLARATIONS => Ok(Types::Current),
-        Ok(text) => Ok(Types::Different(declared_api_version(&text))),
+    match std::fs::read(dir.join(DECLARATIONS_FILE)) {
+        Ok(bytes) if bytes == DECLARATIONS.as_bytes() => Ok(Types::Current),
+        Ok(bytes) => Ok(Types::Different(
+            std::str::from_utf8(&bytes).ok().and_then(declared_api_version),
+        )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Types::Missing),
         Err(error) => {
             Err(Diagnostic::new("unreadable", format!("Couldn't read it: {error}")).file(DECLARATIONS_FILE))
@@ -47,21 +49,35 @@ pub fn check_types(dir: &Path) -> Result<Types, Diagnostic> {
     }
 }
 
+/// [`check_types`] for `dupin ext types`, which first makes sure `dir` is a package, so a
+/// mistyped folder isn't reported as one missing its declarations.
+pub fn package_types(dir: &Path) -> Result<Types, Diagnostic> {
+    read_package(dir)?;
+    check_types(dir)
+}
+
 /// Writes this Dupin's declarations to the package's `dupin.d.ts`, returning how the file
-/// compared before. The new file replaces the old entry by a rename, so a symlink is replaced
-/// rather than followed out of the package, and a failed write leaves the old file whole.
+/// compared before. The new file is created fresh beside it and renamed over the entry, so no
+/// symlink is followed out of the package, and a failed write leaves the old file whole.
 pub fn update_types(dir: &Path) -> Result<Types, Diagnostic> {
-    let before = check_types(dir)?;
+    use std::io::Write;
+
+    let before = package_types(dir)?;
     if before != Types::Current {
-        let staged = dir.join(format!(".{DECLARATIONS_FILE}.tmp"));
+        let staged = dir.join(format!(".{DECLARATIONS_FILE}.{}.tmp", std::process::id()));
         let unwritable = |error: std::io::Error| {
             Diagnostic::new("unwritable", format!("Couldn't write it: {error}")).file(DECLARATIONS_FILE)
         };
-        std::fs::write(&staged, DECLARATIONS).map_err(unwritable)?;
-        std::fs::rename(&staged, dir.join(DECLARATIONS_FILE)).map_err(|error| {
-            let _ = std::fs::remove_file(&staged);
-            unwritable(error)
-        })?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)
+            .and_then(|mut file| file.write_all(DECLARATIONS.as_bytes()))
+            .and_then(|()| std::fs::rename(&staged, dir.join(DECLARATIONS_FILE)))
+            .map_err(|error| {
+                let _ = std::fs::remove_file(&staged);
+                unwritable(error)
+            })?;
     }
     Ok(before)
 }
