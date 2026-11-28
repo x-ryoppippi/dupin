@@ -31,6 +31,7 @@ use self::general::LoginPreference;
 use self::shortcut::ShortcutState;
 use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
+use crate::list_keys::ListKey;
 use crate::ui::Ui;
 use crate::update::Updater;
 
@@ -118,7 +119,8 @@ pub struct Prefs {
     /// The page ⌘, returns to: the last one shown other than Snapshots, which has its own way in.
     settings_page: Page,
     recorders: [ShortcutState; 2],
-    navigation_recorders: [ShortcutState; 2],
+    list_key_recorders: [ShortcutState; 2],
+    list_key_problems: [Option<String>; 2],
     shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
@@ -178,10 +180,7 @@ impl Prefs {
             }
             recorder
         });
-        let navigation_recorders = [
-            ShortcutState::new(parse_navigation_shortcut(&config.navigation_up)),
-            ShortcutState::new(parse_navigation_shortcut(&config.navigation_down)),
-        ];
+        let list_key_recorders = ListKey::ALL.map(|key| ShortcutState::new(key.shortcut(&config)));
         let active_radius = config.theme.corner_radius;
         Prefs {
             preview_dark: None,
@@ -197,7 +196,8 @@ impl Prefs {
             page: Page::General,
             settings_page: Page::General,
             recorders,
-            navigation_recorders,
+            list_key_recorders,
+            list_key_problems: [None, None],
             shortcut_problems: [None, None],
             binding,
             panel,
@@ -315,14 +315,11 @@ impl Prefs {
                 self.shortcut_problems[i] = None;
             }
         }
-        for (recorder, value) in self
-            .navigation_recorders
-            .iter_mut()
-            .zip([&config.navigation_up, &config.navigation_down])
-        {
-            let shortcut = parse_navigation_shortcut(value);
-            if recorder.shortcut() != shortcut.as_ref() {
-                *recorder = ShortcutState::new(shortcut);
+        for key in ListKey::ALL {
+            let shortcut = key.shortcut(&config);
+            if self.list_key_recorders[key as usize].shortcut() != shortcut.as_ref() {
+                self.list_key_recorders[key as usize] = ShortcutState::new(shortcut);
+                self.list_key_problems[key as usize] = None;
             }
         }
         self.reflect_launch_hotkey();
@@ -383,12 +380,14 @@ impl Prefs {
         next: Option<&Shortcut>,
     ) -> Result<(), ShortcutError> {
         let base = self.current.borrow().clone();
-        let result =
-            if next.is_some_and(|shortcut| crate::hotkey::binding_targets(&base).contains_key(shortcut)) {
-                Err(ShortcutError::Conflict)
-            } else {
-                self.binding.replace(kind, next)
-            };
+        let result = if next.is_some_and(|shortcut| {
+            crate::hotkey::binding_targets(&base).contains_key(shortcut)
+                || crate::list_keys::holding(&base, shortcut).is_some()
+        }) {
+            Err(ShortcutError::Conflict)
+        } else {
+            self.binding.replace(kind, next)
+        };
         self.shortcut_problems[kind as usize] = next
             .filter(|_| result == Err(ShortcutError::Conflict))
             .and_then(|next| self.binding.recorder_conflict(kind, next, &base));
@@ -399,29 +398,15 @@ impl Prefs {
         Ok(())
     }
 
-    fn change_navigation_key(&mut self, index: usize, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
-        let other = 1 - index;
-        if next.is_some_and(|shortcut| {
-            matches!(
-                shortcut.physical_key(),
-                rune::PhysicalKeyCode::ArrowUp | rune::PhysicalKeyCode::ArrowDown
-            )
-        }) {
-            return Err(ShortcutError::Backend(
-                "arrow keys are reserved for native navigation".into(),
-            ));
-        }
-        if next.is_some_and(|shortcut| self.navigation_recorders[other].shortcut() == Some(shortcut)) {
+    fn change_list_key(&mut self, key: ListKey, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
+        let base = self.current.borrow().clone();
+        self.list_key_problems[key as usize] =
+            next.and_then(|next| crate::list_keys::problem(&base, key, next));
+        if self.list_key_problems[key as usize].is_some() {
             return Err(ShortcutError::Conflict);
         }
-        let base = self.current.borrow().clone();
         self.config = base.clone();
-        let value = next.map(ToString::to_string).unwrap_or_default();
-        match index {
-            0 => self.config.navigation_up = value,
-            1 => self.config.navigation_down = value,
-            _ => return Err(ShortcutError::Backend("invalid navigation key".into())),
-        }
+        key.set(&mut self.config, next);
         self.save(&base);
         Ok(())
     }
@@ -465,14 +450,6 @@ fn config_lock_note(settings: &crate::settings::Service) -> &'static str {
         "Managed by Nix"
     } else {
         "Set in config.toml"
-    }
-}
-
-fn parse_navigation_shortcut(value: &str) -> Option<Shortcut> {
-    if value.trim().is_empty() {
-        None
-    } else {
-        value.parse().ok()
     }
 }
 
@@ -741,30 +718,40 @@ mod tests {
     }
 
     #[test]
-    fn navigation_recording_rejects_arrows_and_preserves_other_assignments() {
+    fn list_key_recording_refuses_what_is_taken_and_names_who_has_it() {
         let current = Rc::new(RefCell::new(Config::default()));
         let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
         let mut prefs = state(current.clone(), settings, false);
-        let arrow: Shortcut = "ctrl+up".parse().unwrap();
+        let actions: Shortcut = "ctrl+k".parse().unwrap();
         assert_eq!(
-            prefs.change_navigation_key(0, Some(&arrow)),
-            Err(ShortcutError::Backend(
-                "arrow keys are reserved for native navigation".into(),
-            ))
-        );
-        assert!(current.borrow().navigation_up.is_empty());
-
-        let chord: Shortcut = "ctrl+k".parse().unwrap();
-        assert_eq!(prefs.change_navigation_key(0, Some(&chord)), Ok(()));
-        assert_eq!(current.borrow().navigation_up, "ctrl+k");
-
-        prefs.navigation_recorders[0] = ShortcutState::new(Some(chord.clone()));
-        assert_eq!(
-            prefs.change_navigation_key(1, Some(&chord)),
+            prefs.change_list_key(ListKey::Up, Some(&actions)),
             Err(ShortcutError::Conflict)
         );
-        assert_eq!(prefs.change_navigation_key(0, None), Ok(()));
-        assert!(current.borrow().navigation_up.is_empty());
+        assert_eq!(
+            prefs.list_key_problems[ListKey::Up as usize].as_deref(),
+            Some("⌃K already shows a result's actions.")
+        );
+        assert!(current.borrow().up_key.is_empty());
+
+        let chord: Shortcut = "ctrl+p".parse().unwrap();
+        assert_eq!(prefs.change_list_key(ListKey::Up, Some(&chord)), Ok(()));
+        assert_eq!(prefs.list_key_problems[ListKey::Up as usize], None);
+        assert_eq!(current.borrow().up_key, "ctrl+p");
+
+        assert_eq!(
+            prefs.change_list_key(ListKey::Down, Some(&chord)),
+            Err(ShortcutError::Conflict)
+        );
+        assert_eq!(
+            prefs.list_key_problems[ListKey::Down as usize].as_deref(),
+            Some("⌃P is assigned to the Up key.")
+        );
+        assert_eq!(
+            prefs.change_hotkey(LauncherShortcut::Selection, Some(&chord)),
+            Err(ShortcutError::Conflict)
+        );
+        assert_eq!(prefs.change_list_key(ListKey::Up, None), Ok(()));
+        assert!(current.borrow().up_key.is_empty());
     }
 
     #[test]
@@ -778,6 +765,8 @@ mod tests {
         let controls = [
             ("hotkey", "Show Dupin", Role::Button),
             ("selection_hotkey", "Search selected text", Role::Button),
+            ("up_key", "Move up the list", Role::Button),
+            ("down_key", "Move down the list", Role::Button),
             ("display", "Display", Role::ComboBox),
             ("system_automation", "System Command Automation", Role::Switch),
         ];

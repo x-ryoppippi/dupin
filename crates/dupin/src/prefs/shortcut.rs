@@ -147,7 +147,7 @@ impl ShortcutState {
         self.held = mods;
     }
 
-    fn input(&mut self, event: &PhysicalInput, disabled: bool, require_modifier: bool) -> Step {
+    fn input(&mut self, event: &PhysicalInput, disabled: bool) -> Step {
         if disabled && !matches!(event, PhysicalInput::FocusLost) {
             return Step::Pass;
         }
@@ -202,7 +202,6 @@ impl ShortcutState {
                     }
                     PhysicalKeyCode::Backspace => Step::Propose(None),
                     _ => match Shortcut::from_physical_key(key, mods) {
-                        Ok(chord) if !require_modifier => Step::Propose(Some(chord)),
                         Ok(chord) => match chord.require_modifier() {
                             Ok(()) => Step::Propose(Some(chord)),
                             Err(error) => {
@@ -275,7 +274,6 @@ pub(super) struct ShortcutKeycap<'a> {
     locked: bool,
     /// Words a conflict instead of the stock refusal, naming what holds the chord.
     conflict: Option<String>,
-    require_modifier: bool,
 }
 
 impl<'a> ShortcutKeycap<'a> {
@@ -287,7 +285,6 @@ impl<'a> ShortcutKeycap<'a> {
             state,
             locked: false,
             conflict: None,
-            require_modifier: true,
         }
     }
 
@@ -298,12 +295,6 @@ impl<'a> ShortcutKeycap<'a> {
 
     pub(super) fn conflict(mut self, conflict: Option<String>) -> Self {
         self.conflict = conflict;
-        self
-    }
-
-    /// Allows single keys such as Tab or J as well as modifier chords.
-    pub(super) fn allow_unmodified(mut self) -> Self {
-        self.require_modifier = false;
         self
     }
 
@@ -364,18 +355,18 @@ impl<'a> ShortcutKeycap<'a> {
             let begin = access.clone();
             keycap = keycap.on_press(move |s: &mut Prefs| begin(s).begin());
         }
-        let (input, proposed, locked, require_modifier) =
-            (access.clone(), change.clone(), self.locked, self.require_modifier);
-        keycap = keycap.on_physical_input(move |s: &mut Prefs, event, _| {
-            match input(s).input(event, locked, require_modifier) {
-                Step::Pass => false,
-                Step::Consumed => true,
-                Step::Propose(next) => {
-                    propose(s, &input, &proposed, next);
-                    true
-                }
-            }
-        });
+        let (input, proposed, locked) = (access.clone(), change.clone(), self.locked);
+        keycap =
+            keycap.on_physical_input(
+                move |s: &mut Prefs, event, _| match input(s).input(event, locked) {
+                    Step::Pass => false,
+                    Step::Consumed => true,
+                    Step::Propose(next) => {
+                        propose(s, &input, &proposed, next);
+                        true
+                    }
+                },
+            );
 
         // The clear button leads, so the keycap keeps the row's trailing edge set or unset.
         let mut controls = row().gap(4.0).center_y();
@@ -445,7 +436,6 @@ mod tests {
                 consumed_mods: Default::default(),
             },
             false,
-            true,
         )
     }
 
@@ -494,7 +484,7 @@ mod tests {
             logo: true,
             ..Mods::default()
         };
-        state.input(&PhysicalInput::Modifiers(all), false, true);
+        state.input(&PhysicalInput::Modifiers(all), false);
         assert_eq!(state.keycaps(), ["⌃", "⌥", "⇧", "⌘"]);
         key(&mut state, PhysicalKeyCode::Escape, Mods::default(), true);
         assert!(!state.is_recording());

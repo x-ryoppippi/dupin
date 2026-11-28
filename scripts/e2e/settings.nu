@@ -40,13 +40,8 @@ export def settings-stage [out: path] {
     ) }
     poll $out settings-window $settings list-windows --app $DUPIN
     evidence $out settings-created
-    (record-navigation-key
-        $out
-        'Move to previous result'
-        ctrl+k
-        navigation_up
-    )
-    record-navigation-key $out 'Move to next result' ctrl+j navigation_down
+    record-list-key $out 'Move up the list' ctrl+p up_key
+    record-list-key $out 'Move down the list' ctrl+n down_key
     (poll
         $out
         acknowledgements
@@ -220,16 +215,16 @@ export def settings-stage [out: path] {
     let count = $result_line | parse --regex 'items=(?<items>[0-9]+)' | get items.0 | into int
     if $count < 2 { error make {msg: 'The E2E navigation query needs at least two results'} }
     let moved_before = log-count $log 'dupin-trace: navigation down moved selection 0->1'
-    press $out navigation-custom-next ctrl+j | ignore
+    press $out navigation-custom-next ctrl+n | ignore
     wait-for-log --after $moved_before $log 'dupin-trace: navigation down moved selection 0->1'
     let moved_before = log-count $log 'dupin-trace: navigation up moved selection 1->0'
-    press $out navigation-custom-previous ctrl+k | ignore
+    press $out navigation-custom-previous ctrl+p | ignore
     wait-for-log --after $moved_before $log 'dupin-trace: navigation up moved selection 1->0'
     evidence $out navigation-custom-next
     press $out navigation-close-panel escape | ignore
 }
 
-def record-navigation-key [
+def record-list-key [
     out: path
     label: string
     chord: string

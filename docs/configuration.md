@@ -7,20 +7,28 @@ display = "mouse" # "mouse", "main", or "active"
 position = "center" # "center", "top", or "bottom"
 rows = "auto" # "auto", or a count from 3 to 16
 input_source = "ascii" # "ascii", "keep", or an input source identifier
-navigation_up = "ctrl+k" # optional key or chord; Rune chord syntax
-navigation_down = "ctrl+j" # optional key or chord; Rune chord syntax
+up_key = "" # a chord the lists take as ↑, such as "ctrl+p"; empty for none
+down_key = "" # a chord the lists take as ↓, such as "ctrl+n"; empty for none
 ```
 
-| Key               | Default    | Values                                                                                                                                                          |
-| ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `display`         | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display                                                   |
-| `position`        | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top; `"bottom"` near its bottom, with results above it. Settings → General → Position  |
-| `rows`            | `"auto"`   | `"auto"` fills the room the display leaves; a count from `3` to `16` shows that many rows before the list scrolls. See [Rows](#rows). Settings → General → Rows |
-| `input_source`    | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source)                                       |
-| `navigation_up`   | `""`       | Optional key or chord to move to the previous result. Settings → General → Previous result.                                                                     |
-| `navigation_down` | `""`       | Optional key or chord to move to the next result. Settings → General → Next result.                                                                             |
+| Key            | Default    | Values                                                                                                                                                          |
+| -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `display`      | `"mouse"`  | `"mouse"` (Mouse pointer), `"main"` (Main display), `"active"` (Focused window). Settings → General → Display                                                   |
+| `position`     | `"center"` | `"center"` puts the field at the middle of the display; `"top"` near its top; `"bottom"` near its bottom, with results above it. Settings → General → Position  |
+| `rows`         | `"auto"`   | `"auto"` fills the room the display leaves; a count from `3` to `16` shows that many rows before the list scrolls. See [Rows](#rows). Settings → General → Rows |
+| `input_source` | `"ascii"`  | `"ascii"`, `"keep"`, or an input source identifier such as `"com.apple.keylayout.ABC"`; see [Input source](#input-source)                                       |
+| `up_key`       | `""`       | A chord that works as <kbd>↑</kbd> in the lists, written as `hotkey` is. See [Up and down keys](#up-and-down-keys). Settings → General → Up key                 |
+| `down_key`     | `""`       | A chord that works as <kbd>↓</kbd> in the lists. Settings → General → Down key                                                                                  |
 
 With `position = "bottom"` the panel is laid out as fzf and Telescope lay theirs out: the field sits as far above the bottom of the display as `"top"` puts it below the top, and the results run upwards from it, the best match next to the field. The panel's bottom edge stays put as the results change. <kbd>↑</kbd> moves to the row above, the next match, and <kbd>↓</kbd> back towards the field; the ⌘K actions and pickers follow the same order. Hints and notices sit next to the field, and footers, such as the folder picker's <kbd>↩</kbd> Choose folder line, at the top. Forms and cards keep reading top to bottom above the field. The panel doesn't animate its size in this position, so its edge and the field never slide.
+
+### Up and down keys
+
+For a keyboard without arrow keys, `up_key` and `down_key` add a chord that works as <kbd>↑</kbd> and <kbd>↓</kbd> do in the results, the ⌘K actions and pickers, so they follow `position = "bottom"` as the arrows do. The arrows keep working. Settings records the key's position, as it does for `hotkey`, so <kbd>⌃N</kbd> stays on the same key on every layout.
+
+A list key needs <kbd>⌃</kbd> or <kbd>⌥</kbd>, unless it is a function key, and can't be one the panel or its search field already uses: the arrows, <kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Page Up</kbd> and <kbd>Page Down</kbd>, <kbd>↩</kbd>, <kbd>⎋</kbd>, <kbd>⇥</kbd>, <kbd>Space</kbd>, <kbd>⌫</kbd> and <kbd>⌦</kbd> with any modifier, any <kbd>⌘</kbd> chord, <kbd>⌃K</kbd>, which shows a result's actions, or <kbd>⌃A</kbd>, <kbd>⌃E</kbd>, <kbd>⌃B</kbd>, <kbd>⌃F</kbd>, <kbd>⌃D</kbd> and <kbd>⌃H</kbd>, which edit the field. Nor can it be a chord a hotkey, a binding or the other list key has. Settings refuses such a chord and says who has it; in `config.toml` it makes the file invalid. <kbd>⌃P</kbd> and <kbd>⌃N</kbd> suit most keyboards.
+
+Forms and script argument prompts keep the chord for themselves.
 
 Each feature's keys are on its own page; see [Feature configuration](#feature-configuration).
 

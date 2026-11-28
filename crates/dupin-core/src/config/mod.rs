@@ -77,10 +77,10 @@ pub struct Config {
     pub rows: Rows,
     /// The keyboard input source to type with while the panel shows.
     pub input_source: InputSource,
-    /// Optional key for moving to the previous result, using Rune's chord syntax.
-    pub navigation_up: String,
-    /// Optional key for moving to the next result, using Rune's chord syntax.
-    pub navigation_down: String,
+    /// A chord the panel's lists take as ↑, written as `hotkey` is; empty for none.
+    pub up_key: String,
+    /// A chord the panel's lists take as ↓, written as `hotkey` is; empty for none.
+    pub down_key: String,
     /// Whether a signed release build installs its channel's updates by itself. Builds
     /// without an update feed (Nix, `cargo run`) never update.
     pub auto_update: bool,
@@ -129,8 +129,8 @@ impl Default for Config {
             position: Position::default(),
             rows: Rows::default(),
             input_source: InputSource::default(),
-            navigation_up: String::new(),
-            navigation_down: String::new(),
+            up_key: String::new(),
+            down_key: String::new(),
             auto_update: updates::DEFAULT_ENABLED,
             telemetry: telemetry::DEFAULT_ENABLED,
             system_automation: false,

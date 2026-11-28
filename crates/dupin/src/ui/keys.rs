@@ -1,5 +1,5 @@
 use dupin_core::{Effect, Intent};
-use rune::{Key, KeyEvent, PhysicalKeyCode, Shortcut, Tx};
+use rune::{Key, KeyEvent, Tx};
 
 use super::Ui;
 
@@ -19,7 +19,7 @@ impl Ui {
         if tx.focused().is_some() {
             return false;
         }
-        if self.navigation_key(ev, tx).is_some() {
+        if self.configured_arrow(ev, tx).is_some() {
             return self.key(ev, tx);
         }
         if ev.key == Key::Backspace && !self.query.text.is_empty() {
@@ -45,7 +45,7 @@ impl Ui {
             crate::trace::key(ev);
         }
         let mapped;
-        let ev = match self.navigation_key(ev, tx) {
+        let ev = match self.configured_arrow(ev, tx) {
             Some(key) => {
                 mapped = KeyEvent { key, ..ev.clone() };
                 &mapped
@@ -184,18 +184,13 @@ impl Ui {
         true
     }
 
-    /// Optional alternatives to the arrow keys, shared by the result, action and picker lists.
-    fn navigation_key(&self, ev: &KeyEvent, tx: &Tx) -> Option<Key> {
+    /// ↑ or ↓ for one of config.toml's list keys, which the result, action and picker lists
+    /// take as the arrow; forms and script prompts keep the key.
+    fn configured_arrow(&self, ev: &KeyEvent, tx: &Tx) -> Option<Key> {
         if self.script_entry.is_some() || self.script_card.is_some() || self.form_draft().is_some() {
             return None;
         }
-        let config = self.configuration.values.borrow();
-        configured_navigation_key(
-            &config.navigation_up,
-            &config.navigation_down,
-            ev,
-            tx.physical_key(),
-        )
+        crate::list_keys::arrow(&self.configuration.values.borrow(), ev, tx.physical_key())
     }
 
     /// A click on a result row.
@@ -220,31 +215,6 @@ impl Ui {
         let effects = self.session.open_link(id, url);
         self.apply(effects, tx);
     }
-}
-
-/// Recorded settings name physical keys, so matching must use the same identity on every layout.
-fn configured_navigation_key(
-    up: &str,
-    down: &str,
-    ev: &KeyEvent,
-    physical_key: Option<PhysicalKeyCode>,
-) -> Option<Key> {
-    if matches!(ev.key, Key::Up | Key::Down) {
-        return None;
-    }
-    if navigation_shortcut_matches(up, ev, physical_key) {
-        Some(Key::Up)
-    } else if navigation_shortcut_matches(down, ev, physical_key) {
-        Some(Key::Down)
-    } else {
-        None
-    }
-}
-
-fn navigation_shortcut_matches(value: &str, ev: &KeyEvent, physical_key: Option<PhysicalKeyCode>) -> bool {
-    value.parse::<Shortcut>().is_ok_and(|shortcut| {
-        physical_key == Some(shortcut.physical_key()) && shortcut.modifiers() == ev.mods
-    })
 }
 
 /// ↑ and ↓ as the lists see them: a list that runs upwards from the field shows its next row
@@ -277,42 +247,4 @@ fn quick_look_shortcut_is_command_y() {
     assert!(is_quick_look_shortcut(&Key::Command('y')));
     assert!(!is_quick_look_shortcut(&Key::Command('k')));
     assert!(!is_quick_look_shortcut(&Key::Text("y".into())));
-}
-
-#[cfg(test)]
-#[test]
-fn navigation_shortcuts_match_the_recorded_physical_key() {
-    use rune::{KeyEvent, Mods};
-
-    let event = KeyEvent {
-        key: Key::Text("z".into()),
-        mods: Mods {
-            ctrl: true,
-            cmd: !cfg!(target_os = "macos"),
-            ..Mods::default()
-        },
-    };
-    assert_eq!(
-        configured_navigation_key("", "ctrl+KeyY", &event, Some(PhysicalKeyCode::KeyY)),
-        Some(Key::Down),
-        "a layout-dependent character still matches the physical key recorded by the shortcut",
-    );
-    assert_eq!(
-        configured_navigation_key("", "ctrl+KeyY", &event, Some(PhysicalKeyCode::KeyZ)),
-        None,
-        "a different physical key does not match just because of its typed character",
-    );
-}
-
-#[cfg(test)]
-#[test]
-fn configured_navigation_does_not_remap_native_arrows() {
-    let event = KeyEvent {
-        key: Key::Down,
-        mods: rune::Mods::default(),
-    };
-    assert_eq!(
-        configured_navigation_key("up", "", &event, Some(PhysicalKeyCode::ArrowDown)),
-        None,
-    );
 }

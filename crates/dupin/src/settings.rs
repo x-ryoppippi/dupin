@@ -117,6 +117,7 @@ pub fn check(source: &str) -> Result<Config, String> {
         None => error.message().to_owned(),
     })?;
     crate::composition::check(&config.advanced)?;
+    crate::list_keys::check(&config)?;
     crate::hotkey::parse(&config.hotkey).map_err(|_| format!("the hotkey {:?} is invalid", config.hotkey))?;
     crate::hotkey::parse(&config.selection_hotkey)
         .map_err(|_| format!("the selection hotkey {:?} is invalid", config.selection_hotkey))?;

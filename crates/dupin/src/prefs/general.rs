@@ -6,12 +6,11 @@ use rune_kit::{Button, ButtonVariant, Kit, Switch};
 use rune_theme_opencode::icons::{CHEVRON_DOWN, CHEVRON_RIGHT};
 
 use super::Prefs;
-use super::controls::{
-    ROW_PX, card, choose, menu_value, note, setting, setting_with_lock, tilde, value_button,
-};
+use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button};
 use super::shortcut::ShortcutKeycap;
 use crate::hotkey::LauncherShortcut;
 use crate::icons;
+use crate::list_keys::ListKey;
 
 const DISPLAY: &str = "display";
 const POSITION: &str = "position";
@@ -22,8 +21,8 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let rows = vec![
         hotkey_setting(s, k),
         selection_hotkey_setting(s, k),
-        navigation_setting(s, k, 0),
-        navigation_setting(s, k, 1),
+        list_key_setting(s, k, ListKey::Up),
+        list_key_setting(s, k, ListKey::Down),
         display_setting(s, k),
         position_setting(s, k),
         rows_setting(s, k),
@@ -31,7 +30,6 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
         login_setting(s, k),
     ];
     let mut body = vec![card(k, rows)];
-    body.push(note(k, "Record a key or chord for each direction. Arrow keys always remain available. Control+K / Control+J gives you a Vim-style pair without consuming typed letters; if Control+K is assigned, use ⌘K to open actions. An unmodified letter takes priority over typing, and Tab takes priority over query completion."));
     if !s.config.bindings.is_empty() {
         body.push(configured_hotkeys(s, k));
     }
@@ -155,41 +153,37 @@ fn selection_hotkey_setting(s: &Prefs, k: &Kit) -> El {
     )
 }
 
-fn navigation_setting(s: &Prefs, k: &Kit, index: usize) -> El {
-    let (name, key, config_key, shortcut, label) = if index == 0 {
-        (
-            "Previous result",
-            "navigation-up",
-            "navigation_up",
-            &s.navigation_recorders[0],
-            "Move to previous result",
-        )
-    } else {
-        (
-            "Next result",
-            "navigation-down",
-            "navigation_down",
-            &s.navigation_recorders[1],
-            "Move to next result",
-        )
+/// A row recording the chord the panel's lists take as ↑ or ↓.
+fn list_key_setting(s: &Prefs, k: &Kit, key: ListKey) -> El {
+    let (config_key, recorder, label, detail) = match key {
+        ListKey::Up => (
+            "up_key",
+            "up-key",
+            "Move up the list",
+            "Works as ↑ in results, actions and pickers",
+        ),
+        ListKey::Down => (
+            "down_key",
+            "down-key",
+            "Move down the list",
+            "Works as ↓ in results, actions and pickers",
+        ),
     };
     let locked = s.locked(config_key);
-    let editor = ShortcutKeycap::new(key, label, shortcut)
-        .allow_unmodified()
+    let i = key as usize;
+    let editor = ShortcutKeycap::new(recorder, label, &s.list_key_recorders[i])
         .locked(locked)
-        .conflict(Some(
-            "This key is already assigned to the other direction.".into(),
-        ))
+        .conflict(s.list_key_problems[i].clone())
         .build(
             k,
-            move |s: &mut Prefs| &mut s.navigation_recorders[index],
-            move |s: &mut Prefs, next| s.change_navigation_key(index, next),
+            move |s: &mut Prefs| &mut s.list_key_recorders[i],
+            move |s: &mut Prefs, next| s.change_list_key(key, next),
         );
     setting_with_lock(
         k,
         &icons::KEYBOARD,
-        name,
-        Some("An additional shortcut for moving through results"),
+        key.name(),
+        Some(detail),
         editor,
         s.lock_note(locked),
     )
