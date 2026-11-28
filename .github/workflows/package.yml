@@ -86,9 +86,9 @@ jobs:
           TAG: ${{ inputs.ref }}
         run: gh release upload "$TAG" dist/Dupin.zip dist/Dupin.dmg dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
 
-      # nightly.yml skips a commit the nightly tag already points at, so the tag moves only
-      # after both files are up: a failed upload leaves it behind and the next run retries.
-      # The zip goes up before update.json so the feed never names a zip that isn't there yet.
+      # A scheduled nightly skips the commit update.json names, so the feed goes up after the
+      # zip: a failed upload leaves the old feed and the next run retries, and the feed never
+      # names a zip that isn't there yet.
       - name: Publish the nightly prerelease
         if: inputs.channel == 'nightly'
         env:

@@ -124,6 +124,10 @@ search-quality-report *args:
 e2e app *args:
     scripts/e2e.nu run "$@"
 
+# Whether the nightly at `repo` was already built from `head` (scripts/nightly.nu)
+nightly-check repo head:
+    nu --no-config-file scripts/nightly.nu {{ quote(repo) }} {{ quote(head) }}
+
 # Sign, notarize and package a release; needs the Developer ID identity and NOTARY_KEY_*
 package-release channel:
     nu scripts/package-app.nu --channel {{ quote(channel) }} --notarize
