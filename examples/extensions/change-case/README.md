@@ -30,7 +30,7 @@ dupin ext render . fixtures/search.json search.png
 
 `dupin.icon` in `package.json` is the icon on the keyword chip, in Settings and on rows without one of their own: an SF Symbol, such as `sf:puzzlepiece.extension`, or an image in the package, such as `assets/icon.png`.
 
-[`dupin.d.ts`](./dupin.d.ts) describes the API. Dupin runs JavaScript, and TypeScript once it has erased the types: no Node built-ins, files, network or processes.
+[`dupin.d.ts`](./dupin.d.ts) describes the API; after updating Dupin, `dupin ext types .` replaces it with the new one. Dupin runs JavaScript, and TypeScript once it has erased the types: no Node built-ins, files, network or processes.
 
 ## Build
 
