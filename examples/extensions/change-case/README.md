@@ -40,6 +40,8 @@ dupin ext build .
 
 Run `bun install` once first: it installs the Rolldown that `package.json` pins and writes `bun.lock`, which you commit. `build` runs that Rolldown with `rolldown.config.ts`, bundling `src/main.ts` and its npm dependencies into one module at `dist/main.js`, and fails if a dependency needs a Node built-in. Commit `dist/main.js`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds it with the same configuration whenever a push to `main` changes its sources, installing only what `bun.lock` pins, and commits it if it changed.
 
+In the Dupin repository that workflow never runs, since GitHub only runs workflows at a repository's root: after changing `src/main.ts`, run `dupin ext build .` and commit `dist/main.js` with it. The workflow is here as the scaffold writes it, for a copy of this package in a repository of its own.
+
 ## Share
 
 Push the repository to GitHub and add the `dupin-extension` topic, which Dupin's discovery lists. Dupin installs from Git, pinned to a commit, and never runs a build or a package manager, so commit the module that `dupin.main` names.
