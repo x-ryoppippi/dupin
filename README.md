@@ -9,10 +9,7 @@
         <a href="https://dupin.app/download/">Download</a> ·
         <a href="https://github.com/x-ryoppippi/dupin/releases">Releases</a>
     </p>
-    <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="./docs/images/keywords/list-dark.png">
-        <img src="./docs/images/keywords/list-light.png" alt="The Dupin panel with ? typed, listing commands and their keywords: cal for Calendar, clip for Clipboard History, d and define for Dictionary, in for File Contents, Space for Files, maps for Apple Maps." width="560">
-    </picture>
+    <img src="./docs/images/readme/hero.webp" alt="Six Dupin panels in Liquid Glass over a dusk landscape: the ⌘K actions for Maps, a Reports folder being filtered, the Dictionary card for serendipity, searching inside files, the ? list of commands and their keywords, and clipboard history." width="876">
 </div>
 
 ## Why Dupin

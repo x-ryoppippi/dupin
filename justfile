@@ -41,6 +41,10 @@ docs-clips *args: build-debug
 docs-glass *args: build
     nu scripts/docs-glass.nu "$@"
 
+# The README's hero from the home page's glass posters, after `just docs-glass`
+readme-hero:
+    nu scripts/readme-hero.nu
+
 footprint: build-debug
     nu scripts/footprint.nu
 
