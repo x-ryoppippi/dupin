@@ -34,7 +34,7 @@ Other keys: [Keys](../usage.md#keys).
 
 ## Notes
 
-- Both modes find only what Spotlight has indexed.
+- Both modes find only what Spotlight has indexed. When a search finds nothing on a disk whose Spotlight indexing is off, the hint says so instead of "No matches"; a path typed from `~/` or `/` still opens [Folder browsing](./folder-browsing.md) there.
 - Files: every word of the query must appear in the file name or display name.
 - In files: every word must start a word in the text Spotlight indexed from inside the file.
 - You can paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.
