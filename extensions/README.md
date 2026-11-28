@@ -30,8 +30,9 @@ A package that is off by default waits for its switch in Settings → Extensions
 | `exec` profiles and a catalogue with a `ttl`           | The [port](../examples/extensions/port/) example is the smallest; [proc](../examples/extensions/proc/) adds more profiles. |
 | `files` scopes, declared preferences and stored state  | The [repo](../examples/extensions/repo/) example.                                                                          |
 | Kind actions composed by default (`dupin.provides`)    | [running-apps](./running-apps/); see [Advanced composition](../docs/features/advanced.md#extensions).                      |
+| npm packages, bundled with `dupin ext new --bundle`    | The [change-case](../examples/extensions/change-case/) example.                                                            |
 
-[`examples/extensions`](../examples/extensions) holds the packages that don't ship: Processes, Ports, Repositories and Window Management, which used to be bundled, and a smaller word counter and notes list. `cargo test -p dupin every_example_with_fixtures_passes_them` replays the fixtures of each one that has them.
+[`examples/extensions`](../examples/extensions) holds the packages that don't ship: Processes, Ports, Repositories and Window Management, which used to be bundled, a smaller word counter and notes list, and change-case, which bundles an npm package. `cargo test -p dupin every_example_with_fixtures_passes_them` replays the fixtures of each one that has them.
 
 ## Extension docs
 
