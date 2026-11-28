@@ -1,0 +1,11 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"lib": ["ES2023"],
+		"types": [],
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"noEmit": true
+	},
+	"include": ["**/*.js", "**/*.mjs", "dupin.d.ts"]
+}
