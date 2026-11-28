@@ -463,10 +463,17 @@ impl Item {
     }
 }
 
+/// The home folder, from `HOME`.
+pub(crate) fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+}
+
 /// `$HOME/x` as `~/x`, as Finder and shells show it.
 pub fn tilde(path: &str) -> String {
-    match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() && path.starts_with(&home) => {
+    match home().as_deref().and_then(Path::to_str) {
+        Some(home) if path.starts_with(home) => {
             let rest = &path[home.len()..];
             if rest.is_empty() || rest.starts_with('/') {
                 format!("~{rest}")

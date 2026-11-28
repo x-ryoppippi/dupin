@@ -57,6 +57,9 @@ impl Session {
             effects.extend(self.switch(command, true));
             return effects;
         }
+        if route_keyword && let Some(effects) = self.walk_path(text) {
+            return effects;
+        }
         self.search.query = text.to_owned();
         self.search()
     }

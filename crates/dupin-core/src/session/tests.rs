@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::search::ProviderPhase;
 use super::*;
@@ -226,7 +226,9 @@ fn command_registry(dictionary_keywords: Vec<String>) -> CommandRegistry {
                 .with_query_eligibility(crate::QueryEligibility::Any),
         )
         .unwrap();
-    registry.set_browser(browse_command()).unwrap();
+    registry
+        .set_browser(browse_command(), |path| path.is_dir().then(|| path.to_path_buf()))
+        .unwrap();
     registry.add_keyword(&contents, "in").unwrap();
     for keyword in dictionary_keywords {
         registry.add_keyword(&dictionary, keyword).unwrap();
@@ -2970,4 +2972,79 @@ fn a_page_shows_its_form_its_accessories_and_what_it_shows_while_empty() {
     );
     s.deliver_from(dictionary_command(), Delivery::Done { generation });
     assert_eq!(s.empty_text(), Some("Nothing yet"));
+}
+
+#[test]
+fn a_typed_path_walks_into_its_folders_and_backspace_walks_back_out() {
+    let root = tempfile::tempdir().unwrap();
+    let dev = root.path().join("Dev");
+    std::fs::create_dir_all(dev.join("dupin")).unwrap();
+    let mut s = session();
+
+    let typed = format!("{}/Dev/du", root.path().display());
+    let effects = s.set_query(&typed);
+    assert_eq!(effects[0], Effect::ReplaceQuery("du".into()));
+    let (_, query, folder) = listed(&effects);
+    assert_eq!((query.as_str(), folder), ("du", Some(dev.clone())));
+
+    let (_, query, folder) = listed(&s.set_query("dupin/"));
+    assert_eq!((query.as_str(), folder), ("", Some(dev.join("dupin"))));
+
+    let effects = s.intent(Intent::Backspace).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("dupin".into()));
+    assert_eq!(listed(&effects).2, Some(dev.clone()));
+    listed(&s.set_query(""));
+    let effects = s.intent(Intent::Backspace).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("Dev".into()));
+    assert_eq!(listed(&effects).2, Some(root.path().to_path_buf()));
+}
+
+#[test]
+fn a_slash_after_a_listed_subfolder_enters_it_like_tab() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("sub")).unwrap();
+    let mut s = session();
+    let (_, _, folder) = listed(&s.set_query(&format!("{}/", root.path().display())));
+    assert_eq!(folder, Some(root.path().to_path_buf()));
+
+    let (_, query, folder) = listed(&s.set_query("sub/"));
+    assert_eq!((query.as_str(), folder), ("", Some(root.path().join("sub"))));
+    let (_, query, folder) = listed(&s.set_query("none/"));
+    assert_eq!(
+        (query.as_str(), folder),
+        ("none/", Some(root.path().join("sub"))),
+        "a name that is no folder is only a filter"
+    );
+}
+
+#[test]
+fn a_path_walks_only_from_the_main_search() {
+    let root = tempfile::tempdir().unwrap();
+    let mut s = session();
+    s.intent(Intent::Space);
+    let effects = s.set_query(&format!("{}/", root.path().display()));
+    let (command, _, query) = searched(&effects);
+    assert_eq!(command, files_command());
+    assert!(query.ends_with('/'));
+    assert_eq!(s.folder(), None);
+}
+
+#[test]
+fn backspace_out_of_the_first_typed_folder_returns_to_the_main_search() {
+    let mut s = session();
+    let (_, _, folder) = listed(&s.set_query("/"));
+    assert_eq!(folder, Some("/".into()));
+    let effects = s.intent(Intent::Backspace).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery(String::new()));
+    assert_eq!((s.folder(), s.command_id()), (None, &app_command()));
+}
+
+#[test]
+fn a_keyword_that_starts_like_a_path_stays_reachable() {
+    let mut s = session_with_keywords(History::default(), vec!["/todo".into()]);
+    let (command, _, _) = searched(&s.set_query("/"));
+    assert_eq!((command, s.folder()), (app_command(), None));
+    let effects = s.set_query("/todo q");
+    assert_eq!(effects[0], Effect::ReplaceQuery("q".into()));
+    assert_eq!(s.command_id(), &dictionary_command());
 }
