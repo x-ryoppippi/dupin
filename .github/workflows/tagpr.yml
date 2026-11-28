@@ -26,17 +26,22 @@ jobs:
       pull_request: ${{ steps.tagpr.outputs.pull_request }}
     steps:
       # GITHUB_TOKEN's pushes and pull requests start no workflows, so a release pull request
-      # tagpr opened with it would get no CI and could never merge. The App's token starts them.
-      - name: Require the release App's secrets
+      # tagpr opened with it would get no CI and could never merge. The App's token starts them,
+      # so until the repository has the App's secrets, this skips tagpr and says why.
+      - name: Check for the release App's secrets
+        id: credentials
         env:
-          CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          HAS_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID != '' }}
+          HAS_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
         run: |
-          if [ -z "$CLIENT_ID" ] || [ -z "$PRIVATE_KEY" ]; then
-            echo "::error title=Release App secrets missing::Set RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY; see docs/releasing.md."
-            exit 1
+          if [ "$HAS_CLIENT_ID" = true ] && [ "$HAS_PRIVATE_KEY" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=No release pull request::Add the RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY repository secrets to run tagpr (docs/releasing.md#release-app)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
       - id: app-token
+        if: steps.credentials.outputs.ready == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -44,13 +49,15 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-issues: read
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.credentials.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
           # tagpr pushes the tag with whatever credentials checkout left behind, ahead of its own.
           persist-credentials: false
       - id: tagpr
+        if: steps.credentials.outputs.ready == 'true'
         uses: Songmu/tagpr@047aec4b6c0ce166f52958b5a97f5a3d927fd65b # v1.22.0
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
