@@ -45,9 +45,6 @@ impl Session {
             self.search.deleting = false;
         }
         self.search.recalled = None;
-        if route_keyword && let Some(effects) = self.walk_path(text) {
-            return effects;
-        }
         if route_keyword
             && self.page().is_none()
             && self.search.command == *self.commands.default()
@@ -58,6 +55,9 @@ impl Session {
             self.search.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.search.query.clone())];
             effects.extend(self.switch(command, true));
+            return effects;
+        }
+        if route_keyword && let Some(effects) = self.walk_path(text) {
             return effects;
         }
         self.search.query = text.to_owned();

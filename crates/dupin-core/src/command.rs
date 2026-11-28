@@ -283,8 +283,8 @@ fn checked(keyword: String) -> Result<String, CommandError> {
 /// What a web search's rows show: its keyword's row and the row that searches for the query.
 pub const WEB_SEARCH_SYMBOL: &str = "globe";
 
-/// Whether the browser can list a path as a folder.
-pub type Browsable = fn(&Path) -> bool;
+/// The path as the disk spells it, if the browser can list it as a folder.
+pub type Browsable = fn(&Path) -> Option<PathBuf>;
 
 #[derive(Clone, Debug)]
 pub struct CommandRegistry {
@@ -394,11 +394,7 @@ impl CommandRegistry {
 
     /// The command that lists a folder entered from a result, and which paths are folders it
     /// can list, so a typed path enters only what a result would offer to browse.
-    pub fn set_browser(
-        &mut self,
-        command: CommandId,
-        browsable: fn(&Path) -> bool,
-    ) -> Result<(), CommandError> {
+    pub fn set_browser(&mut self, command: CommandId, browsable: Browsable) -> Result<(), CommandError> {
         if !self.contains(&command) {
             return Err(CommandError::UnknownCommand(command));
         }
@@ -673,6 +669,15 @@ impl CommandRegistry {
 
     pub fn keyword(&self, keyword: &str) -> Option<&CommandId> {
         self.keywords.get(keyword)
+    }
+
+    /// Whether `text` is the start of a keyword, web search alias or alias.
+    pub(crate) fn starts_keyword(&self, text: &str) -> bool {
+        self.keywords
+            .keys()
+            .chain(self.web.keys())
+            .chain(self.paths.keys())
+            .any(|keyword| keyword.starts_with(text))
     }
 
     /// Every keyword some command answers, web search aliases aside.

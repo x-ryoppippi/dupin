@@ -226,7 +226,9 @@ fn command_registry(dictionary_keywords: Vec<String>) -> CommandRegistry {
                 .with_query_eligibility(crate::QueryEligibility::Any),
         )
         .unwrap();
-    registry.set_browser(browse_command(), Path::is_dir).unwrap();
+    registry
+        .set_browser(browse_command(), |path| path.is_dir().then(|| path.to_path_buf()))
+        .unwrap();
     registry.add_keyword(&contents, "in").unwrap();
     for keyword in dictionary_keywords {
         registry.add_keyword(&dictionary, keyword).unwrap();
@@ -3025,4 +3027,24 @@ fn a_path_walks_only_from_the_main_search() {
     assert_eq!(command, files_command());
     assert!(query.ends_with('/'));
     assert_eq!(s.folder(), None);
+}
+
+#[test]
+fn backspace_out_of_the_first_typed_folder_returns_to_the_main_search() {
+    let mut s = session();
+    let (_, _, folder) = listed(&s.set_query("/"));
+    assert_eq!(folder, Some("/".into()));
+    let effects = s.intent(Intent::Backspace).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery(String::new()));
+    assert_eq!((s.folder(), s.command_id()), (None, &app_command()));
+}
+
+#[test]
+fn a_keyword_that_starts_like_a_path_stays_reachable() {
+    let mut s = session_with_keywords(History::default(), vec!["/todo".into()]);
+    let (command, _, _) = searched(&s.set_query("/"));
+    assert_eq!((command, s.folder()), (app_command(), None));
+    let effects = s.set_query("/todo q");
+    assert_eq!(effects[0], Effect::ReplaceQuery("q".into()));
+    assert_eq!(s.command_id(), &dictionary_command());
 }

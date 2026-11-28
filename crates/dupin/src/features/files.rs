@@ -84,7 +84,7 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
         registry.register(command)?;
     }
     registry.set_destination_search(files_id)?;
-    registry.set_browser(id(BROWSE), dupin_mac::is_browsable)?;
+    registry.set_browser(id(BROWSE), dupin_mac::browsable)?;
     registry.add_keyword(&contents_id, "in")
 }
 

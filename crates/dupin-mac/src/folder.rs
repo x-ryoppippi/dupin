@@ -131,9 +131,28 @@ fn is_folder(entry: &DirEntry) -> bool {
     directory && !is_package(&path)
 }
 
-/// A folder that browsing lists, following symlinks: a directory that isn't a package.
-pub fn is_browsable(path: &Path) -> bool {
-    path.is_dir() && !is_package(path)
+/// `path` spelt as on disk, if browsing lists it as a folder: a directory, following symlinks,
+/// that isn't a package. The volume may match names regardless of case, so a typed `dev` is
+/// found as the `Dev` that results and history know.
+pub fn browsable(path: &Path) -> Option<PathBuf> {
+    if !path.is_dir() || is_package(path) {
+        return None;
+    }
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Some(path.to_path_buf());
+    };
+    let names: Vec<_> = std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+        .collect();
+    if names.iter().any(|entry| entry == name) {
+        return Some(path.to_path_buf());
+    }
+    let lower = name.to_str()?.to_lowercase();
+    names
+        .iter()
+        .find(|entry| entry.to_str().is_some_and(|entry| entry.to_lowercase() == lower))
+        .map(|entry| parent.join(entry))
 }
 
 pub(crate) fn is_package(path: &Path) -> bool {
@@ -191,11 +210,18 @@ mod tests {
         assert!(browsable("beta"));
         assert!(!browsable("Tool.app"), "a package opens rather than browses");
         assert!(!browsable("alpha.txt"));
-        assert!(is_browsable(&root.join("beta")));
-        assert!(
-            !is_browsable(&root.join("Tool.app")),
+        assert_eq!(super::browsable(&root.join("beta")), Some(root.join("beta")));
+        assert_eq!(
+            super::browsable(&root.join("alpha")),
+            Some(root.join("Alpha")),
+            "spelt as on disk"
+        );
+        assert_eq!(
+            super::browsable(&root.join("Tool.app")),
+            None,
             "a typed path skips packages too"
         );
+        assert_eq!(super::browsable(&root.join("alpha.txt")), None);
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -23,6 +23,7 @@ Dupin runs in the background with no Dock icon or menu bar. Press its hotkey (�
 | `snap` then Space                       | List saved [snapshots](./features/snapshots.md)                                   |
 | `?`                                     | List every command and its keyword ([Keywords](./features/keywords.md))           |
 | ⌫ on an empty query                     | Leave a folder or the current search mode                                         |
+| `~/` or `/` in the main search          | Browse the folder the path names; `name/` enters a subfolder                      |
 | ↑ ↓                                     | Move the selection                                                                |
 | Tab at the end of an unselected input   | Complete the selected keyword or enter the selected command, or browse the folder |
 | ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                                               |

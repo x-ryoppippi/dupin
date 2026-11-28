@@ -41,7 +41,7 @@ pub mod workspace;
 pub use apps::{AppsProvider, AppsWatcher};
 pub use calendar::{EventStore, FIXTURE_CLOCK};
 pub use dictionary::SystemDictionary;
-pub use folder::{FolderProvider, is_browsable};
+pub use folder::{FolderProvider, browsable};
 pub use recent::RecentProvider;
 pub use settings_search::{SNAPSHOTS_SYMBOL, SettingsProvider};
 pub use spotlight::{SpotlightProvider, Target};

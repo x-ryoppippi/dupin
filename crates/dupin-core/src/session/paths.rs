@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{Effect, SearchLocation, Session};
+use crate::command::Browsable;
 
 /// The folders a typed path walks into, each with the text it leaves behind in the view
 /// before it, and what follows the last folder.
@@ -19,15 +20,18 @@ impl Session {
         if self.page().is_some() || self.destination.is_some() {
             return None;
         }
-        let browser = self.commands.browser()?.clone();
         let browsable = self.commands.browsable()?;
         let walk = match &self.search.location {
             SearchLocation::Folder(folder) => walk(Some(folder), text, browsable),
-            SearchLocation::Command if self.search.command == *self.commands.default() => {
+            // A keyword or alias that starts like a path stays reachable while it is being typed.
+            SearchLocation::Command
+                if self.search.command == *self.commands.default() && !self.commands.starts_keyword(text) =>
+            {
                 walk(None, text, browsable)
             }
             _ => None,
         }?;
+        let browser = self.commands.browser()?.clone();
         for (left, folder) in walk.steps {
             self.search.query = left;
             self.push_visit(browser.clone(), SearchLocation::Folder(folder), None);
@@ -39,28 +43,21 @@ impl Session {
     }
 }
 
-fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
-}
-
 /// From the main search (`from` is None) a path starts with `~/` or `/`; within a folder it is
 /// relative to it. Each name followed by a slash is entered while `browsable` takes it for a
-/// folder; the first that isn't, and everything after it, stays as the filter.
-fn walk<'a>(from: Option<&Path>, text: &'a str, browsable: fn(&Path) -> bool) -> Option<Walk<'a>> {
+/// folder, as the disk spells it; the first that isn't, and everything after it, stays as the
+/// filter.
+fn walk<'a>(from: Option<&Path>, text: &'a str, browsable: Browsable) -> Option<Walk<'a>> {
     let mut steps = Vec::new();
     let (mut folder, mut rest) = match from {
         Some(folder) => (folder.to_path_buf(), text),
         None => {
             let (left, folder, rest) = if let Some(rest) = text.strip_prefix("~/") {
-                ("~", home()?, rest)
+                ("~", crate::item::home()?, rest)
             } else {
                 ("", PathBuf::from("/"), text.strip_prefix('/')?)
             };
-            if !browsable(&folder) {
-                return None;
-            }
+            let folder = browsable(&folder)?;
             steps.push((left.to_owned(), folder.clone()));
             (folder, rest)
         }
@@ -70,10 +67,12 @@ fn walk<'a>(from: Option<&Path>, text: &'a str, browsable: fn(&Path) -> bool) ->
             rest = after;
             continue;
         }
-        let next = folder.join(name);
-        if name == "." || name == ".." || !browsable(&next) {
+        if name == "." || name == ".." {
             break;
         }
+        let Some(next) = browsable(&folder.join(name)) else {
+            break;
+        };
         steps.push((name.to_owned(), next.clone()));
         folder = next;
         rest = after;
@@ -94,9 +93,14 @@ mod tests {
         root
     }
 
-    /// A directory, except one named like an app bundle, as the app's predicate treats packages.
-    fn browsable(path: &Path) -> bool {
-        path.is_dir() && path.extension().is_none_or(|extension| extension != "app")
+    /// A directory, except one named like an app bundle, as the app's predicate treats packages,
+    /// spelt as on disk: `dev` is found as `Dev`.
+    fn browsable(path: &Path) -> Option<PathBuf> {
+        let path = match path.file_name() {
+            Some(name) if name == "dev" => path.with_file_name("Dev"),
+            _ => path.to_path_buf(),
+        };
+        (path.is_dir() && path.extension().is_none_or(|extension| extension != "app")).then_some(path)
     }
 
     fn filter<'a>(from: &Path, text: &'a str) -> Option<&'a str> {
@@ -120,6 +124,12 @@ mod tests {
         assert_eq!(walk.filter, "REA");
         assert_eq!(filter(root, ".config/"), Some(""));
         assert_eq!(filter(root, "Dev//dupin/"), Some(""), "a doubled slash stays put");
+        let cased = super::walk(Some(root), "dev/", browsable).unwrap();
+        assert_eq!(
+            cased.steps,
+            [("dev".into(), root.join("Dev"))],
+            "the folder is spelt as on disk, the typed name stays as typed"
+        );
     }
 
     #[test]
