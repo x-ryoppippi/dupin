@@ -762,4 +762,10 @@ fn update_types_never_writes_through_a_planted_staging_file() {
 
     assert_eq!(crate::update_types(&dir).unwrap_err().code, "unwritable");
     assert_eq!(std::fs::read_to_string(&outside).unwrap(), "untouched\n");
+    assert!(
+        std::fs::symlink_metadata(&staged)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
 }

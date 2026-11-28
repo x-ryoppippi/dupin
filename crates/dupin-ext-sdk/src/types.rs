@@ -68,11 +68,12 @@ pub fn update_types(dir: &Path) -> Result<Types, Diagnostic> {
         let unwritable = |error: std::io::Error| {
             Diagnostic::new("unwritable", format!("Couldn't write it: {error}")).file(DECLARATIONS_FILE)
         };
-        std::fs::OpenOptions::new()
+        let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&staged)
-            .and_then(|mut file| file.write_all(DECLARATIONS.as_bytes()))
+            .map_err(unwritable)?;
+        file.write_all(DECLARATIONS.as_bytes())
             .and_then(|()| std::fs::rename(&staged, dir.join(DECLARATIONS_FILE)))
             .map_err(|error| {
                 let _ = std::fs::remove_file(&staged);
