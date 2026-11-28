@@ -95,7 +95,8 @@ in
               touch $out
             '';
         renovate = repoCheck "dupin-renovate" [ ] "nu scripts/tests/renovate.nu";
-        docs-images = repoCheck "dupin-docs-images" [ ] ''
+        # ImageMagick draws the composites again, to check they match their sources.
+        docs-images = repoCheck "dupin-docs-images" [ pkgs.imagemagick ] ''
           nu scripts/tests/docs-images.nu
           nu scripts/docs-images.nu check
         '';

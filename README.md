@@ -9,7 +9,7 @@
         <a href="https://dupin.app/download/">Download</a> ·
         <a href="https://github.com/x-ryoppippi/dupin/releases">Releases</a>
     </p>
-    <img src="./docs/images/readme/hero.webp" alt="Six Dupin panels in Liquid Glass over a dusk landscape: the ⌘K actions for Maps, a Reports folder being filtered, the Dictionary card for serendipity, searching inside files, the ? list of commands and their keywords, and clipboard history." width="876">
+    <img src="./docs/images/readme/hero-dark.webp" alt="Six Dupin panels in Liquid Glass over a dusk landscape: the ⌘K actions for Maps, a Reports folder being filtered, the Dictionary card for serendipity, searching inside files, the ? list of commands and their keywords, and clipboard history." width="876">
 </div>
 
 ## Why Dupin

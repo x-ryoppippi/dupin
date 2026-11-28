@@ -1,6 +1,8 @@
 use std/assert
 use ../docs-images.nu [
     clip-timeline
+    composite-problems
+    composite-sources
     glass-problems
     embedded
     image-paths
@@ -217,4 +219,50 @@ def main [] {
     }
     assert equal (glass-problems $glass {"home/hero": {macos: "26.3"}}) []
     assert equal (glass-problems $glass {"extensions/other": {macos: "26.3"}}) ["glass.json lists extensions/other, which is not a `glass = true` clip"]
+
+    let grid = {
+        page: readme
+        name: grid
+        recipe: grid
+        themes: [dark]
+        columns: 2
+        width: 100
+        sources: [home/hero calendar/upcoming]
+        composite: true
+    }
+    let both = {
+        images: [$calendar]
+        clips: [$hero]
+        composites: [$grid]
+    }
+    assert equal (image-paths $grid) [docs/images/readme/grid-dark.webp]
+    assert equal (composite-sources $grid $both dark) [
+        docs/images/home/hero-dark-poster.webp
+        docs/images/calendar/upcoming-dark.png
+    ]
+    assert equal (composite-problems $grid $both) []
+    let readme = {path: README.md, text: '<img src="./docs/images/readme/grid-dark.webp">'}
+    assert equal (embedded $readme.path $readme.text) [docs/images/readme/grid-dark.webp]
+    let grid_files = image-paths $calendar | append $hero_files | append (image-paths $grid)
+    let calendar_doc = {
+        path: docs/features/calendar.md
+        text: (picture "../" calendar/upcoming)
+    }
+    assert equal (
+        problems $both $grid_files [$calendar_doc $page $readme] {|path| $path in ($grid_files | append $SOURCES) }
+    ) []
+    assert (
+        problems $both ($grid_files | drop) [$calendar_doc $page $readme] {|path| $path in ($grid_files | append $SOURCES) }
+        | any { str contains "docs/images/readme/grid-dark.webp is missing" }
+    )
+    assert equal (composite-problems ($grid | update sources [home/gone]) $both) [
+        "readme/grid is drawn from home/gone, which is not an image or clip in images.toml"
+    ]
+    assert equal (
+        composite-problems ($grid | update sources [extensions/notes]) {clips: [$clip]}
+    ) [
+        "readme/grid is drawn from extensions/notes, an animated clip with no still"
+    ]
+    assert equal (composite-problems ($grid | update themes [light]) $both) ["readme/grid is drawn in light from home/hero, which has no light file"]
+    assert equal (composite-problems ($grid | update recipe mosaic) $both) ["readme/grid names the recipe `mosaic`; the only one is `grid`"]
 }

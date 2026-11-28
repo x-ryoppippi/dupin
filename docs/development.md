@@ -240,7 +240,11 @@ A page embeds an image as a `<picture>` whose `prefers-color-scheme: dark` sourc
 </picture>
 ```
 
-Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image and clip exists in each of its themes, `docs/images` holds nothing else, some page or the website embeds each one and every image either embeds exists.
+Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image, clip and composite exists in each of its themes, `docs/images` holds nothing else, some page, the README or the website embeds each one and every image either embeds exists.
+
+### Composites
+
+The list's `[[composites]]` are drawn from other entries' files rather than rendered, such as the README's hero, a `grid` of the home page's glass posters. `just docs-composites` (`nu scripts/docs-images.nu --kind composites`) draws them with ImageMagick and needs no build; `just docs-images` draws them after the images and clips. A composite needs nothing of the Mac it is drawn on, so `check` draws each again and fails when the committed file no longer matches, allowing for the few pixels the WebP encoder may differ by between machines. Run `just docs-composites` after recording any of its sources again.
 
 ### Clips
 
@@ -265,7 +269,7 @@ The wallpaper is the manifest's `wallpaper`, a clip's own `wallpaper`, or `--wal
 
 `docs/images/glass.json` lists each clip recorded this way, with the macOS version, wallpaper and screen scale. `just docs-clips` keeps those and renders the rest headless over their `backdrop` (Flow) in their place, and the website says which tabs are headless recordings over Flow. `check` fails if it lists a clip that isn't `glass = true`.
 
-The `Docs glass` workflow (`.github/workflows/docs-glass.yml`) runs the same on a `blacksmith-6vcpu-macos-latest` runner, which runs macOS 26 with a GUI session and grants its runner Screen Recording and Accessibility, as the E2E job relies on. Dispatch it (optionally with `only` or `wallpaper`), then `gh run download <run> --name docs-glass --dir docs/images` and commit the result. A pull request that changes the recorder runs it too. The runner's own display is a 1920×1200 framebuffer at 1× with no 2× mode, so on CI the recorder adds a 1440×1000 virtual display, tall enough for every clip to be cut to the demo frame's shape, at 2× (the private `CGVirtualDisplay`, which needs no permission), makes it the main display and mirrors the runner's to it, so the clips are as sharp as a Retina Mac's. It does this only when `CI` is `true`, never on a Mac in use. The runner also has Reduce Transparency on (`defaults read com.apple.universalaccess reduceTransparency` prints `1`), which makes Liquid Glass a solid panel, so on CI the recorder turns it and Increase Contrast off for the job; on a Mac in use it only reports them.
+The `Docs glass` workflow (`.github/workflows/docs-glass.yml`) runs the same on a `blacksmith-6vcpu-macos-latest` runner, which runs macOS 26 with a GUI session and grants its runner Screen Recording and Accessibility, as the E2E job relies on. Dispatch it (optionally with `only` or `wallpaper`), then `gh run download <run> --name docs-glass --dir docs/images`, run `just docs-composites` and commit the result. A pull request that changes the recorder runs it too. The runner's own display is a 1920×1200 framebuffer at 1× with no 2× mode, so on CI the recorder adds a 1440×1000 virtual display, tall enough for every clip to be cut to the demo frame's shape, at 2× (the private `CGVirtualDisplay`, which needs no permission), makes it the main display and mirrors the runner's to it, so the clips are as sharp as a Retina Mac's. It does this only when `CI` is `true`, never on a Mac in use. The runner also has Reduce Transparency on (`defaults read com.apple.universalaccess reduceTransparency` prints `1`), which makes Liquid Glass a solid panel, so on CI the recorder turns it and Increase Contrast off for the job; on a Mac in use it only reports them.
 
 ## Native E2E evidence
 

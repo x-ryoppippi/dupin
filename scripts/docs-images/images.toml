@@ -569,3 +569,26 @@ themes = ["dark"]
 scale = 2
 video = true
 steps = [{ type = "clip" }, { key = "space" }, { key = "down" }, { key = "down" }]
+
+# A composite is drawn from other entries' stills, not rendered: a `grid` of the `sources`, by
+# id, `columns` wide with each tile `width` pixels, in each of its themes from the sources' own
+# file in that theme (a video clip's poster), to docs/images/<page>/<name>-<theme>.webp.
+# `just docs-composites` draws them, `just docs-images` draws them after the rest, and `check`
+# draws them again and fails when one no longer matches its sources.
+
+# The README's hero, the home page's tabs over Liquid Glass.
+[[composites]]
+page = "readme"
+name = "hero"
+recipe = "grid"
+themes = ["dark"]
+columns = 3
+width = 568
+sources = [
+	"home/apps",
+	"home/files",
+	"home/dictionary",
+	"home/in-files",
+	"home/keywords",
+	"home/clipboard",
+]

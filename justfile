@@ -41,9 +41,9 @@ docs-clips *args: build-debug
 docs-glass *args: build
     nu scripts/docs-glass.nu "$@"
 
-# The README's hero from the home page's glass posters, after `just docs-glass`
-readme-hero:
-    nu scripts/readme-hero.nu
+# The composites images.toml draws from other images, such as the README's hero
+docs-composites:
+    nu scripts/docs-images.nu --kind composites
 
 footprint: build-debug
     nu scripts/footprint.nu
