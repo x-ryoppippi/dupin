@@ -168,10 +168,19 @@ impl Ui {
             Key::Escape => Intent::Dismiss,
             _ => return false,
         };
+        let direction = match intent {
+            Intent::Up => Some("up"),
+            Intent::Down => Some("down"),
+            _ => None,
+        };
+        let previous = self.session.selected();
         let Some(effects) = self.session.intent(intent) else {
             return false;
         };
         self.apply(effects, tx);
+        if let Some(direction) = direction {
+            crate::trace::navigation(direction, previous, self.session.selected());
+        }
         true
     }
 

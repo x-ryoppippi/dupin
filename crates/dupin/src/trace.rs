@@ -31,6 +31,13 @@ pub fn results_done(query: &str, items: usize) {
     }
 }
 
+/// A navigation key changed the selected result; the trace contains no result text.
+pub fn navigation(direction: &str, previous: usize, selected: usize) {
+    if on() && previous != selected {
+        eprintln!("dupin-trace: navigation {direction} moved selection {previous}->{selected}");
+    }
+}
+
 pub fn snapshot(event: &str) {
     if on() {
         eprintln!("dupin-trace: snapshot {event}");
