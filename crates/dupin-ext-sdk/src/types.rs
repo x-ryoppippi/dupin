@@ -24,7 +24,7 @@ impl Types {
     /// Whether the package's declarations describe an older API than this Dupin's, so the
     /// author's editor is missing what the host now offers.
     pub fn is_older(self) -> bool {
-        matches!(self, Self::Different(version) if version.is_none_or(|version| version < api_version()))
+        matches!(self, Self::Different(Some(version)) if version < api_version())
     }
 }
 

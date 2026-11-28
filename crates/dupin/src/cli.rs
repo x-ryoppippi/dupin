@@ -140,6 +140,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "test", folder]
             if !folder.starts_with('-')
                 && !build_flags
+                && !check
                 && step.is_none()
                 && frames.is_none()
                 && workspace.is_none() =>
@@ -150,6 +151,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
             if [folder, fixture, output].iter().all(|arg| !arg.starts_with('-'))
                 && step.is_none_or(|step| step > 0)
                 && !update
+                && !check
                 && !build_flags
                 && workspace.is_none() =>
         {
@@ -161,11 +163,24 @@ fn parse(args: &[String]) -> Result<Action, String> {
                 frames,
             ))
         }
-        ["mcp"] if !json && !build_flags && !update && step.is_none() && frames.is_none() && !sync_flags => {
+        ["mcp"]
+            if !json
+                && !build_flags
+                && !update
+                && !check
+                && step.is_none()
+                && frames.is_none()
+                && !sync_flags =>
+        {
             Ok(Action::Mcp(workspace))
         }
         ["sync", verb @ ("on" | "join")]
-            if !build_flags && !update && step.is_none() && frames.is_none() && workspace.is_none() =>
+            if !build_flags
+                && !update
+                && !check
+                && step.is_none()
+                && frames.is_none()
+                && workspace.is_none() =>
         {
             use crate::control::SyncAction;
             let action = match *verb {
@@ -670,7 +685,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     return Err(Failure::Diagnostic(
                         dupin_js_runtime::Diagnostic::new(
                             "types-outdated",
-                            format!("{}, not this Dupin's apiVersion {current}", describe_types(types)),
+                            format!("{file} {}", describe_types(types)),
                         )
                         .file(file)
                         .hint(format!(
@@ -795,6 +810,9 @@ fn describe_types(types: dupin_ext_sdk::Types) -> String {
     match types {
         dupin_ext_sdk::Types::Current => "matches".into(),
         dupin_ext_sdk::Types::Missing => "is missing".into(),
+        dupin_ext_sdk::Types::Different(Some(version)) if version == dupin_ext_sdk::api_version() => {
+            format!("differs from this Dupin's, though both describe apiVersion {version}")
+        }
         dupin_ext_sdk::Types::Different(Some(version)) => format!("describes apiVersion {version}"),
         dupin_ext_sdk::Types::Different(None) => "declares no apiVersion".into(),
     }
@@ -1183,6 +1201,20 @@ mod tests {
             version
         );
 
+        // An edited copy of the same API is not outdated for `check`, but `types --check` wants
+        // the exact file.
+        std::fs::write(&declarations, format!("// edited\n{current}")).unwrap();
+        assert_eq!(
+            execute(Action::ExtCheck(folder.clone()), true).unwrap()["typesOutdated"],
+            false
+        );
+        match execute(Action::ExtTypes(folder.clone(), true), true) {
+            Err(Failure::Diagnostic(diagnostic)) => {
+                assert!(diagnostic.message.contains("differs"), "{}", diagnostic.message)
+            }
+            other => panic!("expected types-outdated, got {other:?}"),
+        }
+
         let older = current.replace(
             &format!("export const apiVersion: {version};"),
             &format!("export const apiVersion: {};", version - 1),
@@ -1450,6 +1482,8 @@ mod tests {
             &["ext", "new", "greeter", "--sourcemap"][..],
             &["ext", "types", "greeter", "--update"],
             &["ext", "check", "greeter", "--check"],
+            &["ext", "test", "greeter", "--check"],
+            &["sync", "on", "--check"],
             &["ext", "build", "greeter", "--ts"],
             &["ext", "check", "greeter", "--ts"],
             &["ext", "dev", "greeter", "--bundle"],
