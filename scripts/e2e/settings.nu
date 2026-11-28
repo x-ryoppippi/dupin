@@ -9,7 +9,7 @@ use driver.nu [
     wait-for-log
     wait-frontmost
 ]
-use ../e2e-state.nu [has-match is-focused-match]
+use ../e2e-state.nu [has-match is-focused-match is-focused-query]
 
 export def settings-stage [out: path] {
     let focused = {|r| is-focused-match $r }
