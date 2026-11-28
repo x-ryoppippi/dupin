@@ -135,16 +135,41 @@ const CASES = [
 	["kebab-case", kebabCase],
 	["CONSTANT_CASE", constantCase]
 ];
+const MAX_TITLE_BYTES = 512;
+const MAX_TEXT_BYTES = 16384;
 function search(query, _ctx) {
 	const input = query.trim();
 	if (!input) return [];
 	return CASES.flatMap(([name, convert]) => {
 		const converted = convert(input);
-		return converted ? [{
-			title: converted,
+		if (!converted || utf8Length(converted) > MAX_TEXT_BYTES) return [];
+		return [{
+			title: clip(converted, MAX_TITLE_BYTES),
 			subtitle: name,
 			text: converted
-		}] : [];
+		}];
 	});
+}
+function utf8Length(text) {
+	let bytes = 0;
+	for (const char of text) bytes += charBytes(char);
+	return bytes;
+}
+function charBytes(char) {
+	const point = char.codePointAt(0) ?? 0;
+	return point < 128 ? 1 : point < 2048 ? 2 : point < 65536 ? 3 : 4;
+}
+/** `text`, or as much of it as fits in `limit` bytes with an ellipsis. */
+function clip(text, limit) {
+	if (utf8Length(text) <= limit) return text;
+	const ellipsis = "…";
+	let budget = limit - charBytes(ellipsis);
+	let clipped = "";
+	for (const char of text) {
+		budget -= charBytes(char);
+		if (budget < 0) break;
+		clipped += char;
+	}
+	return clipped + ellipsis;
 }
 export { search };
