@@ -6,11 +6,11 @@
 //! itself, headless, in a scratch home that holds only the package, answering its host requests
 //! from the fixture's `replies` as `test` does.
 
+use dupin_spawn::{Command, Stdio};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

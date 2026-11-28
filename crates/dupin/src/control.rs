@@ -674,7 +674,7 @@ mod tests {
         std::fs::remove_dir(dir).unwrap();
     }
     fn subprocess(mode: &str, dir: &std::path::Path, tmp: &str) {
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        let mut child = dupin_spawn::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "control::tests::disposable_process", "--nocapture"])
             .env("DUPIN_CONTROL_TEST", mode)
             .env("DUPIN_CONTROL_TEST_DIR", dir)
@@ -738,7 +738,6 @@ mod tests {
     }
     #[test]
     fn another_launcher_can_bind_while_a_child_started_before_the_server_dropped_has_not_exec_ed() {
-        use std::os::unix::process::CommandExt;
         let dir = std::env::temp_dir().join(format!("dupin-control-spawning-{}", std::process::id()));
         std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
         let path = dir.join("control.sock");
@@ -751,22 +750,21 @@ mod tests {
         };
         let (forked_read, forked_write) = pipe();
         let (go_read, go_write) = pipe();
-        // A child between fork and exec holds a copy of every descriptor this process has, as a
-        // child being spawned does until its exec completes; this one stays there until told.
-        let child = std::thread::spawn(move || {
-            let mut command = std::process::Command::new("/usr/bin/true");
-            // SAFETY: the closure makes only async-signal-safe calls on descriptors it was given.
+        // A forked child holds a copy of every descriptor this process has, as a child being
+        // spawned with fork does until its exec completes; this one keeps them until told.
+        // SAFETY: the child makes only async-signal-safe calls on descriptors it was given.
+        let child = unsafe { libc::fork() };
+        assert!(child >= 0, "{}", io::Error::last_os_error());
+        if child == 0 {
+            // SAFETY: as above.
             unsafe {
-                command.pre_exec(move || {
-                    libc::write(forked_write, [1u8].as_ptr().cast(), 1);
-                    let mut byte = 0u8;
-                    libc::read(go_read, (&raw mut byte).cast(), 1);
-                    Ok(())
-                });
+                libc::write(forked_write, [1u8].as_ptr().cast(), 1);
+                let mut byte = 0u8;
+                libc::read(go_read, (&raw mut byte).cast(), 1);
+                libc::_exit(0);
             }
-            command.status().unwrap()
-        });
-        /// Lets the child go on to its exec, even when an assertion below fails: a child left
+        }
+        /// Lets the child go on and exit, even when an assertion below fails: a child left
         /// waiting would keep the test run's output open.
         struct Release(i32);
         impl Drop for Release {
@@ -782,7 +780,10 @@ mod tests {
         drop(server);
         subprocess("bind", &dir, "/unused-spawning");
         drop(release);
-        assert!(child.join().unwrap().success());
+        let mut status = 0;
+        // SAFETY: child is this test's own child, and status is the int waitpid fills.
+        assert_eq!(unsafe { libc::waitpid(child, &raw mut status, 0) }, child);
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
         for fd in [forked_read, forked_write, go_read, go_write] {
             // SAFETY: each is a pipe end this test opened and no longer uses.
             unsafe { libc::close(fd) };

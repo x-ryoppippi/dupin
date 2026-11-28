@@ -13,6 +13,7 @@ dupin-core = { workspace = true }
 dupin-storage = { workspace = true }
 dupin-sync = { workspace = true }
 dupin-host-services = { path = "../dupin-host-services" }
+dupin-spawn = { workspace = true }
 libc = { workspace = true }
 rune = { workspace = true }
 objc2 = { workspace = true }

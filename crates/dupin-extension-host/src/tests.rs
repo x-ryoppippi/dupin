@@ -1,11 +1,11 @@
 use std::fs;
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use dupin_js_runtime::row::PageChange;
 use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, Exports, Reason, Row, RunError, Sources};
+use dupin_spawn::Command;
 
 use super::*;
 

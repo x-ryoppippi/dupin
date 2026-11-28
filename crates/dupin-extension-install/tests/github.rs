@@ -2,11 +2,11 @@
 //! archive host do, with tarballs `git archive` makes from fixture repositories or that the tests
 //! write by hand; nothing here touches the network or needs Git to install.
 
+use dupin_spawn::Command;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

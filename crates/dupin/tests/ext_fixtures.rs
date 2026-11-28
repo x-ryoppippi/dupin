@@ -2,8 +2,9 @@
 //! starts itself as the extension host and, for `render`, as a headless launcher.
 #![cfg(target_os = "macos")]
 
+use dupin_spawn::Command;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;

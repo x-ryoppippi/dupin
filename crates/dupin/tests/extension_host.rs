@@ -2,8 +2,8 @@
 //! `--extension-host`, which runs guests only where it has a sandbox: macOS.
 #![cfg(target_os = "macos")]
 
+use dupin_spawn::Command;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use dupin_extension_host::{Compiled, FLAG, Host, Trust};

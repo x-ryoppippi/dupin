@@ -2,10 +2,10 @@
 //! commit, the macOS system curl downloads GitHub's tarball of exactly that commit, and Dupin
 //! unpacks it itself after checking each file against the commit's tree.
 
+use dupin_spawn::{Command, Stdio};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;

@@ -18,7 +18,7 @@ fn main() {
 }
 
 fn current() -> String {
-    std::process::Command::new("defaults")
+    dupin_spawn::Command::new("defaults")
         .args(["read", "com.apple.HIToolbox", "AppleSelectedInputSources"])
         .output()
         .map(|o| {

@@ -11,10 +11,10 @@
 //! remove it. A copy that can't replace itself (a read-only folder, App Translocation) only
 //! says where to download the update. `DUPIN_DISABLE_UPDATES=1` turns the updater off.
 
+use dupin_spawn::Command;
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};

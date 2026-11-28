@@ -2,13 +2,13 @@
 //! request crosses to this process, the broker decides and a fixture service answers. Storage
 //! is the real encrypted store in a temporary folder, under an in-memory key.
 
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dupin_extension_host::{ActionEffect, Compiled, Host, Trust};
 use dupin_js_runtime::{Acted, DEFAULT_ENTRY, Row, RunError, Sources};
+use dupin_spawn::Command;
 
 use super::services::fixture;
 use super::*;

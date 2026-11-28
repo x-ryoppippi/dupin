@@ -1,8 +1,9 @@
 //! `dupin ext install` as the `dupin` executable runs it, against directories of its own.
 
+use dupin_spawn::Command;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use dupin_extension_bridge::{Origin, PackageId, storage};
 

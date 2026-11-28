@@ -907,6 +907,7 @@ dependencies = [
  "dupin-js-runtime",
  "dupin-mac",
  "dupin-plugin-protocol",
+ "dupin-spawn",
  "dupin-storage",
  "dupin-sync",
  "dupin-telemetry",
@@ -957,6 +958,7 @@ name = "dupin-ext-sdk"
 version = "0.0.0"
 dependencies = [
  "dupin-js-runtime",
+ "dupin-spawn",
  "serde",
  "serde_json",
  "tempfile",
@@ -973,6 +975,7 @@ dependencies = [
  "dupin-host-services",
  "dupin-js-runtime",
  "dupin-plugin-protocol",
+ "dupin-spawn",
  "dupin-storage",
  "serde",
  "serde_json",
@@ -986,6 +989,7 @@ version = "0.0.0"
 dependencies = [
  "dupin-js-runtime",
  "dupin-plugin-protocol",
+ "dupin-spawn",
  "libc",
  "serde",
  "serde_json",
@@ -996,6 +1000,7 @@ dependencies = [
 name = "dupin-extension-http"
 version = "0.0.0"
 dependencies = [
+ "dupin-spawn",
  "libc",
  "serde",
  "serde_json",
@@ -1007,6 +1012,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "dupin-broker",
+ "dupin-spawn",
  "flate2",
  "libc",
  "serde",
@@ -1051,6 +1057,7 @@ dependencies = [
  "block2 0.6.2",
  "dupin-core",
  "dupin-host-services",
+ "dupin-spawn",
  "dupin-storage",
  "dupin-sync",
  "libc",
@@ -1089,6 +1096,13 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "dupin-spawn"
+version = "0.0.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
