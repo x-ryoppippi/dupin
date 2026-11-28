@@ -17,11 +17,6 @@ permissions:
   # setup-nix's Hestia cache checks for evicted packs up front.
   actions: read
 
-env:
-  # Temporary: Hestia logs pack uploads and merge sources to trace crane
-  # dependency packs that go missing from the cache (Mic92/hestia#196).
-  HESTIA_DEBUG: '1'
-
 jobs:
   # Formatting, secrets, Nushell and the pnpm pin are quick, so every pull request runs them.
   # The flake only targets aarch64-darwin, so even these evaluate on macOS.
