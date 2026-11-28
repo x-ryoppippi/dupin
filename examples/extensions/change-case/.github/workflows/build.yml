@@ -1,0 +1,56 @@
+# Dupin installs extensions from Git and never builds them, so the built entry is committed.
+# Dependencies are installed and bundled in a job that can't write to the repository; only the
+# bundle reaches the job that holds the write token.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'rolldown.config.ts'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # `--bun` runs Rolldown on Bun, so the runner's own Node version doesn't matter.
+      - run: bun --bun run rolldown --config rolldown.config.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle
+          path: 'dist/main.js'
+          if-no-files-found: error
+
+  commit:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle
+          path: 'dist'
+      - name: Commit dist/main.js
+        run: |
+          git add dist/main.js
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'build: update dist/main.js'
+          git push

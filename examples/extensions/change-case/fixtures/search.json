@@ -1,0 +1,88 @@
+{
+	"fixture": 1,
+	"description": "Converts the text typed after the keyword into each case, and Enter copies the selected one.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "hello dupin world",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "helloDupinWorld",
+								"title": "Copy"
+							}
+						],
+						"id": "#0",
+						"subtitle": "camelCase",
+						"title": "helloDupinWorld"
+					},
+					{
+						"actions": [
+							{
+								"copy": "HelloDupinWorld",
+								"title": "Copy"
+							}
+						],
+						"id": "#1",
+						"subtitle": "PascalCase",
+						"title": "HelloDupinWorld"
+					},
+					{
+						"actions": [
+							{
+								"copy": "hello_dupin_world",
+								"title": "Copy"
+							}
+						],
+						"id": "#2",
+						"subtitle": "snake_case",
+						"title": "hello_dupin_world"
+					},
+					{
+						"actions": [
+							{
+								"copy": "hello-dupin-world",
+								"title": "Copy"
+							}
+						],
+						"id": "#3",
+						"subtitle": "kebab-case",
+						"title": "hello-dupin-world"
+					},
+					{
+						"actions": [
+							{
+								"copy": "HELLO_DUPIN_WORLD",
+								"title": "Copy"
+							}
+						],
+						"id": "#4",
+						"subtitle": "CONSTANT_CASE",
+						"title": "HELLO_DUPIN_WORLD"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy",
+			"expect": {
+				"effect": {
+					"copy": "helloDupinWorld"
+				}
+			}
+		}
+	]
+}

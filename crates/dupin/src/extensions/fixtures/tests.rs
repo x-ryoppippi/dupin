@@ -875,7 +875,17 @@ fn every_example_with_fixtures_passes_them() {
         tested.push(package.file_name().unwrap().to_string_lossy().into_owned());
     }
     tested.sort();
-    assert_eq!(tested, ["notes-js", "port", "proc", "repo", "window-management"]);
+    assert_eq!(
+        tested,
+        [
+            "change-case",
+            "notes-js",
+            "port",
+            "proc",
+            "repo",
+            "window-management"
+        ]
+    );
 }
 
 /// A package whose views and actions misbehave in every way a page can.
