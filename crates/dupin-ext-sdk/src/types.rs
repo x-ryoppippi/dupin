@@ -21,10 +21,11 @@ pub enum Types {
 }
 
 impl Types {
-    /// Whether the package's declarations describe an older API than this Dupin's, so the
-    /// author's editor is missing what the host now offers.
-    pub fn is_older(self) -> bool {
-        matches!(self, Self::Different(Some(version)) if version < api_version())
+    /// Whether the package's declarations may lack what this Dupin's describe: they differ, and
+    /// don't declare a newer API than this Dupin's. `apiVersion` stays put while the API grows,
+    /// so a copy of the same version can still be missing parts of it.
+    pub fn is_outdated(self) -> bool {
+        matches!(self, Self::Different(version) if version.is_none_or(|version| version <= api_version()))
     }
 }
 
@@ -34,24 +35,32 @@ pub fn api_version() -> u32 {
 }
 
 /// Compares the package's `dupin.d.ts` with this Dupin's.
-pub fn check_types(dir: &Path) -> Types {
+pub fn check_types(dir: &Path) -> Result<Types, Diagnostic> {
+    read_package(dir)?;
     match std::fs::read_to_string(dir.join(DECLARATIONS_FILE)) {
-        Ok(text) if text == DECLARATIONS => Types::Current,
-        Ok(text) => Types::Different(declared_api_version(&text)),
-        Err(_) => Types::Missing,
+        Ok(text) if text == DECLARATIONS => Ok(Types::Current),
+        Ok(text) => Ok(Types::Different(declared_api_version(&text))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Types::Missing),
+        Err(error) => {
+            Err(Diagnostic::new("unreadable", format!("Couldn't read it: {error}")).file(DECLARATIONS_FILE))
+        }
     }
 }
 
 /// Writes this Dupin's declarations to the package's `dupin.d.ts`, returning how the file
-/// compared before.
+/// compared before. The new file replaces the old entry by a rename, so a symlink is replaced
+/// rather than followed out of the package, and a failed write leaves the old file whole.
 pub fn update_types(dir: &Path) -> Result<Types, Diagnostic> {
-    read_package(dir)?;
-    let before = check_types(dir);
+    let before = check_types(dir)?;
     if before != Types::Current {
-        let path = dir.join(DECLARATIONS_FILE);
-        std::fs::write(&path, DECLARATIONS).map_err(|error| {
-            Diagnostic::new("unwritable", format!("Couldn't write it: {error}"))
-                .file(path.display().to_string())
+        let staged = dir.join(format!(".{DECLARATIONS_FILE}.tmp"));
+        let unwritable = |error: std::io::Error| {
+            Diagnostic::new("unwritable", format!("Couldn't write it: {error}")).file(DECLARATIONS_FILE)
+        };
+        std::fs::write(&staged, DECLARATIONS).map_err(unwritable)?;
+        std::fs::rename(&staged, dir.join(DECLARATIONS_FILE)).map_err(|error| {
+            let _ = std::fs::remove_file(&staged);
+            unwritable(error)
         })?;
     }
     Ok(before)

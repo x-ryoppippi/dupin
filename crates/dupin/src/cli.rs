@@ -98,7 +98,14 @@ fn parse(args: &[String]) -> Result<Action, String> {
         sourcemap: parser.contains("--sourcemap"),
     };
     let update = parser.contains("--update");
-    let check = parser.contains("--check");
+    // Only `ext types` takes `--check`, so it stays an ordinary argument elsewhere, such as
+    // the value of `ext run --query`.
+    let check = args
+        .iter()
+        .filter(|arg| !arg.starts_with('-'))
+        .take(2)
+        .eq(["ext", "types"])
+        && parser.contains("--check");
     let step: Option<usize> = parser
         .opt_value_from_str("--step")
         .map_err(|_| "--step takes a step number, counting from 1".to_owned())?;
@@ -140,7 +147,6 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "test", folder]
             if !folder.starts_with('-')
                 && !build_flags
-                && !check
                 && step.is_none()
                 && frames.is_none()
                 && workspace.is_none() =>
@@ -151,7 +157,6 @@ fn parse(args: &[String]) -> Result<Action, String> {
             if [folder, fixture, output].iter().all(|arg| !arg.starts_with('-'))
                 && step.is_none_or(|step| step > 0)
                 && !update
-                && !check
                 && !build_flags
                 && workspace.is_none() =>
         {
@@ -163,24 +168,11 @@ fn parse(args: &[String]) -> Result<Action, String> {
                 frames,
             ))
         }
-        ["mcp"]
-            if !json
-                && !build_flags
-                && !update
-                && !check
-                && step.is_none()
-                && frames.is_none()
-                && !sync_flags =>
-        {
+        ["mcp"] if !json && !build_flags && !update && step.is_none() && frames.is_none() && !sync_flags => {
             Ok(Action::Mcp(workspace))
         }
         ["sync", verb @ ("on" | "join")]
-            if !build_flags
-                && !update
-                && !check
-                && step.is_none()
-                && frames.is_none()
-                && workspace.is_none() =>
+            if !build_flags && !update && step.is_none() && frames.is_none() && workspace.is_none() =>
         {
             use crate::control::SyncAction;
             let action = match *verb {
@@ -506,8 +498,8 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if exports.items {
                 exported.push("items");
             }
-            let types = dupin_ext_sdk::check_types(std::path::Path::new(&folder));
-            let types_outdated = types.is_older();
+            let types = dupin_ext_sdk::check_types(std::path::Path::new(&folder))?;
+            let types_outdated = types.is_outdated();
             if json {
                 return Ok(serde_json::json!({
                     "typesOutdated": types_outdated,
@@ -536,10 +528,9 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             );
             if types_outdated {
                 crate::out::outln!(
-                    "{} {}, and this Dupin has apiVersion {}: run `dupin ext types {folder}` so your editor sees all of it",
+                    "{} {}: run `dupin ext types {folder}` so your editor sees the API this Dupin offers",
                     dupin_ext_sdk::DECLARATIONS_FILE,
-                    describe_types(types),
-                    dupin_ext_sdk::api_version()
+                    describe_types(types)
                 );
             }
             Ok(Value::Null)
@@ -680,23 +671,20 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             let current = dupin_ext_sdk::api_version();
             let file = dupin_ext_sdk::DECLARATIONS_FILE;
             if check {
-                let types = dupin_ext_sdk::check_types(dir);
+                let types = dupin_ext_sdk::check_types(dir)?;
                 if types != dupin_ext_sdk::Types::Current {
                     return Err(Failure::Diagnostic(
-                        dupin_js_runtime::Diagnostic::new(
-                            "types-outdated",
-                            format!("{file} {}", describe_types(types)),
-                        )
-                        .file(file)
-                        .hint(format!(
-                            "Run `dupin ext types {folder}` to replace it with this Dupin's."
-                        )),
+                        dupin_js_runtime::Diagnostic::new("types-outdated", describe_types(types))
+                            .file(file)
+                            .hint(format!(
+                                "Run `dupin ext types {folder}` to replace it with this Dupin's."
+                            )),
                     ));
                 }
                 if json {
                     return Ok(serde_json::json!({ "file": file, "apiVersion": current, "updated": false }));
                 }
-                crate::out::outln!("{file} matches this Dupin's, apiVersion {current}");
+                crate::out::outln!("{file} matches this Dupin's, which describe apiVersion {current}");
                 return Ok(Value::Null);
             }
             let before = dupin_ext_sdk::update_types(dir)?;
@@ -709,13 +697,15 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             }
             match before {
                 dupin_ext_sdk::Types::Current => {
-                    crate::out::outln!("{file} already matches this Dupin's, apiVersion {current}")
+                    crate::out::outln!(
+                        "{file} already matches this Dupin's, which describe apiVersion {current}"
+                    )
                 }
                 dupin_ext_sdk::Types::Missing => {
-                    crate::out::outln!("Wrote {file} for this Dupin's apiVersion {current}")
+                    crate::out::outln!("Wrote {file}, which describes apiVersion {current}")
                 }
                 before => crate::out::outln!(
-                    "Replaced {file}, which {}, with this Dupin's, apiVersion {current}",
+                    "Replaced {file} with this Dupin's; the old copy {}",
                     describe_types(before)
                 ),
             }
@@ -807,14 +797,19 @@ pub(crate) fn rendered_json(rendered: &crate::extensions::Rendered) -> Value {
 
 /// How a package's `dupin.d.ts` differs from this Dupin's, as the rest of a sentence about it.
 fn describe_types(types: dupin_ext_sdk::Types) -> String {
+    let current = dupin_ext_sdk::api_version();
     match types {
-        dupin_ext_sdk::Types::Current => "matches".into(),
+        dupin_ext_sdk::Types::Current => "matches this Dupin's".into(),
         dupin_ext_sdk::Types::Missing => "is missing".into(),
-        dupin_ext_sdk::Types::Different(Some(version)) if version == dupin_ext_sdk::api_version() => {
+        dupin_ext_sdk::Types::Different(Some(version)) if version == current => {
             format!("differs from this Dupin's, though both describe apiVersion {version}")
         }
-        dupin_ext_sdk::Types::Different(Some(version)) => format!("describes apiVersion {version}"),
-        dupin_ext_sdk::Types::Different(None) => "declares no apiVersion".into(),
+        dupin_ext_sdk::Types::Different(Some(version)) => {
+            format!("describes apiVersion {version}, and this Dupin's describe apiVersion {current}")
+        }
+        dupin_ext_sdk::Types::Different(None) => {
+            format!("declares no apiVersion, and this Dupin's describe apiVersion {current}")
+        }
     }
 }
 
@@ -1201,12 +1196,12 @@ mod tests {
             version
         );
 
-        // An edited copy of the same API is not outdated for `check`, but `types --check` wants
-        // the exact file.
+        // `apiVersion` stays put while the API grows, so a different copy of the same version is
+        // outdated too.
         std::fs::write(&declarations, format!("// edited\n{current}")).unwrap();
         assert_eq!(
             execute(Action::ExtCheck(folder.clone()), true).unwrap()["typesOutdated"],
-            false
+            true
         );
         match execute(Action::ExtTypes(folder.clone(), true), true) {
             Err(Failure::Diagnostic(diagnostic)) => {
@@ -1239,6 +1234,27 @@ mod tests {
             execute(Action::ExtTypes(folder.clone(), false), true).unwrap()["updated"],
             false
         );
+
+        // A copy from a newer Dupin means Dupin is behind, not the package.
+        std::fs::write(
+            &declarations,
+            current.replace(
+                &format!("export const apiVersion: {version};"),
+                &format!("export const apiVersion: {};", version + 1),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            execute(Action::ExtCheck(folder.clone()), true).unwrap()["typesOutdated"],
+            false
+        );
+
+        let stray = root.path().join("not-a-package");
+        std::fs::create_dir(&stray).unwrap();
+        match execute(Action::ExtTypes(stray.to_string_lossy().into_owned(), true), true) {
+            Err(Failure::Diagnostic(diagnostic)) => assert_eq!(diagnostic.code, "missing-manifest"),
+            other => panic!("expected missing-manifest, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1477,6 +1493,10 @@ mod tests {
         assert_eq!(
             parse(&args(&["ext", "types", "greeter", "--check", "--json"])).unwrap(),
             Action::ExtTypes("greeter".into(), true)
+        );
+        assert_eq!(
+            parse(&args(&["ext", "run", "greeter", "--query", "--check"])).unwrap(),
+            Action::ExtRun("greeter".into(), "--check".into())
         );
         for invalid in [
             &["ext", "new", "greeter", "--sourcemap"][..],

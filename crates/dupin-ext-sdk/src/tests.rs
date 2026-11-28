@@ -113,11 +113,7 @@ fn rolldown() -> Option<Rolldown> {
 
 #[test]
 fn declarations_state_the_hosts_api_version() {
-    let declared: u32 = crate::DECLARATIONS
-        .split_once("export const apiVersion: ")
-        .and_then(|(_, rest)| rest.split_once(';'))
-        .and_then(|(version, _)| version.parse().ok())
-        .expect("dupin.d.ts declares `export const apiVersion: <n>;`");
+    let declared = crate::api_version();
     let dir = tempfile::tempdir().unwrap();
     write(&dir.path().join("package.json"), &manifest("version", json!({})));
     write(
@@ -696,4 +692,33 @@ fn watching_publishes_again_after_an_edit() {
     running.store(false, Ordering::Relaxed);
     assert_eq!(watcher.join().unwrap(), [1, 2]);
     assert_eq!(answer(&link, ""), vec![json!({ "title": "edited" })]);
+}
+
+#[cfg(unix)]
+#[test]
+fn update_types_replaces_a_symlinked_copy_instead_of_writing_through_it() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("greeter");
+    scaffold(&dir, Template::TypeScript).unwrap();
+    let shared = root.path().join("shared.d.ts");
+    write(&shared, "// someone else's file\n");
+    let declarations = dir.join(crate::DECLARATIONS_FILE);
+    std::fs::remove_file(&declarations).unwrap();
+    std::os::unix::fs::symlink(&shared, &declarations).unwrap();
+
+    assert_eq!(crate::update_types(&dir).unwrap(), crate::Types::Different(None));
+    assert_eq!(
+        std::fs::read_to_string(&shared).unwrap(),
+        "// someone else's file\n"
+    );
+    assert!(
+        !std::fs::symlink_metadata(&declarations)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&declarations).unwrap(),
+        crate::DECLARATIONS
+    );
 }

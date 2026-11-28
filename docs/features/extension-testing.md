@@ -77,7 +77,7 @@ The workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and
 
 `dupin ext types <dir>` replaces the package's `dupin.d.ts` with the one this Dupin ships, so the editor and `tsc` see the API the launcher now offers. `dupin.d.ts` is a generated copy; keep your own declarations in other files. With `--check` it changes nothing and fails with `types-outdated` unless the file already matches, which suits CI.
 
-`dupin ext check` also says when the package's `dupin.d.ts` declares an older `apiVersion` than this Dupin's, and `--json` reports it as `typesOutdated`.
+`dupin ext check` also says when the package's `dupin.d.ts` differs from this Dupin's, unless it declares a newer `apiVersion`, and `--json` reports it as `typesOutdated`. The API grows between `apiVersion` bumps, so a copy of the same version can still lack parts of it.
 
 ## Developing live
 
