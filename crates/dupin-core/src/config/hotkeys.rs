@@ -41,7 +41,7 @@ const MAX_ROW_BYTES: usize = 256;
 pub enum Address {
     Alias(AliasTarget),
     /// `<command>/<row>`: the row with the ID `row` among those of the command `command`
-    /// names as an alias names it, such as `window-management/left-half`; `system` names the
+    /// names as an alias names it, such as `running-apps/com.apple.Safari`; `system` names the
     /// system commands.
     Row {
         command: String,
@@ -245,7 +245,7 @@ command = "system/sleep"
 
 [bindings."alt+cmd+l"]
 target = "dupin"
-command = "window-management/left-half"
+command = "running-apps/com.apple.Safari"
 
 [bindings."alt+cmd+g"]
 target = "dupin"
@@ -273,7 +273,7 @@ command = "file:~/Downloads"
                 row: "sleep".into(),
             }
         );
-        assert_eq!(address("alt+cmd+l").to_string(), "window-management/left-half");
+        assert_eq!(address("alt+cmd+l").to_string(), "running-apps/com.apple.Safari");
         assert_eq!(address("alt+cmd+g"), AliasTarget::Web("g".into()).into());
         assert_eq!(
             address("alt+cmd+f"),

@@ -123,8 +123,8 @@ in
               touch $out
             '';
         third-party-notices = dupin.thirdPartyNotices;
-        # The bundled extensions and the notes example against sdk/dupin.d.ts, as their authors'
-        # editors see them.
+        # The bundled extensions, the notes example and the TypeScript examples against
+        # sdk/dupin.d.ts, as their authors' editors see them.
         extensions-typecheck = repoCheck "dupin-extensions-typecheck" [ pkgs.typescript ] ''
           ^tsc --project extensions/tsconfig.json
         '';

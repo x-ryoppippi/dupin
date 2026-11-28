@@ -351,12 +351,12 @@ def main [] {
     assert equal (unenabled $composed [] 1) 0
     let joined = [
         {
-            searched: [apps.search, extension-search.repo]
-            packages: {extension-search.repo: "bundled:repo"}
+            searched: [apps.search, extension-search.catalogue]
+            packages: {extension-search.catalogue: "catalogue"}
         }
     ]
-    assert equal (unenabled $joined ["bundled:repo"] 1) 0 "a package joining the main search shows by its rows"
-    assert equal (unenabled $joined ["bundled:repo", "bundled:running-apps"] 1) 1
+    assert equal (unenabled $joined ["catalogue"] 1) 0 "a package joining the main search shows by its rows"
+    assert equal (unenabled $joined ["catalogue", "bundled:running-apps"] 1) 1
     assert equal (enabled-grants ["bundled:running-apps"] | from toml) {
         version: 1
         packages: {"bundled:running-apps": {enabled: true}}

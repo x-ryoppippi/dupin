@@ -26,9 +26,8 @@ let
     (root + /sdk)
     # The backdrop shader examples, which a test compiles.
     (root + /examples/shaders)
-    # The JavaScript word counter and notes examples, which tests load and run.
-    (root + /examples/extensions/word-count-js)
-    (root + /examples/extensions/notes-js)
+    # The example extensions, which tests load and replay their fixtures against.
+    (root + /examples/extensions)
     # The bundled extensions, which a test build finds in the source tree.
     (root + /extensions)
     # The search-quality corpus and cases, which dupin-search-quality's test runs.

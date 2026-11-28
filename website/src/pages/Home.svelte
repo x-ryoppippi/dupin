@@ -36,7 +36,7 @@
 		{
 			id: 'commands',
 			title: 'Commands',
-			text: 'Your own scripts, window halves and thirds, sleep and lock, and Restart or Update Dupin, from search or a hotkey.',
+			text: 'Your own scripts, sleep and lock, quitting apps, and Restart or Update Dupin, from search or a hotkey.',
 			href: '/docs/features/scripts/',
 			icon: 'icon-[ph--terminal-window]',
 		},

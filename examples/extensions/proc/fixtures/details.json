@@ -1,6 +1,6 @@
 {
 	"fixture": 1,
-	"description": "Show Open Ports hands the process over to the Ports keyword, which lists what it listens on.",
+	"description": "Details reads the whole command line and working folder, which the list leaves out, and shows them on a page of their own with the process's actions.",
 	"environment": {
 		"now": "2026-11-26T12:00:00Z",
 		"seed": 1,
@@ -23,8 +23,22 @@
 			},
 			{
 				"profile": "commands",
+				"args": ["-ww", "-o", "pid=,args=", "-p", "4242"],
+				"status": 0,
+				"stdout": " 4242 node /Users/alex/Projects/shop/node_modules/.bin/vite --port 5173\n",
+				"stderr": ""
+			},
+			{
+				"profile": "commands",
 				"status": 0,
 				"stdout": "    1 /sbin/launchd\n  150 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon\n  321 /Applications/Safari.app/Contents/MacOS/Safari\n  500 /Applications/Dupin.app/Contents/MacOS/dupin\n  510 /Applications/Dupin.app/Contents/MacOS/dupin --extension-host\n 4242 node /Users/alex/Projects/shop/node_modules/.bin/vite --port 5173\n 4300 /bin/zsh -l\n 5120 claude --resume\n 5130 claude mcp serve\n 5200 node /opt/homebrew/bin/gemini\n 5300 /nix/store/abc-codex-0.167.0/libexec/codex/bin/codex\n 9999 /bin/ps -axww -o pid=,ppid=,uid=,user=,%cpu=,rss=,etime=,comm=\n",
+				"stderr": ""
+			},
+			{
+				"profile": "cwd",
+				"args": ["-a", "-d", "cwd", "-F", "n", "-p", "4242"],
+				"status": 0,
+				"stdout": "p4242\nfcwd\nn/Users/alex/Projects/shop\n",
 				"stderr": ""
 			}
 		]
@@ -76,15 +90,6 @@
 							},
 							{
 								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 4242
-									}
-								},
-								"title": "Show Open Ports"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "node",
@@ -116,21 +121,85 @@
 			}
 		},
 		{
-			"activate": "Show Open Ports",
+			"activate": "Details",
 			"expect": {
 				"effect": {
 					"run": {
-						"action": "showPorts",
+						"action": "details",
 						"data": {
-							"pid": 4242
+							"name": "node",
+							"path": "/opt/homebrew/bin/node",
+							"pid": 4242,
+							"user": "alex"
 						}
 					}
 				},
-				"panel": {
-					"enter": {
-						"command": "port",
-						"query": "4242"
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "4242",
+								"title": "Copy PID"
+							},
+							{
+								"copy": "node /Users/alex/Projects/shop/node_modules/.bin/vite --port 5173",
+								"title": "Copy Command"
+							},
+							{
+								"reveal": "/opt/homebrew/bin/node",
+								"title": "Reveal in Finder"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "node",
+										"path": "/opt/homebrew/bin/node",
+										"pid": 4242
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"detail": {
+							"markdown": "```\nnode /Users/alex/Projects/shop/node_modules/.bin/vite --port 5173\n```",
+							"metadata": [
+								{
+									"label": "PID",
+									"text": "4242"
+								},
+								{
+									"label": "User",
+									"text": "alex"
+								},
+								{
+									"label": "Program",
+									"text": "/opt/homebrew/bin/node"
+								},
+								{
+									"label": "Folder",
+									"text": "/Users/alex/Projects/shop"
+								}
+							]
+						},
+						"id": "detail",
+						"title": "node"
 					}
+				],
+				"selected": 0,
+				"view": {
+					"depth": 1,
+					"name": "details",
+					"state": {
+						"command": "node /Users/alex/Projects/shop/node_modules/.bin/vite --port 5173",
+						"folder": "/Users/alex/Projects/shop",
+						"name": "node",
+						"path": "/opt/homebrew/bin/node",
+						"pid": 4242,
+						"user": "alex"
+					},
+					"title": "node",
+					"type": "detail"
 				}
 			}
 		}

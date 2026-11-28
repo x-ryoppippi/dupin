@@ -11,31 +11,26 @@
       cfg = config.programs.dupin;
       toml = pkgs.formats.toml { };
       # A bundled package runs only as the sealed copy that shipped, and Dupin pre-grants what
-      # it declares, except a `files` or `exec` scope, which is bound to a path. Only those
-      # grants name the revision, which Dupin computes when the file builds.
+      # it declares, so its entry names no revision.
       bundledPackages = lib.filterAttrs (_: package: package != { }) (
         lib.mapAttrs' (
           name: extension:
           lib.nameValuePair "bundled:${name}" (
             lib.optionalAttrs (extension.enable != null) { enabled = extension.enable; }
             // lib.optionalAttrs (extension.deny != [ ]) { inherit (extension) deny; }
-            // lib.optionalAttrs (extension.grants != [ ]) {
-              grant = extension.grants;
-              inherit (extension) bindings;
-            }
           )
         ) cfg.bundledExtensions
       );
       bundled = cfg.package.bundledExtensions or { };
       bundledNames = lib.attrNames bundled;
       unknownBundled = lib.subtractLists bundledNames (lib.attrNames cfg.bundledExtensions);
-      # A denial or grant of a scope the package doesn't declare would do nothing.
+      # A denial of a scope the package doesn't declare would do nothing.
       undeclaredDenials = lib.concatLists (
         lib.mapAttrsToList (
           name: extension:
           let
             declared = bundled.${name} or [ ];
-            undeclared = lib.subtractLists declared (extension.deny ++ extension.grants);
+            undeclared = lib.subtractLists declared extension.deny;
           in
           lib.optional (lib.elem name bundledNames && undeclared != [ ])
             "${name} doesn't declare ${lib.concatStringsSep ", " undeclared}; it declares ${
@@ -82,20 +77,12 @@
             ];
           }
           ''
-            cp "$bundledPath" bundled.json
-            for name in $(jq -r 'to_entries[] | select(.value.grant != null) | .key | ltrimstr("bundled:")' bundled.json); do
-              declared=$(${lib.getExe' cfg.package "dupin"} ext revision \
-                "${cfg.package}/Applications/Dupin.app/Contents/Resources/extensions/$name" --json)
-              jq --arg key "bundled:$name" --argjson declared "$declared" \
-                '.[$key].revision = $declared.revision' bundled.json > bundled.next.json
-              mv bundled.next.json bundled.json
-            done
             jq -c '.[]' "$packagesPath" | while read -r package; do
               src=$(jq -r .src <<<"$package")
               declared=$(${lib.getExe' cfg.package "dupin"} ext revision "$src" --json)
               jq --argjson declared "$declared" \
                 '{($declared.package): {revision: $declared.revision, enabled, grant: .grants, deny, bindings}}' <<<"$package"
-            done | jq -s --slurpfile bundled bundled.json '
+            done | jq -s --slurpfile bundled "$bundledPath" '
               (map(keys[0]) | group_by(.) | map(select(length > 1) | .[0])) as $twice
               | if $twice != [] then
                   error("programs.dupin.extensions: more than one package is named \($twice | join(", ")) in package.json")
@@ -183,7 +170,7 @@
             type = lib.types.nullOr lib.types.bool;
             default = null;
             description = ''
-              `true` turns the package on, even one that ships off such as Window Management;
+              `true` turns the package on, even one that ships off such as Running Apps;
               Dupin's own switch can still turn it off. `false` keeps it off whatever Dupin's
               switch says, so a built-in command it answers says it isn't available. `null`
               leaves it to Dupin.
@@ -196,32 +183,7 @@
             description = ''
               Scopes the package may never use, although it ships with them granted, named as
               the capability broker names them, such as `calendar`, `clipboard:watch` or
-              `windows:arrange`. Each must be one the package declares.
-            '';
-          };
-          grants = lib.mkOption {
-            type = lib.types.listOf scope;
-            default = [ ];
-            example = [
-              "files:ghq"
-              "exec:git-status"
-            ];
-            description = ''
-              `files` and `exec` scopes granted ahead of time, which Dupin doesn't pre-grant
-              because each is bound to a path; give it in `bindings`. They apply to the package
-              exactly as {option}`programs.dupin.package` ships it.
-            '';
-          };
-          bindings = lib.mkOption {
-            type = lib.types.attrsOf lib.types.str;
-            default = { };
-            example = {
-              "files:ghq" = "/Users/me/ghq";
-              "exec:git-status" = "/usr/bin/git";
-            };
-            description = ''
-              The absolute path each granted `files` or `exec` scope is bound to: the folder it
-              may list, or the program it runs.
+              `apps:control`. Each must be one the package declares.
             '';
           };
         };
@@ -287,7 +249,7 @@
           default = { };
           example = lib.literalExpression ''
             {
-              window-management.enable = true;
+              running-apps.enable = true;
               calendar.deny = [ "calendar" ];
               clipboard-history.enable = false;
             }

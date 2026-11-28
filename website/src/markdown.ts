@@ -27,7 +27,7 @@ ${siteName} is a launcher for Apple silicon Macs on macOS 14 or later. It stays 
 
 - Keywords: a keyword and Space enters a command, such as \`cal\` for the calendar, \`d\` for the dictionary, \`clip\` for clipboard history or \`gh\` for a web search. \`?\` lists every one. Aliases and global shortcuts reach commands, apps, web searches and files.
 - Clipboard history, images and files included, and snippets that paste with the date, time or clipboard filled in.
-- Calculations and unit or currency conversions in the main search, emoji, window management, system commands, Restart and Update Dupin, and your own script commands.
+- Calculations and unit or currency conversions in the main search, emoji, system commands, Restart and Update Dupin, and your own script commands.
 - Snapshots of a calculation, search or extension view, and an MCP server (\`dupin mcp\`) for agents.
 - Extensions: TypeScript or JavaScript packages installed from Git, run in a sandbox with the capabilities you grant, and tested against fixtures with \`dupin ext test\`.
 - Backdrop shaders: Flow, built in, and example WGSL shaders behind the panel, or your own; off by default.

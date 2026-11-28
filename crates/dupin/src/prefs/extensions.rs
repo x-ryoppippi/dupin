@@ -585,7 +585,7 @@ mod tests {
         );
         let capabilities = |value| dupin_extension_bridge::Capabilities::parse(&value).unwrap();
         let revision = dupin_extension_bridge::Revision::new("blake3:fixture").unwrap();
-        let bundled = PackageId::new("bundled:window-management").unwrap();
+        let bundled = PackageId::new("bundled:windows").unwrap();
         bridge.set_bundled(&bundled, revision.clone(), false);
         bridge.install(
             &bundled,

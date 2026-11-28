@@ -1,6 +1,6 @@
 # Bundled extensions
 
-Each folder here is an extension package that ships inside Dupin.app. They run in the same sandboxed extension host, under the same limits, as any package you install, so each one is a working example to copy. [Bundled extensions](../docs/features/extensions.md#bundled-extensions) covers how they ship, their grants and how to override one.
+Each folder here is an extension package that ships inside Dupin.app. They run in the same sandboxed extension host, under the same limits, as any package you install. [Bundled extensions](../docs/features/extensions.md#bundled-extensions) covers how they ship, their grants and how to override one, and [the bundling rule](../docs/design/extension-platform.md#built-ins-as-bundled-extensions) decides what belongs here. Packages that don't ship, to install or copy, are in [`examples/extensions`](../examples/extensions).
 
 | Package                                   | Keyword               | On by default              | What it does                                                          |
 | ----------------------------------------- | --------------------- | -------------------------- | --------------------------------------------------------------------- |
@@ -10,32 +10,28 @@ Each folder here is an extension package that ships inside Dupin.app. They run i
 | [dictionary](./dictionary/)               | `define`, `d`         | Yes                        | Looks words up in Dictionary.app's dictionaries.                      |
 | [dupin](./dupin/)                         | `help`                | Yes                        | Links to Dupin's documentation, issues, source and website.           |
 | [emoji](./emoji/)                         | `emoji`               | Yes                        | Picks an emoji or symbol by its English or Japanese name.             |
-| [port](./port/)                           | `port`                | No                         | Lists listening ports and stops the process holding one.              |
-| [proc](./proc/)                           | `proc`                | No                         | Lists processes and stops one.                                        |
-| [repo](./repo/)                           | `repo`                | No                         | Lists Git repositories and opens one in an editor or terminal.        |
 | [running-apps](./running-apps/)           | `quit`                | No                         | Hides, quits and force quits running apps, from its list or app rows. |
 | [snippets](./snippets/)                   | `snip`                | Yes                        | Copies or pastes saved text, and adds and edits stored snippets.      |
 | [web-search](./web-search/)               | `web`, and each alias | Yes                        | Lists the web searches the main search reaches by alias.              |
-| [window-management](./window-management/) | `window`              | No                         | Moves and resizes the focused window.                                 |
 
-A package that is off by default waits for its switch in Settings → Extensions. A setting in brackets is a former built-in's own switch, which must be on too; calculator, calendar, clipboard-history, dictionary, snippets, web-search and window-management are ports of former built-ins.
+A package that is off by default waits for its switch in Settings → Extensions. A setting in brackets is a former built-in's own switch, which must be on too; calculator, calendar, clipboard-history, dictionary, snippets and web-search are ports of former built-ins.
 
 ## Where to start
 
-| To learn                                               | Read                                                                                                  |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `search(query)` and nothing else                       | [dupin](./dupin/), then [dictionary](./dictionary/) for a host service and a detail pane.             |
-| `search` with sections and `emptyQuery`                | [calendar](./calendar/).                                                                              |
-| An `items()` catalogue, sent in parts                  | [emoji](./emoji/).                                                                                    |
-| Web search items and config.toml preferences           | [web-search](./web-search/).                                                                          |
-| The main search (`defaultSearch`) and `run` actions    | [window-management](./window-management/).                                                            |
-| Pushed views and forms                                 | [snippets](./snippets/) for a form, [proc](./proc/) for a detail page.                                |
-| `events.clipboard`, `storage` and `items.invalidate()` | [clipboard-history](./clipboard-history/).                                                            |
-| `exec` profiles and a catalogue with a `ttl`           | [port](./port/) is the smallest; [proc](./proc/) adds more profiles.                                  |
-| `files` scopes, declared preferences and stored state  | [repo](./repo/).                                                                                      |
-| Kind actions composed by default (`dupin.provides`)    | [running-apps](./running-apps/); see [Advanced composition](../docs/features/advanced.md#extensions). |
+| To learn                                               | Read                                                                                                                       |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `search(query)` and nothing else                       | [dupin](./dupin/), then [dictionary](./dictionary/) for a host service and a detail pane.                                  |
+| `search` with sections and `emptyQuery`                | [calendar](./calendar/).                                                                                                   |
+| An `items()` catalogue, sent in parts                  | [emoji](./emoji/).                                                                                                         |
+| Web search items and config.toml preferences           | [web-search](./web-search/).                                                                                               |
+| The main search (`defaultSearch`) and `run` actions    | [window-management](../examples/extensions/window-management/), an example.                                                |
+| Pushed views and forms                                 | [snippets](./snippets/) for a form, the [proc](../examples/extensions/proc/) example for a detail page.                    |
+| `events.clipboard`, `storage` and `items.invalidate()` | [clipboard-history](./clipboard-history/).                                                                                 |
+| `exec` profiles and a catalogue with a `ttl`           | The [port](../examples/extensions/port/) example is the smallest; [proc](../examples/extensions/proc/) adds more profiles. |
+| `files` scopes, declared preferences and stored state  | The [repo](../examples/extensions/repo/) example.                                                                          |
+| Kind actions composed by default (`dupin.provides`)    | [running-apps](./running-apps/); see [Advanced composition](../docs/features/advanced.md#extensions).                      |
 
-[`examples/extensions`](../examples/extensions) holds two smaller packages that don't ship: a word counter and a notes list.
+[`examples/extensions`](../examples/extensions) holds the packages that don't ship: Processes, Ports, Repositories and Window Management, which used to be bundled, and a smaller word counter and notes list. `cargo test -p dupin every_example_with_fixtures_passes_them` replays the fixtures of each one that has them.
 
 ## Extension docs
 
@@ -51,7 +47,7 @@ A package that is off by default waits for its switch in Settings → Extensions
 Every package is TypeScript that Dupin runs as written, typed by [`sdk/dupin.d.ts`](../sdk/dupin.d.ts). In `nix develop`:
 
 ```sh
-tsc --project extensions/tsconfig.json     # type-check every package
+tsc --project extensions/tsconfig.json     # type-check every package and the TypeScript examples
 cargo run -p dupin -- ext test extensions/calendar
 cargo run -p dupin -- ext render extensions/calendar extensions/calendar/fixtures/upcoming.json upcoming.png
 ```

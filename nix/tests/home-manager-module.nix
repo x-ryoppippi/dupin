@@ -44,13 +44,12 @@ let
             programs.dupin = {
               enable = true;
               # Stands in for `dupin ext revision --json`, which names the package in the folder
-              # and its revision. The stand-in bundles no folders, so a bundled one is named by
-              # its folder.
+              # and its revision.
               package =
                 pkgs.writeShellScriptBin "dupin" ''
                   [ "$1 $2 $4" = "ext revision --json" ] \
                     && printf '{"package": %s, "revision": "blake3:%s"}\n' \
-                      "$(${lib.getExe pkgs.jq} .name "$3/package.json" 2>/dev/null || printf '"%s"' "$(basename "$3")")" \
+                      "$(${lib.getExe pkgs.jq} .name "$3/package.json")" \
                       "$(basename "$3" | cut -c1-8)"
                 ''
                 // {
@@ -117,27 +116,22 @@ let
       }
     ];
     bundledExtensions = {
-      window-management.enable = true;
       calendar.deny = [ "calendar" ];
       clipboard-history.enable = false;
       dictionary = { };
       calculator.deny = [ "query" ];
       snippets.deny = [ "snippets" ];
-      proc = {
+      running-apps = {
         enable = true;
-        deny = [ "exec:force-quit" ];
-      };
-      repo = {
-        enable = true;
-        grants = [ "files:ghq" ];
-        bindings."files:ghq" = "/Users/me/ghq";
+        deny = [ "apps:control" ];
       };
     };
   };
-  bundledOnly = evaluate { bundledExtensions.window-management.enable = true; };
+  bundledOnly = evaluate { bundledExtensions.running-apps.enable = true; };
   unbundled = evaluate { bundledExtensions.word-count.enable = true; };
+  # Bundled once, and examples now: a declaration of one fails as any other name would.
+  unbundledExample = evaluate { bundledExtensions.window-management.enable = true; };
   undeclared = evaluate { bundledExtensions.calendar.deny = [ "clipboard:read" ]; };
-  undeclaredGrant = evaluate { bundledExtensions.repo.grants = [ "files:nowhere" ]; };
   # A scope the broker can't read is a type error, whichever option names it.
   rejects =
     dupin:
@@ -170,11 +164,6 @@ assert declared.launchd.agents.dupin.enable;
 assert !failed declared && failed duplicated;
 assert bundledExtensions.calendar == [ "calendar" ];
 assert
-  bundledExtensions.window-management == [
-    "windows:read"
-    "windows:arrange"
-  ];
-assert
   bundledExtensions.running-apps == [
     "apps:read"
     "apps:control"
@@ -182,15 +171,8 @@ assert
   ];
 assert rejects { bundledExtensions.running-apps.deny = [ "apps:quit" ]; };
 assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
-assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
-  "proc"
-  "port"
-];
 assert bundledExtensions.dupin == [ ];
-assert
-  lib.elem "files:ghq" bundledExtensions.repo && lib.elem "exec:git-status" bundledExtensions.repo;
-assert failed undeclaredGrant;
-assert !failed bundledOnly && failed unbundled && failed undeclared;
+assert !failed bundledOnly && failed unbundled && failed unbundledExample && failed undeclared;
 assert lib.hasInfix "it declares calendar"
   (lib.findFirst (a: !a.assertion) null undeclared.assertions).message;
 assert rejects { bundledExtensions.calendar.deny = [ "calender" ]; };
@@ -253,26 +235,20 @@ pkgs.runCommand "dupin-home-manager-module"
           deny = [ "clipboard:read" ];
           bindings = { };
         };
-        "bundled:window-management".enabled = true;
         "bundled:calendar".deny = [ "calendar" ];
         "bundled:clipboard-history".enabled = false;
         "bundled:calculator".deny = [ "query" ];
         "bundled:snippets".deny = [ "snippets" ];
-        "bundled:proc" = {
+        "bundled:running-apps" = {
           enabled = true;
-          deny = [ "exec:force-quit" ];
-        };
-        "bundled:repo" = {
-          enabled = true;
-          grant = [ "files:ghq" ];
-          bindings."files:ghq" = "/Users/me/ghq";
+          deny = [ "apps:control" ];
         };
       };
     };
     bundledGrants = bundledOnly.xdg.configFile."dupin/extension-grants.toml".source;
     bundledExpected = builtins.toJSON {
       version = 1;
-      packages."bundled:window-management".enabled = true;
+      packages."bundled:running-apps".enabled = true;
     };
   }
   ''
@@ -292,8 +268,7 @@ pkgs.runCommand "dupin-home-manager-module"
     diff bundled-expected.json bundled-actual.json
     toml2json "$grants" | jq --sort-keys 'del(.packages[].revision)' > actual.json
     toml2json "$grants" | jq -e '.packages | with_entries(select(.key | startswith("bundled:") | not)) | map(.revision) | all(startswith("blake3:"))'
-    toml2json "$grants" | jq -e '.packages["bundled:repo"].revision == "blake3:repo"
-      and ([.packages | to_entries[] | select(.key != "bundled:repo" and (.key | startswith("bundled:"))) | .value.revision] | all(. == null))'
+    toml2json "$grants" | jq -e '[.packages | to_entries[] | select(.key | startswith("bundled:")) | .value.revision] | all(. == null)'
     printf '%s' "$expected" | jq --sort-keys . > expected.json
     diff expected.json actual.json
     grep -F 'more than one package is named word-count in package.json' "$clash/testBuildFailure.log"
