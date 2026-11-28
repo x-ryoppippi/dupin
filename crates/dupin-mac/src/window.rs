@@ -5,7 +5,7 @@ use std::ptr::NonNull;
 
 use dupin_core::DisplaySelection;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
+use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
 use objc2::{MainThreadMarker, msg_send, sel};
 use objc2_app_kit::{NSApplication, NSEvent, NSScreen, NSView, NSWorkspace};
 use objc2_foundation::{
@@ -59,61 +59,72 @@ pub unsafe fn autosave_frame(ns_view: NonNull<c_void>, name: &str) -> bool {
 fn fit_within(frame: NSRect, area: NSRect) -> NSRect {
     let width = frame.size.width.min(area.size.width);
     let height = frame.size.height.min(area.size.height);
-    let x = frame.origin.x.clamp(area.origin.x, area.max().x - width);
-    let top = frame.max().y.clamp(area.origin.y + height, area.max().y);
+    // Not `clamp`, which panics when rounding leaves the far bound a hair below the near one.
+    let x = frame.origin.x.min(area.max().x - width).max(area.origin.x);
+    let top = frame.max().y.max(area.origin.y + height).min(area.max().y);
     NSRect::new(NSPoint::new(x, top - height), NSSize::new(width, height))
 }
 
 /// Keep the bottom edge of the view's window at `bottom`, in AppKit's bottom-up screen points,
-/// whenever its frame is set, so it grows and shrinks from its top; `None` lets it go.
+/// whenever its frame is set, so it grows and shrinks from its top; `None` lets it go. False
+/// when the edge can't be held, so the window grows downwards as Rune sizes it.
 ///
 /// Rune keeps a window's top edge where it is when the window resizes to fit its content, and
 /// has no way to keep another. Every frame change Rune makes goes through
-/// `-[NSWindow setFrame:display:]`, so the window's class is swapped for a subclass of its own
-/// whose `setFrame:display:` moves the requested frame onto the pinned edge: the new size and
-/// position land in the one call, with no move in between.
+/// `-[NSWindow setFrame:display:]`, so the window's class gets a `setFrame:display:` of its own
+/// that moves the requested frame onto the pinned edge: the new size and position land in the
+/// one call, with no move in between.
 ///
 /// # Safety
 ///
 /// `ns_view` must point to a live AppKit `NSView` on the main thread.
-pub unsafe fn pin_bottom_edge(ns_view: NonNull<c_void>, bottom: Option<f64>) {
+pub unsafe fn pin_bottom_edge(ns_view: NonNull<c_void>, bottom: Option<f64>) -> bool {
     let Some(_main) = MainThreadMarker::new() else {
-        return;
+        return false;
     };
     // SAFETY: The caller guarantees a live NSView for this borrow.
     let view = unsafe { ns_view.cast::<NSView>().as_ref() };
     let Some(window) = view.window() else {
-        return;
+        return false;
     };
-    let object: &AnyObject = &window;
-    let key = std::ptr::from_ref(object) as usize;
-    PINNED.with_borrow_mut(|pinned| match bottom {
-        Some(bottom) => {
-            pinned.insert(key, bottom);
-        }
-        None => {
-            pinned.remove(&key);
-        }
-    });
-    if bottom.is_some() {
-        // SAFETY: on the main thread, with the window alive for this borrow.
-        unsafe { adopt_pinning_class(object) };
+    // SAFETY: a live NSWindow, on the main thread.
+    unsafe { pin_window(&window, bottom) }
+}
+
+/// # Safety
+///
+/// `window` must be a live object that answers `frame` and `setFrame:display:` as an
+/// `NSWindow` does, on the thread that sets its frames.
+unsafe fn pin_window(window: &AnyObject, bottom: Option<f64>) -> bool {
+    let key = std::ptr::from_ref(window) as usize;
+    let Some(bottom) = bottom else {
+        PINNED.with_borrow_mut(|pinned| pinned.remove(&key));
+        return true;
+    };
+    // SAFETY: the caller guarantees a live window.
+    if !unsafe { hold_frames(window) } {
+        PINNED.with_borrow_mut(|pinned| pinned.remove(&key));
+        return false;
     }
-    if let Some(bottom) = bottom {
-        let frame = window.frame();
+    PINNED.with_borrow_mut(|pinned| pinned.insert(key, bottom));
+    // SAFETY: the caller guarantees the window answers both messages.
+    unsafe {
+        let frame: NSRect = msg_send![window, frame];
         let pinned = pinned_frame(frame, Some(bottom));
         if pinned != frame {
-            window.setFrame_display(pinned, false);
+            let _: () = msg_send![window, setFrame: pinned, display: Bool::NO];
         }
     }
+    true
 }
 
 thread_local! {
     /// Each pinned window's bottom edge, by the window's address.
     static PINNED: std::cell::RefCell<std::collections::HashMap<usize, f64>> = Default::default();
+    /// Each class given the pinning `setFrame:display:`, by address, with the superclass whose
+    /// method it passes the frame on to.
+    static HELD: std::cell::RefCell<std::collections::HashMap<usize, usize>> = Default::default();
 }
-
-const PINNING_PREFIX: &str = "DupinPinnedBottom_";
 
 /// `frame` on the pinned bottom edge, keeping its size and horizontal place.
 fn pinned_frame(mut frame: NSRect, bottom: Option<f64>) -> NSRect {
@@ -123,33 +134,56 @@ fn pinned_frame(mut frame: NSRect, bottom: Option<f64>) -> NSRect {
     frame
 }
 
-/// Swaps `window`'s class for one that keeps its pinned edge, made once per original class.
+/// Gives the class `window` was declared with a `setFrame:display:` that keeps a pinned
+/// window's edge, once per class. Windows of the class that aren't pinned pass their frames on
+/// unchanged. False when the class has a `setFrame:display:` of its own, which adding one would
+/// replace.
+///
+/// The method goes on the declared class, `-class`, rather than on a subclass swapped in as the
+/// window's class: once KVO observes the window, its class is KVO's subclass of the declared
+/// one, whose `-class` answers nil for any subclass made over it, and `-[NSWindow animator]`
+/// throws on a nil class.
 ///
 /// # Safety
 ///
-/// `window` must be a live `NSWindow`, on the main thread.
-unsafe fn adopt_pinning_class(window: &AnyObject) {
-    let class = window.class();
-    if class.name().to_string_lossy().starts_with(PINNING_PREFIX) {
-        return;
+/// `window` must be a live object, on the thread that sets its frames.
+unsafe fn hold_frames(window: &AnyObject) -> bool {
+    // SAFETY: every NSObject answers `-class` with its class.
+    let declared: &AnyClass = unsafe { msg_send![window, class] };
+    let key = std::ptr::from_ref(declared) as usize;
+    if HELD.with_borrow(|held| held.contains_key(&key)) {
+        return true;
     }
-    let name = std::ffi::CString::new(format!("{PINNING_PREFIX}{}", class.name().to_string_lossy()))
-        .expect("class names have no NUL");
-    let pinning = AnyClass::get(&name).or_else(|| {
-        let mut builder = ClassBuilder::new(&name, class)?;
-        // SAFETY: the method has `-[NSWindow setFrame:display:]`'s argument and return types.
-        unsafe {
-            builder.add_method(
-                sel!(setFrame:display:),
-                set_frame_display as unsafe extern "C-unwind" fn(*mut AnyObject, Sel, NSRect, Bool),
-            );
-        }
-        Some(builder.register())
-    });
-    if let Some(pinning) = pinning {
-        // SAFETY: the subclass adds a method and no ivars, so the instance's layout still fits.
-        unsafe { AnyObject::set_class(window, pinning) };
+    let selector = sel!(setFrame:display:);
+    let Some(parent) = declared.superclass() else {
+        return false;
+    };
+    let (Some(own), Some(inherited)) = (
+        declared.instance_method(selector),
+        parent.instance_method(selector),
+    ) else {
+        return false;
+    };
+    if !std::ptr::eq(own, inherited) {
+        return false;
     }
+    let method: unsafe extern "C-unwind" fn(*mut AnyObject, Sel, NSRect, Bool) = set_frame_display;
+    // SAFETY: the method takes `setFrame:display:`'s arguments, under the inherited method's
+    // type encoding, and the runtime only adds it to a class that doesn't implement it itself.
+    let added = unsafe {
+        objc2::ffi::class_addMethod(
+            std::ptr::from_ref(declared).cast_mut(),
+            selector,
+            std::mem::transmute::<unsafe extern "C-unwind" fn(*mut AnyObject, Sel, NSRect, Bool), Imp>(
+                method,
+            ),
+            objc2::ffi::method_getTypeEncoding(own),
+        )
+    };
+    if added.as_bool() {
+        HELD.with_borrow_mut(|held| held.insert(key, std::ptr::from_ref(parent) as usize));
+    }
+    added.as_bool()
 }
 
 unsafe extern "C-unwind" fn set_frame_display(this: *mut AnyObject, _: Sel, frame: NSRect, display: Bool) {
@@ -159,20 +193,24 @@ unsafe extern "C-unwind" fn set_frame_display(this: *mut AnyObject, _: Sel, fram
     };
     let key = std::ptr::from_ref(this) as usize;
     let frame = pinned_frame(frame, PINNED.with_borrow(|pinned| pinned.get(&key).copied()));
-    // A subclass made over the pinning one (KVO's, say) still reaches the original's method.
-    let mut class = this.class();
-    while !class.name().to_string_lossy().starts_with(PINNING_PREFIX) {
-        let Some(superclass) = class.superclass() else {
+    // The window's own class may be a subclass of the one that holds this method (KVO's).
+    let mut class = Some(this.class());
+    let parent = loop {
+        let Some(current) = class else {
             return;
         };
-        class = superclass;
-    }
-    let Some(original) = class.superclass() else {
-        return;
+        if let Some(parent) =
+            HELD.with_borrow(|held| held.get(&(std::ptr::from_ref(current) as usize)).copied())
+        {
+            break parent;
+        }
+        class = current.superclass();
     };
-    // SAFETY: the original class is an NSWindow subclass, which takes `setFrame:display:`.
+    // SAFETY: `HELD` keeps registered classes, which live for the whole process, and the parent
+    // implements `setFrame:display:`, as `hold_frames` found.
     unsafe {
-        let _: () = msg_send![super(this, original), setFrame: frame, display: display];
+        let parent = &*(parent as *const AnyClass);
+        let _: () = msg_send![super(this, parent), setFrame: frame, display: display];
     }
 }
 
@@ -291,8 +329,12 @@ fn appkit_frame(mut frame: NSRect, primary_top: f64) -> Option<NSRect> {
 
 #[cfg(test)]
 mod pin_tests {
-    use super::pinned_frame;
-    use objc2_foundation::{NSPoint, NSRect, NSSize};
+    use super::{pin_window, pinned_frame};
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, NSObject, Sel};
+    use objc2::{ClassType, msg_send, sel};
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+    use std::ffi::c_void;
 
     #[test]
     fn a_pinned_frame_keeps_its_bottom_edge_and_grows_upwards() {
@@ -302,6 +344,73 @@ mod pin_tests {
         assert_eq!(pinned_frame(asked, Some(300.0)), rect(300.0, 400.0));
         assert_eq!(pinned_frame(rect(250.0, 64.0), Some(300.0)), rect(300.0, 64.0));
         assert_eq!(pinned_frame(asked, None), asked);
+    }
+
+    thread_local! {
+        static FRAME: std::cell::Cell<NSRect> = const { std::cell::Cell::new(NSRect::ZERO) };
+    }
+
+    extern "C-unwind" fn frame(_: *mut AnyObject, _: Sel) -> NSRect {
+        FRAME.get()
+    }
+    extern "C-unwind" fn set_frame(_: *mut AnyObject, _: Sel, frame: NSRect, _: Bool) {
+        FRAME.set(frame);
+    }
+    extern "C-unwind" fn title(_: *mut AnyObject, _: Sel) -> *mut AnyObject {
+        std::ptr::null_mut()
+    }
+    extern "C-unwind" fn set_title(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {}
+
+    /// A window class as Rune declares its panel's, inheriting `frame` and `setFrame:display:`.
+    fn window_class() -> &'static AnyClass {
+        let mut base = ClassBuilder::new(c"DupinPinTestWindowBase", NSObject::class()).unwrap();
+        // SAFETY: each function takes its selector's arguments and returns its type.
+        unsafe {
+            base.add_method(sel!(frame), frame as extern "C-unwind" fn(_, _) -> _);
+            base.add_method(
+                sel!(setFrame:display:),
+                set_frame as extern "C-unwind" fn(_, _, _, _),
+            );
+            base.add_method(sel!(title), title as extern "C-unwind" fn(_, _) -> _);
+            base.add_method(sel!(setTitle:), set_title as extern "C-unwind" fn(_, _, _));
+        }
+        let base = base.register();
+        ClassBuilder::new(c"DupinPinTestWindow", base).unwrap().register()
+    }
+
+    /// AppKit or winit observes the panel through KVO before the bottom position pins it, so
+    /// the panel's class is already KVO's subclass. The window must still answer `-class`
+    /// (`-[NSWindow animator]` throws on nil) and keep its bottom edge.
+    #[test]
+    fn a_window_kvo_observes_keeps_its_class_and_its_bottom_edge() {
+        let class = window_class();
+        // SAFETY: registered classes whose `new` returns a live instance; KVO observes a key the
+        // class has a getter and setter for, and the observer is removed before both are freed.
+        unsafe {
+            let window: Retained<AnyObject> = msg_send![class, new];
+            let observer = NSObject::new();
+            let key = NSString::from_str("title");
+            let _: () = msg_send![&*window, addObserver: &*observer, forKeyPath: &*key, options: 0usize, context: std::ptr::null_mut::<c_void>()];
+            let kvo = window.class();
+            assert!(kvo.name().to_string_lossy().starts_with("NSKVONotifying_"));
+
+            let rect = |y, h| NSRect::new(NSPoint::new(40.0, y), NSSize::new(680.0, h));
+            FRAME.set(rect(250.0, 64.0));
+            assert!(pin_window(&window, Some(300.0)));
+            assert_eq!(FRAME.get(), rect(300.0, 64.0));
+            let declared: *const AnyClass = msg_send![&*window, class];
+            assert_eq!(declared, std::ptr::from_ref(class));
+            assert!(std::ptr::eq(window.class(), kvo));
+
+            let _: () = msg_send![&*window, setFrame: rect(300.0 + 64.0 - 400.0, 400.0), display: Bool::YES];
+            assert_eq!(FRAME.get(), rect(300.0, 400.0));
+
+            assert!(pin_window(&window, None));
+            let _: () = msg_send![&*window, setFrame: rect(10.0, 64.0), display: Bool::YES];
+            assert_eq!(FRAME.get(), rect(10.0, 64.0));
+
+            let _: () = msg_send![&*window, removeObserver: &*observer, forKeyPath: &*key];
+        }
     }
 }
 
@@ -344,6 +453,9 @@ mod tests {
             fit_within(rect(100.0, 600.0, 960.0, 640.0), visible),
             rect(100.0, 160.0, 960.0, 640.0)
         );
+        // 0.1 + 0.4 - 0.4 rounds below 0.1: the far bound lands left of the near one.
+        let fitted = fit_within(rect(0.0, 0.0, 1.0, 1.0), rect(0.1, 0.1, 0.4, 0.4));
+        assert_eq!((fitted.origin.x, fitted.size.width), (0.1, 0.4));
     }
 
     #[test]
