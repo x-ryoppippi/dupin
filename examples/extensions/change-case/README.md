@@ -2,7 +2,7 @@
 
 A [Dupin](https://github.com/x-ryoppippi/dupin) extension that uses an npm package. Type `case`, a space and some text to see it in camelCase, PascalCase, snake_case, kebab-case and CONSTANT_CASE; Enter copies the selected one.
 
-It is `dupin ext new change-case --bundle` with [`change-case`](https://github.com/blakeembrey/change-case) added by `bun add change-case`, bundled into `dist/main.js` by `dupin ext build .`. `dist/main.js` includes `change-case`, Copyright (c) 2014 Blake Embrey, under the [MIT License](https://github.com/blakeembrey/change-case/blob/main/LICENSE).
+It is `dupin ext new change-case --bundle` with [`change-case`](https://github.com/blakeembrey/change-case) added by `bun add change-case`, bundled into `dist/main.js` by `dupin ext build .`. `dist/main.js` includes `change-case`, whose MIT licence is in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
 
 ## Develop
 
