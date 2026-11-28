@@ -401,6 +401,16 @@ impl Prefs {
 
     fn change_navigation_key(&mut self, index: usize, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
         let other = 1 - index;
+        if next.is_some_and(|shortcut| {
+            matches!(
+                shortcut.physical_key(),
+                rune::PhysicalKeyCode::ArrowUp | rune::PhysicalKeyCode::ArrowDown
+            )
+        }) {
+            return Err(ShortcutError::Backend(
+                "arrow keys are reserved for native navigation".into(),
+            ));
+        }
         if next.is_some_and(|shortcut| self.navigation_recorders[other].shortcut() == Some(shortcut)) {
             return Err(ShortcutError::Conflict);
         }
@@ -728,6 +738,33 @@ mod tests {
             welcome,
             CalendarAccess::new(|| {}),
         )
+    }
+
+    #[test]
+    fn navigation_recording_rejects_arrows_and_preserves_other_assignments() {
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut prefs = state(current.clone(), settings, false);
+        let arrow: Shortcut = "ctrl+up".parse().unwrap();
+        assert_eq!(
+            prefs.change_navigation_key(0, Some(&arrow)),
+            Err(ShortcutError::Backend(
+                "arrow keys are reserved for native navigation".into(),
+            ))
+        );
+        assert!(current.borrow().navigation_up.is_empty());
+
+        let chord: Shortcut = "ctrl+k".parse().unwrap();
+        assert_eq!(prefs.change_navigation_key(0, Some(&chord)), Ok(()));
+        assert_eq!(current.borrow().navigation_up, "ctrl+k");
+
+        prefs.navigation_recorders[0] = ShortcutState::new(Some(chord.clone()));
+        assert_eq!(
+            prefs.change_navigation_key(1, Some(&chord)),
+            Err(ShortcutError::Conflict)
+        );
+        assert_eq!(prefs.change_navigation_key(0, None), Ok(()));
+        assert!(current.borrow().navigation_up.is_empty());
     }
 
     #[test]
