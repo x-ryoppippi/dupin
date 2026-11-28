@@ -154,7 +154,7 @@ fn run(
         let outcome = provider.search_batches(&request, &mut |mut batch| {
             batch.items.truncate(remaining);
             remaining -= batch.items.len();
-            if !batch.items.is_empty() && is_current(generation) {
+            if (!batch.items.is_empty() || batch.empty_text.is_some()) && is_current(generation) {
                 deliver(if batch.is_plain() {
                     Delivery::Batch {
                         generation,
@@ -272,6 +272,47 @@ mod tests {
         ));
         assert!(matches!(&got[1], Delivery::Batch { items, .. } if items.len() == 1));
         assert_eq!(got[2], Delivery::Done { generation: 1 });
+    }
+
+    struct Nothing;
+
+    impl Provider for Nothing {
+        fn search(
+            &self,
+            request: &Request,
+            emit: &mut dyn FnMut(Vec<Item>),
+        ) -> Result<(), crate::ProviderError> {
+            self.search_batches(request, &mut |batch| emit(batch.items))
+        }
+
+        fn search_batches(
+            &self,
+            _: &Request,
+            emit: &mut dyn FnMut(Batch),
+        ) -> Result<(), crate::ProviderError> {
+            emit(Batch::default());
+            emit(Batch {
+                empty_text: Some("Nothing here".into()),
+                ..Batch::default()
+            });
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn what_to_show_for_no_rows_reaches_the_session_without_rows() {
+        let (tx, rx) = mpsc::channel();
+        let searcher = Searcher::spawn("test", Arc::new(Nothing), move |d| tx.send(d).unwrap());
+        searcher.search(1, String::new(), None, None, 10);
+        let got: Vec<_> = (0..2)
+            .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap())
+            .collect();
+        assert!(matches!(
+            &got[0],
+            Delivery::Presented { batch, .. }
+                if batch.items.is_empty() && batch.empty_text.as_deref() == Some("Nothing here")
+        ));
+        assert_eq!(got[1], Delivery::Done { generation: 1 });
     }
 
     #[test]
