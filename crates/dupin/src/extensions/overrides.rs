@@ -78,7 +78,6 @@ fn case(name: &str) -> Option<Override> {
         "web-search" => Override::extension("web-search", None),
         "proc" => Override::signals("proc"),
         "port" => Override::signals("port"),
-        "agent" => Override::signals("agent"),
         "window-management" => Override::extension(
             "window-management",
             Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),

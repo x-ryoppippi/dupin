@@ -4,7 +4,6 @@ Each folder here is an extension package that ships inside Dupin.app. They run i
 
 | Package                                   | Keyword               | On by default              | What it does                                                          |
 | ----------------------------------------- | --------------------- | -------------------------- | --------------------------------------------------------------------- |
-| [agent](./agent/)                         | `agent`               | No                         | Lists running coding agents and the project each works in.            |
 | [calculator](./calculator/)               | None: the main search | Yes (`calculator`)         | Answers calculations and unit and currency conversions.               |
 | [calendar](./calendar/)                   | `cal`                 | No (`[calendar] enabled`)  | Lists and searches calendar events.                                   |
 | [clipboard-history](./clipboard-history/) | `clip`                | No (`[clipboard] enabled`) | Keeps what you copy and copies or pastes it again.                    |
@@ -32,7 +31,7 @@ A package that is off by default waits for its switch in Settings → Extensions
 | The main search (`defaultSearch`) and `run` actions    | [window-management](./window-management/).                                                            |
 | Pushed views and forms                                 | [snippets](./snippets/) for a form, [proc](./proc/) for a detail page.                                |
 | `events.clipboard`, `storage` and `items.invalidate()` | [clipboard-history](./clipboard-history/).                                                            |
-| `exec` profiles and a catalogue with a `ttl`           | [port](./port/) is the smallest; [proc](./proc/) and [agent](./agent/) add more profiles.             |
+| `exec` profiles and a catalogue with a `ttl`           | [port](./port/) is the smallest; [proc](./proc/) adds more profiles.                                  |
 | `files` scopes, declared preferences and stored state  | [repo](./repo/).                                                                                      |
 | Kind actions composed by default (`dupin.provides`)    | [running-apps](./running-apps/); see [Advanced composition](../docs/features/advanced.md#extensions). |
 

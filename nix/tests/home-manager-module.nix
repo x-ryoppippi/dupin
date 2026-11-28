@@ -185,7 +185,6 @@ assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
 assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
   "proc"
   "port"
-  "agent"
 ];
 assert bundledExtensions.dupin == [ ];
 assert

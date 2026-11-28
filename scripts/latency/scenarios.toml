@@ -119,7 +119,7 @@ provider = "extension.emoji"
 package = "bundled:emoji"
 budget_ms = 5.0
 
-# The bundled Processes, Ports and Coding Agents catalogues under their keywords, which ship off.
+# The bundled Processes and Ports catalogues under their keywords, which ship off.
 # Each `extensions` folder holds only `.headless-fixture.json`, the fixture whose `exec` replies
 # stand in for ps and lsof and whose consent turns the package on. Loading the catalogue is the
 # warm-up's work and its 2-second refresh runs in a helper of its own, so a measured keypress
@@ -136,13 +136,6 @@ config = "scripts/headless/config/dupin/config.toml"
 provider = "extension.port"
 package = "bundled:port"
 extensions = "scripts/latency/port.extensions"
-budget_ms = 5.0
-
-[features.agent.extension]
-config = "scripts/headless/config/dupin/config.toml"
-provider = "extension.agent"
-package = "bundled:agent"
-extensions = "scripts/latency/agent.extensions"
 budget_ms = 5.0
 
 # The bundled Repositories catalogue under its keyword, held to the keystroke budget, since
@@ -286,12 +279,6 @@ id = "running-apps.no"
 feature = "running-apps"
 prefix = "quit "
 typed = "no"
-
-[[scenarios]]
-id = "agent.claude"
-feature = "agent"
-prefix = "agent "
-typed = "claude"
 
 [[scenarios]]
 id = "repo.ccu"

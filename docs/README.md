@@ -53,7 +53,6 @@ Shipped with Dupin as extensions, each one yours to eject and change.
 - [Running apps](./features/running-apps.md)
 - [Processes](./features/processes.md)
 - [Ports](./features/ports.md)
-- [Coding agents](./features/coding-agents.md)
 
 ## Your own extensions
 

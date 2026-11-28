@@ -162,11 +162,11 @@ There is no store. Packages are installed from Git and pinned by commit ([Instal
 AI moves from use time to build time. An agent builds the tool once; from then on you use it with one keyword, at the same speed and with the same result every time, with no tokens spent and no model to wait for.
 
 <picture>
-<source media="(prefers-color-scheme: dark)" srcset="images/philosophy/agents-dark.png" />
-<img alt="The Coding Agents extension listing the agents at work, each with its project, PID, CPU and memory." src="images/philosophy/agents-light.png" width="680" />
+<source media="(prefers-color-scheme: dark)" srcset="images/running-apps/list-dark.png" />
+<img alt="quit and Space lists the running apps: Safari tagged Active, Notes, Music tagged Hidden, Preview and Finder, each with its bundle ID." src="images/running-apps/list-light.png" width="680" />
 </picture>
 
-[Coding Agents](./features/coding-agents.md), rendered here from its test fixture, is one such tool: plain TypeScript that lists the agents at work, with no model behind it.
+[Running Apps](./features/running-apps.md), rendered here from its test fixture, is one such tool: plain TypeScript that lists the apps running and hides or quits one, with no model behind it.
 
 **A launcher for the age of AI isn't a launcher with AI built in; it's a launcher for people that AI can extend.**
 
