@@ -93,9 +93,10 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
         icon = string(DEFAULT_ICON),
     );
 
-    let (build_note, build_command, build_section) = match template {
-        Template::JavaScript => ("", "", String::new()),
+    let (install_command, build_note, build_command, build_section) = match template {
+        Template::JavaScript => ("", "", "", String::new()),
         Template::TypeScript => (
+            "",
             "",
             "",
             format!(
@@ -103,10 +104,11 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
             ),
         ),
         Template::Bundled => (
+            "bun install\n",
             "bundles `src/main.ts` with Rolldown, ",
             "dupin ext build .\n",
             format!(
-                "\n## Build\n\n```sh\ndupin ext build .\n```\n\nRun `bun install` once first: it installs the Rolldown that `package.json` pins and writes `bun.lock`, which you commit. `build` runs that Rolldown with `rolldown.config.ts`, bundling `{TS_SOURCE}` and its npm dependencies into one module at `{TS_MAIN}`, and fails if a dependency needs a Node built-in. Commit `{TS_MAIN}`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds it with the same configuration and commits it on every push to `main`, installing only what `bun.lock` pins.\n"
+                "\n## Build\n\n```sh\ndupin ext build .\n```\n\nRun `bun install` once first: it installs the Rolldown that `package.json` pins and writes `bun.lock`, which you commit. `build` runs that Rolldown with `rolldown.config.ts`, bundling `{TS_SOURCE}` and its npm dependencies into one module at `{TS_MAIN}`, and fails if a dependency needs a Node built-in. Commit `{TS_MAIN}`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds it with the same configuration whenever a push to `main` changes its sources, installing only what `bun.lock` pins, and commits it if it changed.\n"
             ),
         ),
     };
@@ -117,6 +119,7 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
             .replace("{{main_dir}}", TS_MAIN_DIR)
             .replace("{{main}}", TS_MAIN)
             .replace("{{build_command}}", build_command)
+            .replace("{{install_command}}", install_command)
             .replace("{{build_note}}", build_note)
             .replace("{{build_section}}", &build_section)
     };

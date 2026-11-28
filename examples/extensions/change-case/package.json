@@ -1,0 +1,22 @@
+{
+	"name": "change-case",
+	"version": "0.1.0",
+	"private": true,
+	"keywords": [
+		"dupin-extension"
+	],
+	"source": "src/main.ts",
+	"type": "module",
+	"dependencies": {
+		"change-case": "5.4.4"
+	},
+	"devDependencies": {
+		"rolldown": "1.3.2"
+	},
+	"dupin": {
+		"title": "Change Case",
+		"keyword": "case",
+		"icon": "sf:textformat",
+		"main": "dist/main.js"
+	}
+}

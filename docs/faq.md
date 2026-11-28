@@ -123,7 +123,7 @@ There is no store. Extensions are installed from Git, and `dupin ext search` lis
 <details>
 <summary>Can I use npm packages in an extension?</summary>
 
-Yes, bundle them into one module with `dupin ext build`, which uses Rolldown. Node built-ins such as `fs` aren't available, and a dependency that imports one fails the build ([Building a bundle](./features/extension-distribution.md#building-a-bundle)).
+Yes. Start the package with `dupin ext new <dir> --bundle`, add packages with `bun add`, and `dupin ext build .` bundles them into one module with Rolldown; the scaffold's workflow rebuilds and commits that module when a push to `main` changes its sources. Node built-ins such as `fs` aren't available, and a dependency that imports one fails the build. [`examples/extensions/change-case`](../examples/extensions/change-case) is such a package ([Building a bundle](./features/extension-distribution.md#building-a-bundle)).
 
 </details>
 

@@ -23,5 +23,6 @@
 		"../sdk/dupin.d.ts",
 		"../examples/extensions/notes-js/main.js",
 		"../examples/extensions/*/**/*.ts"
-	]
+	],
+	"exclude": ["../examples/extensions/change-case"]
 }
