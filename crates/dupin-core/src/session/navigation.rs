@@ -281,6 +281,20 @@ impl Session {
         let selected = self
             .selected_item()
             .map(|item| (self.search.origins[self.search.selected].clone(), item.id.clone()));
+        self.push_visit(command, location, selected);
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.replace_search());
+        effects
+    }
+
+    /// Moves to `command`'s search at `location`, keeping the current view to return to with
+    /// `selected` reselected; the caller searches the new view.
+    pub(super) fn push_visit(
+        &mut self,
+        command: CommandId,
+        location: SearchLocation,
+        selected: Option<(CommandId, String)>,
+    ) {
         self.navigation += 1;
         self.visits.push(Visit {
             location: std::mem::replace(&mut self.search.location, location),
@@ -289,9 +303,6 @@ impl Session {
             query: std::mem::take(&mut self.search.query),
             selected,
         });
-        let mut effects = vec![Effect::ClearQuery];
-        effects.extend(self.replace_search());
-        effects
     }
 
     pub(super) fn leave_view(&mut self) -> Vec<Effect> {
@@ -308,7 +319,7 @@ impl Session {
         effects
     }
 
-    fn replace_search(&mut self) -> Vec<Effect> {
+    pub(super) fn replace_search(&mut self) -> Vec<Effect> {
         self.search.recalled = None;
         self.search.deleting = false;
         self.search.before_deletion = None;

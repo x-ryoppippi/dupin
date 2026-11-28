@@ -32,6 +32,8 @@ let
         "*.png"
         # Generated from crates/dupin-telemetry, whose test compares it byte for byte.
         "telemetry/src/v1/ping-schema.gen.ts"
+        # Rolldown's output, committed as `dupin ext build` writes it.
+        "examples/extensions/*/dist/**"
       ];
 
       settings.formatter = {

@@ -53,7 +53,7 @@ The folder must be new or empty. Its name becomes the id, so it takes 1–64 low
 | `README.md`                   | How to develop, build and share the package.                                                                                                                                            |
 | `tsconfig.json`, `.gitignore` | `--ts` and `--bundle`. The compiler sees ES2023 and nothing else, as the guest does.                                                                                                    |
 | `rolldown.config.ts`          | `--bundle` only. How `dupin ext build`, `dupin ext dev` and the workflow bundle `src/main.ts`.                                                                                          |
-| `.github/workflows/build.yml` | `--bundle` only. Rebuilds `dist/main.js` with Rolldown and commits it on every push to `main`.                                                                                          |
+| `.github/workflows/build.yml` | `--bundle` only. Rebuilds `dist/main.js` with Rolldown when a push to `main` changes its sources, and commits it.                                                                       |
 
 </details>
 

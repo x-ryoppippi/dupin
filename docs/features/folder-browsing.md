@@ -4,7 +4,8 @@ Dupin lists a folder's contents in the panel so you can walk through it.
 
 ## Open it
 
-<kbd>⇥</kbd> on a folder, or its **Browse** action.
+- <kbd>⇥</kbd> on a folder, or its **Browse** action.
+- Type a path starting with `~/` or `/` in the main search: `~/Documents/rep` opens `~/Documents` and filters it by `rep`.
 
 ## What you see
 
@@ -23,11 +24,12 @@ Dupin lists a folder's contents in the panel so you can walk through it.
 
 ## What you can do
 
-| Key / action                    | What it does                                                                                    |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Type                            | Filter the entries fuzzily                                                                      |
-| Type `.` first                  | Show hidden entries too                                                                         |
-| <kbd>⇥</kbd>                    | Enter the selected subfolder                                                                    |
-| <kbd>⌫</kbd> on an empty filter | Return to the parent folder; from the first folder, restore the search, its query and selection |
+| Key / action                    | What it does                                                                                                                                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type                            | Filter the entries fuzzily                                                                                                                                                                                |
+| Type `.` first                  | Show hidden entries too                                                                                                                                                                                   |
+| <kbd>⇥</kbd>                    | Enter the selected subfolder                                                                                                                                                                              |
+| Type a subfolder's name and `/` | Enter it; a name that is no folder stays in the filter                                                                                                                                                    |
+| <kbd>⌫</kbd> on an empty filter | Return to the parent folder with its filter, or with the name a typed path left there; from the first folder, restore the search and its query, and the selection <kbd>⇥</kbd> or **Browse** started from |
 
 Listed entries have the same [actions](./file-actions.md) as search results. Other keys: [Keys](../usage.md#keys).

@@ -5,9 +5,9 @@ use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 
 use dupin_core::{Item, Provider, ProviderError, Request};
-use objc2::rc::autoreleasepool;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::NSWorkspace;
-use objc2_foundation::NSString;
+use objc2_foundation::{NSString, NSURL, NSURLNameKey};
 
 use crate::kinds::Rows;
 
@@ -131,6 +131,32 @@ fn is_folder(entry: &DirEntry) -> bool {
     directory && !is_package(&path)
 }
 
+/// `path` spelt as on disk, if browsing lists it as a folder: a directory, following symlinks,
+/// that isn't a package. The volume may match a name regardless of case or Unicode
+/// normalization form, so a typed `dev` is found as the `Dev` that results and history know.
+pub fn browsable(path: &Path) -> Option<PathBuf> {
+    if !path.is_dir() || is_package(path) {
+        return None;
+    }
+    let (Some(parent), Some(name)) = (path.parent(), disk_name(path)) else {
+        return Some(path.to_path_buf());
+    };
+    Some(parent.join(name))
+}
+
+/// The last component's name as the file system stores it, without resolving a symlink.
+fn disk_name(path: &Path) -> Option<String> {
+    path.file_name()?;
+    autoreleasepool(|_| {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str()?));
+        let mut value = None;
+        // SAFETY: NSURLNameKey is a valid resource key whose value is an NSString.
+        unsafe { url.getResourceValue_forKey_error(&mut value, NSURLNameKey) }.ok()?;
+        let name: Retained<NSString> = value?.downcast().ok()?;
+        Some(name.to_string())
+    })
+}
+
 pub(crate) fn is_package(path: &Path) -> bool {
     autoreleasepool(|_| {
         NSWorkspace::sharedWorkspace().isFilePackageAtPath(&NSString::from_str(&path.to_string_lossy()))
@@ -186,6 +212,25 @@ mod tests {
         assert!(browsable("beta"));
         assert!(!browsable("Tool.app"), "a package opens rather than browses");
         assert!(!browsable("alpha.txt"));
+        assert_eq!(super::browsable(&root.join("beta")), Some(root.join("beta")));
+        assert_eq!(
+            super::browsable(&root.join("Tool.app")),
+            None,
+            "a typed path skips packages too"
+        );
+        assert_eq!(super::browsable(&root.join("alpha.txt")), None);
+        // Only a volume that matches names this way can find them; a case-sensitive one can't.
+        if root.join("alpha").is_dir() {
+            assert_eq!(super::browsable(&root.join("alpha")), Some(root.join("Alpha")));
+        }
+        std::fs::create_dir(root.join("e\u{301}te\u{301}")).unwrap();
+        if root.join("\u{e9}t\u{e9}").is_dir() {
+            assert_eq!(
+                super::browsable(&root.join("\u{e9}t\u{e9}")),
+                Some(root.join("e\u{301}te\u{301}")),
+                "a composed name finds the decomposed one on disk"
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

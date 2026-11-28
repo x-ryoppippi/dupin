@@ -70,7 +70,7 @@ A built-in feature that ships as a package chooses their values from its own Set
 
 A module can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), also `.ts`, `.mts` and `.tsx` files when `dupin.main` is TypeScript, and the host module `dupin`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
 
-TypeScript whose types can simply be erased runs as written; see [TypeScript without a build](#typescript-without-a-build). JSX, TypeScript that needs compiling and npm packages are built on your machine: bundle the extension into one JavaScript module (`dupin ext build` does it with Rolldown; see [Building a bundle](./extension-distribution.md#building-a-bundle)), point `dupin.main` at the output and install the folder. Dupin never type-checks and never runs a package manager or the package's scripts.
+TypeScript whose types can simply be erased runs as written; see [TypeScript without a build](#typescript-without-a-build). JSX, TypeScript that needs compiling and npm packages are built on your machine: bundle the extension into one JavaScript module with `dupin ext build`, which uses Rolldown. `dupin ext new <dir> --bundle` starts a package set up for it; see [Building a bundle](./extension-distribution.md#building-a-bundle). Dupin never type-checks and never runs a package manager or the package's scripts.
 
 ### TypeScript without a build
 
@@ -81,7 +81,7 @@ When `dupin.main` is a `.ts`, `.mts` or `.tsx` file, the package's TypeScript fi
 - Declaration files (`.d.ts`, `.d.mts`) are not modules and are never compiled.
 - With a JavaScript `dupin.main`, TypeScript files are ignored, so a bundled package can keep its sources beside the bundle.
 
-Bundle with `dupin ext build` when the package uses npm packages, needs syntax that is rejected below, or should ship as one file.
+Bundle with `dupin ext build` when the package uses npm packages, needs syntax that is rejected below, or should ship as one file; [Building a bundle](./extension-distribution.md#building-a-bundle) says how to start or convert one.
 
 <details>
 <summary>What is erased</summary>
