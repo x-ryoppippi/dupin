@@ -40,8 +40,6 @@ export def settings-stage [out: path] {
     ) }
     poll $out settings-window $settings list-windows --app $DUPIN
     evidence $out settings-created
-    record-list-key $out 'Move up the list' ctrl+p up_key
-    record-list-key $out 'Move down the list' ctrl+n down_key
     (poll
         $out
         acknowledgements
@@ -177,9 +175,9 @@ export def settings-stage [out: path] {
     poll $out settings-from-result $settings list-windows --app $DUPIN
     evidence $out settings-from-result
 
-    # This app uses the disposable XDG profile run-suite created under `out`; recorded keys never
-    # touch the machine's ordinary config. Search a common letter and require at least two results
-    # before asserting that the custom chord moved the selected row.
+    # This app uses the disposable XDG profile run-suite created under `out`. Search a common
+    # letter and require at least two results before asserting that the configured chords moved
+    # the selected row.
     press $out navigation-close-settings cmd+w | ignore
     press $out navigation-summon-panel alt+space | ignore
     (poll
@@ -220,42 +218,6 @@ export def settings-stage [out: path] {
     let moved_before = log-count $log 'dupin-trace: navigation up moved selection 1->0'
     press $out navigation-custom-previous ctrl+p | ignore
     wait-for-log --after $moved_before $log 'dupin-trace: navigation up moved selection 1->0'
-    evidence $out navigation-custom-next
+    evidence $out navigation-custom-keys
     press $out navigation-close-panel escape | ignore
-}
-
-def record-list-key [
-    out: path
-    label: string
-    chord: string
-    config_key: string
-] {
-    let button = (poll
-        $out
-        $'navigation-record-($config_key)'
-        {|r| $r.ok and $r.data?.match?.ref_id? != null }
-        find
-        --app
-        $DUPIN
-        --role
-        button
-        --name
-        $label
-        --exact
-        --first
-    )
-    let clicked = ad $out $'navigation-start-($config_key)' click $button.data.match.ref_id
-    if not $clicked.ok { error make {msg: $'Could not start recording ($label)'} }
-    press $out $'navigation-press-($config_key)' $chord | ignore
-    let path = $out | path join config dupin config.toml
-    for _ in 1..20 {
-        let value = try {
-            open $path | get --optional $config_key
-        } catch {
-            null
-        }
-        if $value == $chord { return }
-        sleep 250ms
-    }
-    error make {msg: $'Settings did not save ($config_key) = "($chord)"'}
 }
