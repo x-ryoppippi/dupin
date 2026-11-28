@@ -28,7 +28,7 @@ use objc2_foundation::{
 const SLICE: Duration = Duration::from_millis(16);
 
 /// Shown in place of "No matches" when the searched disk has Spotlight indexing turned off.
-const INDEXING_OFF: &str = "Spotlight indexing is off here  ·  ⌫ back to apps and type ~/ to browse";
+const INDEXING_OFF: &str = "Spotlight indexing is off here  ·  type ~/ in app search to browse folders";
 
 /// What a Spotlight search matches the query words against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
