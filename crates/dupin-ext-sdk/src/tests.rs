@@ -138,6 +138,7 @@ fn javascript_scaffold_checks_and_answers_its_fixture() {
             "README.md",
             "dupin.d.ts",
             "fixtures/search.json",
+            "jsconfig.json",
             "main.js",
             "package.json"
         ]

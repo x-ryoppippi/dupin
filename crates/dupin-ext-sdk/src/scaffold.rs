@@ -134,7 +134,13 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
         ("README.md", fill(include_str!("../templates/README.md"))),
     ];
     match template {
-        Template::JavaScript => files.push(("main.js", include_str!("../templates/main.js").to_owned())),
+        Template::JavaScript => files.extend([
+            ("main.js", include_str!("../templates/main.js").to_owned()),
+            (
+                "jsconfig.json",
+                include_str!("../templates/jsconfig.json").to_owned(),
+            ),
+        ]),
         Template::TypeScript | Template::Bundled => files.extend([
             (TS_SOURCE, include_str!("../templates/main.ts").to_owned()),
             (
