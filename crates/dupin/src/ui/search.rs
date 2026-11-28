@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::time::{Duration, Instant};
 
 use dupin_core::{CommandId, Delivery, Page, Provider, Searcher};
 use rune::{AppHandle, ImageCache, Tx, Waker};
@@ -93,9 +93,62 @@ impl Ui {
         self.deadlines.clear();
     }
 
-    pub(super) fn poll_searches(&mut self, clock: f64, tx: &mut Tx) -> bool {
-        let due = take_due(&mut self.deadlines, clock);
+    /// In a headless run, waits for every search still running to answer and hands over what
+    /// it delivers, so the frame shows the answer to the keys before it rather than whatever
+    /// came back in the time a script left. A search that outlasts its own deadline is left
+    /// for that deadline to expire.
+    fn settle_headless(&mut self, clock: f64) -> bool {
+        let Some(delivered) = headless_deliveries() else {
+            return false;
+        };
+        let delivered = delivered
+            .1
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut changed = false;
+        while let Ok((origin, delivery, sent)) = delivered.try_recv() {
+            self.deliver(origin, delivery, sent);
+            changed = true;
+        }
+        let started = Instant::now();
+        loop {
+            let Some(due) = self
+                .deadlines
+                .iter()
+                .filter(|(id, (generation, _))| self.session.pending(id, *generation))
+                .map(|(_, (_, due))| *due)
+                .max_by(f64::total_cmp)
+            else {
+                return changed;
+            };
+            let left = Duration::from_secs_f64((due - clock).max(0.0)).saturating_sub(started.elapsed());
+            match delivered.recv_timeout(left) {
+                Ok((origin, delivery, sent)) => {
+                    self.deliver(origin, delivery, sent);
+                    changed = true;
+                }
+                Err(_) => return changed,
+            }
+        }
+    }
+
+    /// Hands over what headless searches delivered while no frame waited for them.
+    fn take_headless_deliveries(&mut self) {
+        let Some(delivered) = headless_deliveries() else {
+            return;
+        };
+        let delivered = delivered
+            .1
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while let Ok((origin, delivery, sent)) = delivered.try_recv() {
+            self.deliver(origin, delivery, sent);
+        }
+    }
+
+    pub(super) fn poll_searches(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        let mut changed = self.settle_headless(clock);
+        let due = take_due(&mut self.deadlines, clock);
         for (id, generation) in due {
             if self.session.pending(&id, generation) {
                 if let Some(worker) = self.searchers.get(&id) {
@@ -224,10 +277,34 @@ pub(super) fn spawn_searcher(me: AppHandle<Ui>, origin: CommandId, provider: Arc
     Searcher::spawn(&name, provider, move |d| {
         let origin = origin.clone();
         let sent = Instant::now();
+        if let Some(delivered) = headless_deliveries() {
+            let _ = delivered
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .send((origin, d, sent));
+            me.update(|s, _| s.take_headless_deliveries());
+            return;
+        }
         me.update(move |s, tx| {
             s.poll(tx.clock(), tx);
             s.deliver(origin, d, sent);
         });
+    })
+}
+
+type Delivered = (CommandId, Delivery, Instant);
+type Deliveries = (Mutex<mpsc::Sender<Delivered>>, Mutex<mpsc::Receiver<Delivered>>);
+
+/// Where a headless run's searches deliver, which a frame can wait on from the UI thread while
+/// an update it queued couldn't be run until that frame ends. None with a window.
+fn headless_deliveries() -> Option<&'static Deliveries> {
+    static CHANNEL: OnceLock<Deliveries> = OnceLock::new();
+    rune::tooling::is_headless().then(|| {
+        CHANNEL.get_or_init(|| {
+            let (sender, receiver) = mpsc::channel();
+            (Mutex::new(sender), Mutex::new(receiver))
+        })
     })
 }
 
