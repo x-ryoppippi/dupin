@@ -6,7 +6,7 @@ Add a `tagpr:minor` or `tagpr:major` label to the release pull request for a big
 
 The crates stay at version 0.0.0 and the Nix package reads `VERSION`, so a release doesn't change `Cargo.lock`.
 
-tagpr runs with a token from the release GitHub App rather than `GITHUB_TOKEN`, whose pushes and pull requests start no workflows: the release pull request has to report `main`'s required checks ([Branch rules](./development.md#branch-rules)), CLA included, like any other. The workflow fails up front when the App's secrets are missing.
+tagpr runs with a token from the release GitHub App rather than `GITHUB_TOKEN`, whose pushes and pull requests start no workflows: the release pull request has to report `main`'s required checks ([Branch rules](./development.md#branch-rules)), CLA included, like any other. Until the App's secrets are set, the workflow skips tagpr with a notice that points here, so `main` stays green; once they are, failing to mint the App's token fails it.
 
 ### Release App
 
