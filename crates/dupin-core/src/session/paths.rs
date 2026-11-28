@@ -25,7 +25,9 @@ impl Session {
             SearchLocation::Folder(folder) => walk(Some(folder), text, browsable),
             // A keyword or alias that starts like a path stays reachable while it is being typed.
             SearchLocation::Command
-                if self.search.command == *self.commands.default() && !self.commands.starts_keyword(text) =>
+                if self.search.command == *self.commands.default()
+                    && (text.starts_with('/') || text.starts_with("~/"))
+                    && !self.commands.starts_keyword(text) =>
             {
                 walk(None, text, browsable)
             }
