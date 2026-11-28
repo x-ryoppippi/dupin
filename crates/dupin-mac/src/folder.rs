@@ -131,6 +131,11 @@ fn is_folder(entry: &DirEntry) -> bool {
     directory && !is_package(&path)
 }
 
+/// A folder that browsing lists, following symlinks: a directory that isn't a package.
+pub fn is_browsable(path: &Path) -> bool {
+    path.is_dir() && !is_package(path)
+}
+
 pub(crate) fn is_package(path: &Path) -> bool {
     autoreleasepool(|_| {
         NSWorkspace::sharedWorkspace().isFilePackageAtPath(&NSString::from_str(&path.to_string_lossy()))
@@ -186,6 +191,11 @@ mod tests {
         assert!(browsable("beta"));
         assert!(!browsable("Tool.app"), "a package opens rather than browses");
         assert!(!browsable("alpha.txt"));
+        assert!(is_browsable(&root.join("beta")));
+        assert!(
+            !is_browsable(&root.join("Tool.app")),
+            "a typed path skips packages too"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

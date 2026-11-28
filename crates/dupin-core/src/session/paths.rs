@@ -19,14 +19,15 @@ impl Session {
         if self.page().is_some() || self.destination.is_some() {
             return None;
         }
+        let browser = self.commands.browser()?.clone();
+        let browsable = self.commands.browsable()?;
         let walk = match &self.search.location {
-            SearchLocation::Folder(folder) => walk(Some(folder), text, None),
+            SearchLocation::Folder(folder) => walk(Some(folder), text, browsable),
             SearchLocation::Command if self.search.command == *self.commands.default() => {
-                walk(None, text, home().as_deref())
+                walk(None, text, browsable)
             }
             _ => None,
         }?;
-        let browser = self.commands.browser()?.clone();
         for (left, folder) in walk.steps {
             self.search.query = left;
             self.push_visit(browser.clone(), SearchLocation::Folder(folder), None);
@@ -45,19 +46,19 @@ fn home() -> Option<PathBuf> {
 }
 
 /// From the main search (`from` is None) a path starts with `~/` or `/`; within a folder it is
-/// relative to it. Each name followed by a slash is entered while it names a folder; the first
-/// that doesn't, and everything after it, stays as the filter.
-fn walk<'a>(from: Option<&Path>, text: &'a str, home: Option<&Path>) -> Option<Walk<'a>> {
+/// relative to it. Each name followed by a slash is entered while `browsable` takes it for a
+/// folder; the first that isn't, and everything after it, stays as the filter.
+fn walk<'a>(from: Option<&Path>, text: &'a str, browsable: fn(&Path) -> bool) -> Option<Walk<'a>> {
     let mut steps = Vec::new();
     let (mut folder, mut rest) = match from {
         Some(folder) => (folder.to_path_buf(), text),
         None => {
             let (left, folder, rest) = if let Some(rest) = text.strip_prefix("~/") {
-                ("~", home?.to_path_buf(), rest)
+                ("~", home()?, rest)
             } else {
                 ("", PathBuf::from("/"), text.strip_prefix('/')?)
             };
-            if !folder.is_dir() {
+            if !browsable(&folder) {
                 return None;
             }
             steps.push((left.to_owned(), folder.clone()));
@@ -65,8 +66,12 @@ fn walk<'a>(from: Option<&Path>, text: &'a str, home: Option<&Path>) -> Option<W
         }
     };
     while let Some((name, after)) = rest.split_once('/') {
+        if name.is_empty() {
+            rest = after;
+            continue;
+        }
         let next = folder.join(name);
-        if name.is_empty() || name == "." || name == ".." || !next.is_dir() {
+        if name == "." || name == ".." || !browsable(&next) {
             break;
         }
         steps.push((name.to_owned(), next.clone()));
@@ -83,84 +88,69 @@ mod tests {
     fn tree() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("Dev/dupin")).unwrap();
+        std::fs::create_dir_all(root.path().join("Tool.app/Contents")).unwrap();
         std::fs::create_dir(root.path().join(".config")).unwrap();
         std::fs::write(root.path().join("notes.txt"), "").unwrap();
         root
     }
 
-    fn steps<'a>(walk: &'a Walk<'_>) -> Vec<(&'a str, &'a Path)> {
-        walk.steps
-            .iter()
-            .map(|(left, folder)| (left.as_str(), folder.as_path()))
-            .collect()
+    /// A directory, except one named like an app bundle, as the app's predicate treats packages.
+    fn browsable(path: &Path) -> bool {
+        path.is_dir() && path.extension().is_none_or(|extension| extension != "app")
+    }
+
+    fn filter<'a>(from: &Path, text: &'a str) -> Option<&'a str> {
+        walk(Some(from), text, browsable).map(|walk| walk.filter)
     }
 
     #[test]
-    fn a_home_path_enters_each_folder_it_names_and_filters_the_last() {
-        let home = tree();
-        let home = home.path();
-        let walk = walk(None, "~/Dev/dupin/REA", Some(home)).unwrap();
+    fn a_path_enters_each_folder_it_names_and_filters_by_the_rest() {
+        let root = tree();
+        let root = root.path();
+        let walk = walk(Some(root), "Dev/dupin/REA", browsable).unwrap();
+        let steps: Vec<_> = walk
+            .steps
+            .iter()
+            .map(|(left, folder)| (left.as_str(), folder.clone()))
+            .collect();
         assert_eq!(
-            steps(&walk),
-            [
-                ("~", home),
-                ("Dev", &*home.join("Dev")),
-                ("dupin", &*home.join("Dev/dupin"))
-            ]
+            steps,
+            [("Dev", root.join("Dev")), ("dupin", root.join("Dev/dupin"))]
         );
         assert_eq!(walk.filter, "REA");
-        assert_eq!(walk_filter(None, "~/", home), Some(""));
-        assert_eq!(walk_filter(None, "~/.config/", home), Some(""));
+        assert_eq!(filter(root, ".config/"), Some(""));
+        assert_eq!(filter(root, "Dev//dupin/"), Some(""), "a doubled slash stays put");
     }
 
     #[test]
     fn an_absolute_path_starts_at_the_root() {
         let root = tree();
         let text = format!("{}/Dev/x", root.path().display());
-        let walk = walk(None, &text, None).unwrap();
+        let walk = walk(None, &text, browsable).unwrap();
         assert_eq!(walk.steps[0], (String::new(), PathBuf::from("/")));
         assert_eq!(walk.steps.last().unwrap().1, root.path().join("Dev"));
         assert_eq!(walk.filter, "x");
-        assert_eq!(walk_filter(None, "/", root.path()), Some(""));
     }
 
     #[test]
-    fn a_name_that_is_not_a_folder_stays_in_the_filter() {
-        let home = tree();
-        let home = home.path();
-        assert_eq!(walk_filter(None, "~/Dve/dupin/", home), Some("Dve/dupin/"));
-        assert_eq!(walk_filter(None, "~/notes.txt/", home), Some("notes.txt/"));
-        assert_eq!(walk_filter(None, "~/Dev//", home), Some("/"));
-        assert_eq!(walk_filter(None, "~/../", home), Some("../"));
+    fn a_name_that_is_not_a_browsable_folder_stays_in_the_filter() {
+        let root = tree();
+        let root = root.path();
+        assert_eq!(filter(root, "Dve/dupin/"), None);
+        assert_eq!(filter(root, "Dev/Dve/x"), Some("Dve/x"));
+        assert_eq!(filter(root, "notes.txt/"), None);
+        assert_eq!(
+            filter(root, "Tool.app/"),
+            None,
+            "a package opens rather than browses"
+        );
+        assert_eq!(filter(root, "../"), None);
     }
 
     #[test]
     fn the_main_search_walks_only_a_path_from_home_or_the_root() {
-        let home = tree();
-        let home = home.path();
         for text in ["~", "Dev/", "~Dev/", " ~/Dev/"] {
-            assert_eq!(walk(None, text, Some(home)), None, "{text:?}");
+            assert_eq!(walk(None, text, browsable), None, "{text:?}");
         }
-        assert_eq!(walk(None, "~/Dev/", None), None, "no home to start from");
-    }
-
-    #[test]
-    fn within_a_folder_a_path_is_relative_to_it() {
-        let root = tree();
-        let walk = walk(Some(root.path()), "Dev/dupin/a", None).unwrap();
-        assert_eq!(
-            steps(&walk),
-            [
-                ("Dev", &*root.path().join("Dev")),
-                ("dupin", &*root.path().join("Dev/dupin"))
-            ]
-        );
-        assert_eq!(walk.filter, "a");
-        assert_eq!(super::walk(Some(root.path()), "Dev", None), None);
-        assert_eq!(super::walk(Some(root.path()), "Dve/", None), None);
-    }
-
-    fn walk_filter<'a>(from: Option<&Path>, text: &'a str, home: &Path) -> Option<&'a str> {
-        walk(from, text, Some(home)).map(|walk| walk.filter)
     }
 }

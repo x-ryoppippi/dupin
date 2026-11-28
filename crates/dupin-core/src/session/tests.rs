@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::search::ProviderPhase;
 use super::*;
@@ -226,7 +226,7 @@ fn command_registry(dictionary_keywords: Vec<String>) -> CommandRegistry {
                 .with_query_eligibility(crate::QueryEligibility::Any),
         )
         .unwrap();
-    registry.set_browser(browse_command()).unwrap();
+    registry.set_browser(browse_command(), Path::is_dir).unwrap();
     registry.add_keyword(&contents, "in").unwrap();
     for keyword in dictionary_keywords {
         registry.add_keyword(&dictionary, keyword).unwrap();

@@ -283,6 +283,9 @@ fn checked(keyword: String) -> Result<String, CommandError> {
 /// What a web search's rows show: its keyword's row and the row that searches for the query.
 pub const WEB_SEARCH_SYMBOL: &str = "globe";
 
+/// Whether the browser can list a path as a folder.
+pub type Browsable = fn(&Path) -> bool;
+
 #[derive(Clone, Debug)]
 pub struct CommandRegistry {
     default: CommandId,
@@ -296,7 +299,7 @@ pub struct CommandRegistry {
     paths: BTreeMap<String, (PathBuf, String)>,
     defaults: Vec<CommandId>,
     pinned: Option<CommandId>,
-    browser: Option<CommandId>,
+    browser: Option<(CommandId, Browsable)>,
 }
 
 impl CommandRegistry {
@@ -389,17 +392,26 @@ impl CommandRegistry {
         self.pinned.as_ref()
     }
 
-    /// The command that lists a folder entered from a result.
-    pub fn set_browser(&mut self, command: CommandId) -> Result<(), CommandError> {
+    /// The command that lists a folder entered from a result, and which paths are folders it
+    /// can list, so a typed path enters only what a result would offer to browse.
+    pub fn set_browser(
+        &mut self,
+        command: CommandId,
+        browsable: fn(&Path) -> bool,
+    ) -> Result<(), CommandError> {
         if !self.contains(&command) {
             return Err(CommandError::UnknownCommand(command));
         }
-        self.browser = Some(command);
+        self.browser = Some((command, browsable));
         Ok(())
     }
 
     pub(crate) fn browser(&self) -> Option<&CommandId> {
-        self.browser.as_ref()
+        self.browser.as_ref().map(|(command, _)| command)
+    }
+
+    pub(crate) fn browsable(&self) -> Option<Browsable> {
+        self.browser.as_ref().map(|&(_, browsable)| browsable)
     }
 
     pub fn register(&mut self, command: CommandSpec) -> Result<(), CommandError> {
