@@ -6,7 +6,7 @@
 
 Dupin is what Alfred was meant to be, as its author sees it: a launcher built for searching, simple and extensible, with extensions that agents can write.
 
-It owes its shape to LaunchBar, Quicksilver, Alfred, Spotlight and Raycast, and to everyone who made them ([the name](./name.md) tells their story). Its model of sources, filters and kinds, which you compose yourself, comes from Shougo Matsushita's [unite.vim](https://github.com/Shougo/unite.vim), [denite.nvim](https://github.com/Shougo/denite.nvim) and [ddu.vim](https://github.com/Shougo/ddu.vim). Thank you.
+It owes its shape to LaunchBar, Quicksilver, Alfred, Spotlight and Raycast, and to everyone who made them ([the name](./name.md) tells their story). Its model of sources, filters and kinds, which you compose yourself, comes from Shougo Matsushita's [unite.vim](https://github.com/Shougo/unite.vim), [denite.nvim](https://github.com/Shougo/denite.nvim) and [ddu.vim](https://github.com/Shougo/ddu.vim) ([Shougoism](https://zenn.dev/shougo/articles/vimconf-2024)). Thank you.
 
 <DesignChoices>
 
