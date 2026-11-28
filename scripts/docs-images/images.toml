@@ -250,13 +250,6 @@ page = "running-apps"
 name = "actions"
 scenario = "scripts/headless/running-apps-actions.json"
 
-[[images]]
-page = "philosophy"
-name = "agents"
-extension = "extensions/agent"
-fixture = "list.json"
-step = 1
-
 # A clip is a short recording of `steps` played into the panel, rendered to
 # docs/images/<page>/<name>-<theme>.webp with a caption below the panel naming each key it
 # presses and the text it types. A step types text one character at a time (`type`, or all at

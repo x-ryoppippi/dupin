@@ -53,7 +53,6 @@ export const sections = [
 			'features/running-apps.md',
 			'features/processes.md',
 			'features/ports.md',
-			'features/coding-agents.md',
 		],
 	},
 	{

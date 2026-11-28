@@ -4,7 +4,6 @@ Each folder here is an extension package that ships inside Dupin.app. They run i
 
 | Package                                   | Keyword               | On by default              | What it does                                                          |
 | ----------------------------------------- | --------------------- | -------------------------- | --------------------------------------------------------------------- |
-| [agent](./agent/)                         | `agent`               | No                         | Lists running coding agents and the project each works in.            |
 | [calculator](./calculator/)               | None: the main search | Yes (`calculator`)         | Answers calculations and unit and currency conversions.               |
 | [calendar](./calendar/)                   | `cal`                 | No (`[calendar] enabled`)  | Lists and searches calendar events.                                   |
 | [clipboard-history](./clipboard-history/) | `clip`                | No (`[clipboard] enabled`) | Keeps what you copy and copies or pastes it again.                    |
@@ -32,7 +31,7 @@ A package that is off by default waits for its switch in Settings → Extensions
 | The main search (`defaultSearch`) and `run` actions    | [window-management](./window-management/).                                                            |
 | Pushed views and forms                                 | [snippets](./snippets/) for a form, [proc](./proc/) for a detail page.                                |
 | `events.clipboard`, `storage` and `items.invalidate()` | [clipboard-history](./clipboard-history/).                                                            |
-| `exec` profiles and a catalogue with a `ttl`           | [port](./port/) is the smallest; [proc](./proc/) and [agent](./agent/) add more profiles.             |
+| `exec` profiles and a catalogue with a `ttl`           | [port](./port/) is the smallest; [proc](./proc/) adds more profiles.                                  |
 | `files` scopes, declared preferences and stored state  | [repo](./repo/).                                                                                      |
 | Kind actions composed by default (`dupin.provides`)    | [running-apps](./running-apps/); see [Advanced composition](../docs/features/advanced.md#extensions). |
 
@@ -57,6 +56,6 @@ cargo run -p dupin -- ext test extensions/calendar
 cargo run -p dupin -- ext render extensions/calendar extensions/calendar/fixtures/upcoming.json upcoming.png
 ```
 
-Run `dupin` from this checkout's build, as above, so a package here replays as the bundled package it is; the READMEs write it as plain `dupin`. `cargo test -p dupin every_bundled_extension_passes_its_fixtures` replays every package's fixtures, and the `extensions::overrides` test fails for a package added here without a case of its own. That test also fails when a package that ports a built-in declares a `keyword` the built-in doesn't answer by default, or any keyword when the built-in answers only the main search, as Calculator does. Other tests fail when a bundled `package.json` holds a top-level key besides `name`, `version`, `private` and `dupin`, and when two packages' copies of a shared module, today `ps.ts` in agent and proc, differ.
+Run `dupin` from this checkout's build, as above, so a package here replays as the bundled package it is; the READMEs write it as plain `dupin`. `cargo test -p dupin every_bundled_extension_passes_its_fixtures` replays every package's fixtures, and the `extensions::overrides` test fails for a package added here without a case of its own. That test also fails when a package that ports a built-in declares a `keyword` the built-in doesn't answer by default, or any keyword when the built-in answers only the main search, as Calculator does. Other tests fail when a bundled `package.json` holds a top-level key besides `name`, `version`, `private` and `dupin`.
 
 The build seals each package folder by a hash of every file in it, its README and fixtures included, and ships the folder whole; a folder that no longer matches stays off, so rebuild after editing one. A package's revision, which its grants follow, hashes only `package.json` and its modules.

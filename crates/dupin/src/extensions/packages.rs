@@ -393,6 +393,48 @@ mod tests {
     }
 
     #[test]
+    fn choices_for_a_package_no_longer_bundled_are_ignored_quietly() {
+        const NO_LONGER_BUNDLED: &[&str] = &["agent"];
+        let dir = tempfile::tempdir().unwrap();
+        let key = DataKey::generate().unwrap();
+        let about = || package(Origin::Bundled, "About", "about", "blake3:shipped");
+        let base: String = NO_LONGER_BUNDLED
+            .iter()
+            .map(|name| format!("[packages.\"bundled:{name}\"]\nenabled = true\n"))
+            .collect();
+        std::fs::write(dir.path().join("base.toml"), format!("version = 1\n{base}")).unwrap();
+
+        let before = bridge(Some((dir.path(), &key)));
+        let mut packages = Packages::new(before.clone());
+        packages.set(
+            Origin::Bundled,
+            std::iter::once(about())
+                .chain(
+                    NO_LONGER_BUNDLED
+                        .iter()
+                        .map(|name| package(Origin::Bundled, name, name, "blake3:old")),
+                )
+                .collect(),
+        );
+        packages.set(Origin::User, Vec::new());
+        for name in NO_LONGER_BUNDLED {
+            let removed = listed(&packages, name).package;
+            before.set_enabled(&removed, false).unwrap();
+            before.set_enabled(&removed, true).unwrap();
+        }
+        drop((before, packages));
+
+        let bridge = bridge(Some((dir.path(), &key)));
+        let mut packages = Packages::new(bridge.clone());
+        packages.set(Origin::Bundled, vec![about()]);
+        packages.set(Origin::User, Vec::new());
+        assert!(bridge.problems().is_empty(), "{:?}", bridge.problems());
+        assert_eq!(ids(&packages.active()), ["about"]);
+        assert_eq!(packages.listing(|_| true).len(), 1);
+        assert!(bridge.is_enabled(&listed(&packages, "about").package));
+    }
+
+    #[test]
     fn a_choice_that_cannot_be_saved_changes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let bridge = Bridge::open(
