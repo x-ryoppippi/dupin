@@ -5,6 +5,8 @@ use headless-config.nu [scenario-env panel-height headless headless-in]
 export const MANIFEST = path self docs-images/images.toml
 export const GLASS = path self ../docs/images/glass.json
 const THEMES = [light dark]
+# In the order they are made: composites are drawn from the images and clips.
+const KINDS = [images clips composites]
 # Pages draw at twice their size, so `width` in the Markdown is half the PNG's.
 const SCALE = 2
 # Clips draw at 1.25 times their size and 10 frames a second: a clip's bytes go to the frames
@@ -46,6 +48,7 @@ const KEYS = {
 # Render every image and clip scripts/docs-images/images.toml lists, in both themes: images to
 # docs/images/<page>/<name>-<theme>.png, compressed losslessly, and clips to
 # docs/images/<page>/<name>-<theme>.webp, animated, with the keys they press drawn below the panel.
+# Then draw its composites from them.
 #
 # Each comes from fixtures only, never from this Mac: an extension's own fixture through
 # `dupin ext render`, or a headless launcher scenario with a scratch home holding the fixture
@@ -54,17 +57,21 @@ const KEYS = {
 # deleted.
 def main [
     --bin: path = "target/debug/dupin" # Any build of Dupin, or the app's Contents/MacOS/dupin
-    --only: string # Render only the images and clips whose `<page>/<name>` contains this
-    --kind: string = "all" # `images`, `clips` or `all`
+    --only: string # Render only the entries whose `<page>/<name>` contains this
+    --kind: string = "all" # `images`, `clips`, `composites` or `all`
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
     let bin = $bin | path expand
     let manifest = open $MANIFEST
     let kinds = match $kind {
-        all => [images clips]
-        "images" | "clips" => [$kind]
-        _ => (error make {msg: $"--kind is `images`, `clips` or `all`, not `($kind)`"})
+        all => $KINDS
+        $other if $other in $KINDS => [$other]
+        _ => (
+            error make {
+                msg: $"--kind is `images`, `clips`, `composites` or `all`, not `($kind)`"
+            }
+        )
     }
     let entries = manifest-entries $manifest $kinds
     let entries = $entries | where {|entry| $only == null or (image-id $entry | str contains $only) }
@@ -85,7 +92,7 @@ def main [
         ^oxipng --quiet --opt 4 --strip safe ...$pngs
     }
     if $only == null {
-        let expected = $files | path expand
+        let expected = manifest-entries $manifest $KINDS | each {|entry| image-paths $entry } | flatten | path expand
         $kinds
         | each {|kind| kind-extensions $kind | each {|extension| glob $"docs/images/**/*.($extension)" } }
         | flatten
@@ -96,21 +103,23 @@ def main [
     $rendered | update files {|row| $row.files | each { ls $in | get size.0 } | math sum } | rename image bytes
 }
 
-# Check that every image and clip the manifest lists exists in each of its themes, that
-# docs/images holds nothing else, that the Markdown or the website embeds each and that
-# everything they embed exists. Pixels differ from Mac to Mac (fonts, app icons, the GPU), so this
-# checks presence rather than rendering them again.
+# Check that every image, clip and composite the manifest lists exists in each of its themes, that
+# docs/images holds nothing else, that the Markdown, the README or the website embeds each and
+# that everything they embed exists. Pixels differ from Mac to Mac (fonts, app icons, the GPU), so
+# this checks images and clips for presence rather than rendering them again; composites are drawn
+# from the committed files alone, so it draws them again and compares.
 def "main check" []: nothing -> nothing {
     let root = $env.FILE_PWD | path dirname
     cd $root
     let problems = (
         problems (open $MANIFEST)
         (glob docs/images/**/*.{png,webp,mp4} | each { path relative-to $root })
-        (glob docs/**/*.md | where {|doc| not ($doc | str contains /design/) } | append (glob website/src/**/*.{svelte,ts} | where {|file| not ($file | str ends-with .test.ts) }) | each {|doc|
+        (glob docs/**/*.md | where {|doc| not ($doc | str contains /design/) } | append (glob README.md) | append (glob website/src/**/*.{svelte,ts} | where {|file| not ($file | str ends-with .test.ts) }) | each {|doc|
             {path: ($doc | path relative-to $root), text: (open --raw $doc)}
         })
         {|path| $path | path exists }
     ) | append (glass-problems (open $MANIFEST) (captured-glass))
+    let problems = if ($problems | is-empty) { stale-composites (open $MANIFEST) } else { $problems }
     if ($problems | is-not-empty) {
         error make {
             msg: ($problems | str join "\n")
@@ -118,9 +127,14 @@ def "main check" []: nothing -> nothing {
     }
 }
 
-# The extensions the files of `kind` have: clips are animated WebP, or MP4 with a WebP poster.
+# The extensions the files of `kind` have: clips are animated WebP, or MP4 with a WebP poster, and
+# composites WebP.
 def kind-extensions [kind: string]: nothing -> list<string> {
-    if $kind == images { [png] } else { [webp mp4] }
+    match $kind {
+        images => [png]
+        clips => [webp mp4]
+        _ => [webp]
+    }
 }
 
 # The `glass = true` clips scripts/docs-glass.nu has recorded from the real app, by id, with how.
@@ -142,11 +156,15 @@ export def image-id [image: record]: nothing -> string {
     $"($image.page)/($image.name)"
 }
 
-# The manifest's entries of `kinds`, each clip marked as one.
+# The manifest's entries of `kinds`, each clip and composite marked as one.
 export def manifest-entries [manifest: record, kinds: list<string>]: nothing -> list<record> {
     $kinds | each {|kind|
         $manifest | get --optional $kind | default [] | each {|entry|
-            if $kind == clips { $entry | upsert clip true } else { $entry }
+            match $kind {
+                clips => ($entry | upsert clip true)
+                composites => ($entry | upsert composite true)
+                _ => $entry
+            }
         }
     } | flatten
 }
@@ -159,7 +177,9 @@ export def image-themes [image: record]: nothing -> list<string> {
 # The repository path an image or clip is saved at in `theme`.
 export def theme-path [image: record, theme: string]: nothing -> string {
     let clip = ($image.clip? | default false) or $image.steps? != null
-    let extension = if not $clip { "png" } else if ($image.video? | default false) { "mp4" } else { "webp" }
+    let extension = if ($image.composite? | default false) or $image.recipe? != null {
+        "webp"
+    } else if not $clip { "png" } else if ($image.video? | default false) { "mp4" } else { "webp" }
     $"docs/images/(image-id $image)-($theme).($extension)"
 }
 
@@ -217,7 +237,7 @@ export def problems [
     docs: list<record>
     exists: closure
 ]: nothing -> list<string> {
-    let entries = manifest-entries $manifest [images clips]
+    let entries = manifest-entries $manifest $KINDS
     let expected = $entries | each {|image| image-paths $image } | flatten
     let embeds = $docs | each {|doc| embedded $doc.path $doc.text | each {|file| {doc: $doc.path, file: $file} } } | flatten
     let embedded = $embeds | get file? | default []
@@ -229,7 +249,7 @@ export def problems [
         )
         (
             $entries
-            | each {|image| source-problems $image $exists }
+            | each {|image| source-problems $image $manifest $exists }
             | flatten
         )
         (
@@ -255,8 +275,11 @@ export def problems [
     ] | flatten
 }
 
-def source-problems [image: record, exists: closure]: nothing -> list<string> {
+def source-problems [image: record, manifest: record, exists: closure]: nothing -> list<string> {
     let id = image-id $image
+    if $image.recipe? != null {
+        return (composite-problems $image $manifest)
+    }
     let sources = if $image.extension? != null {
         [
             $image.extension
@@ -275,6 +298,109 @@ def source-problems [image: record, exists: closure]: nothing -> list<string> {
     $sources | where {|source| not (do $exists $source) } | each {|source| $"($id) renders from ($source), which does not exist" }
 }
 
+# The stills a composite is drawn from in `theme`: each source's file in that theme, or a video
+# clip's poster.
+export def composite-sources [composite: record, manifest: record, theme: string]: nothing -> list<string> {
+    let entries = manifest-entries $manifest [images clips]
+    $composite.sources | each {|id|
+        let source = $entries | where {|entry| (image-id $entry) == $id } | first
+        if ($source.video? | default false) { poster-path $source $theme } else { theme-path $source $theme }
+    }
+}
+
+# Everything wrong with how a composite is declared: a recipe this script draws, and sources
+# that are images or video clips in the manifest, rendered in each of its themes. An animated
+# clip has no single still to draw from.
+export def composite-problems [composite: record, manifest: record]: nothing -> list<string> {
+    let id = image-id $composite
+    if $composite.recipe != grid {
+        return [
+            $"($id) names the recipe `($composite.recipe)`; the only one is `grid`"
+        ]
+    }
+    if ($composite.sources? | default [] | is-empty) {
+        return [$"($id) has no sources"]
+    }
+    let entries = manifest-entries $manifest [images clips]
+    $composite.sources | each {|source_id|
+        let source = $entries | where {|entry| (image-id $entry) == $source_id }
+        if ($source | is-empty) {
+            [$"($id) is drawn from ($source_id), which is not an image or clip in ($MANIFEST | path basename)"]
+        } else if ($source.0.clip? | default false) and not ($source.0.video? | default false) {
+            [$"($id) is drawn from ($source_id), an animated clip with no still"]
+        } else {
+            image-themes $composite
+            | where {|theme| $theme not-in (image-themes $source.0) }
+            | each {|theme| $"($id) is drawn in ($theme) from ($source_id), which has no ($theme) file" }
+        }
+    } | flatten
+}
+
+# Draw a composite in each of its themes, to its paths or the same paths under `into`.
+def draw-composite [composite: record, manifest: record, --into: path]: nothing -> list<string> {
+    image-themes $composite | each {|theme|
+        let out = if $into == null { theme-path $composite $theme } else { $into | path join (theme-path $composite $theme) }
+        mkdir ($out | path dirname)
+        grid (composite-sources $composite $manifest $theme) $out $composite.columns $composite.width
+        $out
+    }
+}
+
+# Stills in a grid `columns` wide, each `width` pixels with rounded corners and transparent gutters
+# between them, so the grid sits on a light page and a dark one alike.
+def grid [
+    sources: list<string>
+    out: path
+    columns: int
+    width: int
+]: nothing -> nothing {
+    let gutter = 24
+    let radius = 24
+    let tmp = mktemp --directory | path expand
+    let tiles = $sources | enumerate | each {|source|
+        let tile = $tmp | path join $"tile-($source.index).png"
+        ^magick $source.item -resize $"($width)x" $tile
+        let height = ^magick identify -format "%h" $tile | into int
+        (
+            ^magick $tile
+            "(" -size $"($width)x($height)" xc:none -fill white
+            -draw $"roundrectangle 0,0,($width - 1),($height - 1),($radius),($radius)" ")"
+            -alpha set -compose DstIn -composite $tile
+        )
+        $tile
+    }
+    let rows = $tiles | chunks $columns | enumerate | each {|row|
+        let path = $tmp | path join $"row-($row.index).png"
+        ^magick -background none ...$row.item +smush $gutter $path
+        $path
+    }
+    ^magick -background none ...$rows -smush $gutter -quality 90 -define webp:method=6 -define webp:alpha-quality=100 $out
+    rm --recursive $tmp
+}
+
+# The composites whose committed files no longer match what their sources draw. The encoder may
+# differ in a few pixels from one machine to another, so a file matches when no more than 0.1% of
+# its pixels differ by more than a tenth.
+def stale-composites [manifest: record]: nothing -> list<string> {
+    let tmp = mktemp --directory | path expand
+    let stale = manifest-entries $manifest [composites] | each {|composite|
+        draw-composite $composite $manifest --into $tmp | each {|drawn|
+            let committed = $drawn | path relative-to $tmp
+            let result = ^magick compare -metric AE -fuzz 10% $committed $drawn null: | complete
+            let matches = $result.exit_code <= 1 and (
+                ($result.stderr | split row " " | first | into float) <= (^magick identify -format "%[fx:w*h]" $drawn | into float) * 0.001
+            )
+            if not $matches {
+                [$"($committed) does not match its sources; run `just docs-composites`"]
+            } else {
+                []
+            }
+        } | flatten
+    } | flatten
+    rm --recursive $tmp
+    $stale
+}
+
 def render [
     image: record
     manifest: record
@@ -285,7 +411,9 @@ def render [
     print --stderr $"rendering ($id)"
     let folder = $"docs/images/($image.page)"
     mkdir $folder
-    let files = if $image.extension? != null and ($image.clip? | default false) {
+    let files = if $image.recipe? != null {
+        draw-composite $image $manifest
+    } else if $image.extension? != null and ($image.clip? | default false) {
         render-extension-clip $image $bin $tmp
     } else if $image.extension? != null {
         render-extension $image $bin $tmp
