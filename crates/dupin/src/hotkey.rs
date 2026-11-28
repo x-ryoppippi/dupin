@@ -756,7 +756,7 @@ mod tests {
             ("clipboard", true),
             ("web:g", true),
             ("system/sleep", false),
-            ("window-management/left-half", false),
+            ("running-apps/com.apple.Safari", false),
             ("app:com.apple.calculator", false),
             ("file:~/Downloads", false),
         ] {

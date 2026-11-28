@@ -24,7 +24,6 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
         clipboard_images_setting(s, k),
         clipboard_files_setting(s, k),
         snippet_paste_setting(s, k),
-        window_management_setting(k),
     ];
     rows.extend(snippet_accessibility(s, k));
     let mut body = vec![card(k, rows)];
@@ -275,23 +274,6 @@ fn snippet_paste_setting(s: &Prefs, k: &Kit) -> El {
         Some("Enter pastes a snippet into the front app. Requires Accessibility access."),
         paste,
         s.lock_note(locked),
-    )
-}
-
-fn window_management_setting(k: &Kit) -> El {
-    let open = value_button(
-        k,
-        "open-window-management",
-        "Extensions",
-        &rune_theme_opencode::icons::CHEVRON_RIGHT,
-    )
-    .on_press(|s: &mut Prefs| s.show_extensions());
-    setting(
-        k,
-        &icons::PANEL,
-        "Window Management",
-        Some("Now an extension: turn on Window Management in Settings → Extensions"),
-        open,
     )
 }
 

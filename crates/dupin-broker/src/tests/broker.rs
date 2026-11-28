@@ -1271,7 +1271,7 @@ fn a_base_without_a_revision_switches_bundled_packages_and_denies_their_scopes()
         r#"
 version = 1
 
-[packages."bundled:window-management"]
+[packages."bundled:windows"]
 enabled = true
 
 [packages."bundled:calendar"]
@@ -1282,7 +1282,7 @@ enabled = false
 "#,
     );
     let mut broker = Broker::new(base, Local::default());
-    let windows = id("bundled:window-management");
+    let windows = id("bundled:windows");
     let calendar = id("bundled:calendar");
     let emoji = id("bundled:emoji");
     broker.set_bundled(windows.clone(), rev(R1), false);
@@ -1653,7 +1653,7 @@ fn running_in_the_background_widens_a_profile_and_asks_again() {
 #[test]
 fn a_declared_path_is_bound_like_a_picked_one_and_not_granted_by_bundling() {
     let mut broker = Broker::new(Base::default(), Local::default());
-    let package = id("bundled:repo");
+    let package = id("bundled:folders");
     let capabilities = caps(json!({
         "files": { "src": { "kind": "directory", "access": ["list"], "path": "~/src" } },
         "exec": { "git": { "program": "/usr/bin/git", "args": ["status"], "background": true } }

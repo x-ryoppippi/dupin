@@ -15,7 +15,7 @@ use dupin_core::{CommandId, Config, Provider};
 use dupin_extension_bridge::services::{self, Services};
 use dupin_extension_bridge::{
     AppsAccess, Bridge, ClipboardAccess, ConsentState, Failure, OsAccess, OsPermission, PackageId, Request,
-    Scope, StorageOp, Trigger, WindowsAccess,
+    Scope, Trigger,
 };
 use dupin_host_services::calendar;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Storage};
@@ -69,20 +69,7 @@ fn case(name: &str) -> Option<Override> {
             None,
             Some(Use::Effect(Request::SnippetsWrite)),
         ),
-        // Its files and exec scopes are bound to paths, so only its storage ships granted.
-        "repo" => Override::extension(
-            "repo",
-            Some(Use::Effect(Request::Storage { op: StorageOp::Read })),
-        )
-        .ships_off(),
         "web-search" => Override::extension("web-search", None),
-        "proc" => Override::signals("proc"),
-        "port" => Override::signals("port"),
-        "window-management" => Override::extension(
-            "window-management",
-            Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),
-        )
-        .ships_off(),
         "running-apps" => Override::extension(
             "running-apps",
             Some(Use::Effect(Request::Apps(AppsAccess::Control))),
@@ -142,12 +129,6 @@ impl Override {
             uses,
             ships_off: false,
         }
-    }
-
-    /// A package that ships off and only runs programs, each of which the user allows before
-    /// it runs, bundled or not, so it holds nothing as it ships.
-    fn signals(name: &'static str) -> Self {
-        Self::extension(name, None).ships_off()
     }
 
     fn ships_off(self) -> Self {

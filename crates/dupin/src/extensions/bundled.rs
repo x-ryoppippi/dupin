@@ -10,10 +10,8 @@ use dupin_js_runtime::Diagnostic;
 include!(concat!(env!("OUT_DIR"), "/bundled_seals.rs"));
 
 /// Bundled packages, by `name`, that stay off until the user turns them on in Settings →
-/// Extensions, since not everyone wants what they do: moving other apps' windows, running Git
-/// over the repositories in their folders, or running `ps`, `lsof` and `kill` to list and stop
-/// processes.
-pub const OFF_UNTIL_TURNED_ON: &[&str] = &["repo", "window-management", "proc", "port", "running-apps"];
+/// Extensions, since not everyone wants what they do: hiding and quitting other apps.
+pub const OFF_UNTIL_TURNED_ON: &[&str] = &["running-apps"];
 
 /// The content hash of each bundled package folder, by folder name, as the build found them.
 #[derive(Clone, Debug)]
@@ -208,6 +206,23 @@ mod tests {
                 ignored.is_empty(),
                 "{name}'s package.json has {ignored:?}, which Dupin ignores"
             );
+        }
+    }
+
+    /// docs/design/extension-platform.md's bundling rule: a package whose value rests on
+    /// running programs or reading folders the user picks belongs among the examples.
+    #[test]
+    fn no_bundled_package_declares_exec_or_files() {
+        for (folder, name, _) in packages(&directory().unwrap()) {
+            let package: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(folder.join("package.json")).unwrap()).unwrap();
+            let capabilities = &package["dupin"]["capabilities"];
+            for kind in ["exec", "files"] {
+                assert!(
+                    capabilities.get(kind).is_none(),
+                    "{name} declares `{kind}`, so it is an example, not a bundled package"
+                );
+            }
         }
     }
 

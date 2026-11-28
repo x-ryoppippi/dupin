@@ -73,15 +73,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 4242
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "node",
@@ -144,15 +135,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 600
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "postgres",
@@ -211,15 +193,6 @@
 							{
 								"copy": "5432",
 								"title": "Copy Port"
-							},
-							{
-								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 600
-									}
-								},
-								"title": "Show Process"
 							},
 							{
 								"run": {

@@ -37,10 +37,7 @@ function row(
 	];
 	if (process.path.startsWith('/'))
 		actions.push({ title: 'Reveal in Finder', reveal: process.path });
-	actions.push(
-		{ title: 'Open Activity Monitor', run: 'activityMonitor' },
-		{ title: 'Show Open Ports', run: 'showPorts', data: { pid: process.pid } },
-	);
+	actions.push({ title: 'Open Activity Monitor', run: 'activityMonitor' });
 	if (stoppable(process, uid)) {
 		actions.push(
 			{
@@ -107,7 +104,6 @@ export const views: Views = {
 		const actions: Action[] = [
 			{ title: 'Copy PID', copy: String(details.pid) },
 			{ title: 'Copy Command', copy: details.command || details.path },
-			{ title: 'Show Open Ports', run: 'showPorts', data: { pid: details.pid } },
 		];
 		if (details.path.startsWith('/'))
 			actions.push({ title: 'Reveal in Finder', reveal: details.path });
@@ -134,11 +130,6 @@ export const views: Views = {
 };
 
 export const actions: Actions = {
-	/** Opens Ports with the PID typed, which lists what the process listens on. */
-	showPorts(data) {
-		const { pid } = data as { pid: number };
-		return { type: 'enter', command: 'port', query: String(pid) };
-	},
 	/** Reads the whole command line and working folder, which the list leaves out, and shows them. */
 	async details(data) {
 		const target = data as unknown as Target & { user: string };

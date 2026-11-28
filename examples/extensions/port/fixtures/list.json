@@ -48,15 +48,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 1127
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "rapportd",
@@ -92,15 +83,6 @@
 							{
 								"copy": "5173",
 								"title": "Copy Port"
-							},
-							{
-								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 4242
-									}
-								},
-								"title": "Show Process"
 							},
 							{
 								"run": {
@@ -142,15 +124,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 600
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "postgres",
@@ -186,15 +159,6 @@
 							{
 								"copy": "49205",
 								"title": "Copy Port"
-							},
-							{
-								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 1127
-									}
-								},
-								"title": "Show Process"
 							},
 							{
 								"run": {
@@ -244,15 +208,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 4242
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "node",
@@ -299,15 +254,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 600
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "postgres",
@@ -350,15 +296,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 1127
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "rapportd",
@@ -394,15 +331,6 @@
 							{
 								"copy": "49205",
 								"title": "Copy Port"
-							},
-							{
-								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 1127
-									}
-								},
-								"title": "Show Process"
 							},
 							{
 								"run": {

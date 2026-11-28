@@ -214,16 +214,6 @@ title = "Snippets"
 keywords = ["snip"]
 
 [[commands]]
-id = "extension.window-management"
-title = "Window Management"
-keywords = ["window"]
-
-[[commands]]
-id = "extension.repo"
-title = "Repositories"
-keywords = ["repo"]
-
-[[commands]]
 id = "extension.dupin"
 title = "Dupin Help"
 keywords = ["help"]

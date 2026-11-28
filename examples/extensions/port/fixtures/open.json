@@ -52,15 +52,6 @@
 							},
 							{
 								"run": {
-									"action": "showProcess",
-									"data": {
-										"pid": 4242
-									}
-								},
-								"title": "Show Process"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "node",

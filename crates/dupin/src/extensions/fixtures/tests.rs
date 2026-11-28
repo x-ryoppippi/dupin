@@ -859,12 +859,23 @@ fn a_paste_the_package_may_not_make_copies_instead_and_says_why() {
     }
 }
 
+/// The examples don't ship, so nothing else would notice an SDK change that breaks one.
 #[test]
-fn the_notes_example_passes_its_fixtures() {
+fn every_example_with_fixtures_passes_them() {
     dupin_extension_host::skip_inside_a_sandbox!();
-    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/notes-js");
-    let report = test(&package, false, &|| false).unwrap();
-    assert!(report.passed, "{}", report.text);
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    let mut tested = Vec::new();
+    for entry in std::fs::read_dir(&examples).unwrap() {
+        let package = entry.unwrap().path();
+        if !package.join("fixtures").is_dir() {
+            continue;
+        }
+        let report = test(&package, false, &|| false).unwrap();
+        assert!(report.passed, "{}:\n{}", package.display(), report.text);
+        tested.push(package.file_name().unwrap().to_string_lossy().into_owned());
+    }
+    tested.sort();
+    assert_eq!(tested, ["notes-js", "port", "proc", "repo", "window-management"]);
 }
 
 /// A package whose views and actions misbehave in every way a page can.

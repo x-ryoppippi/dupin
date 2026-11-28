@@ -120,7 +120,7 @@ target = "dupin"
 command = "web:yt"
 ```
 
-The same `command` also names one row, such as `system/sleep` or `window-management/left-half`, which the shortcut runs without showing the panel ([Hotkeys › Rows](./hotkeys.md#rows)).
+The same `command` also names one row, such as `system/sleep` or `running-apps/com.apple.Safari`, which the shortcut runs without showing the panel ([Hotkeys › Rows](./hotkeys.md#rows)).
 
 ### Who gets a keyword
 

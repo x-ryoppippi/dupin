@@ -2,17 +2,17 @@
 
 Lists the Git repositories on your Mac and opens one in your editor, your terminal, Finder or its page on the web.
 
-| Keyword       | `repo`                                      |
-| ------------- | ------------------------------------------- |
-| Command       | `repo`                                      |
-| On by default | No: turn it on in Settings → Extensions     |
-| User docs     | [Repositories](../../docs/features/repo.md) |
+| Keyword   | `repo`                                          |
+| --------- | ----------------------------------------------- |
+| Command   | `repo`                                          |
+| Installed | No: an example; see its user docs to install it |
+| User docs | [Repositories](../../../docs/features/repo.md)  |
 
-Never native: it was written as an optional bundled extension.
+Never native: it was written as an optional bundled extension, and is an example now; see [Built-ins as bundled extensions](../../../docs/design/extension-platform.md#built-ins-as-bundled-extensions).
 
 ## How it's built
 
-The bundled example of `files` scopes, declared preferences and state kept between refreshes.
+The example of `files` scopes, declared preferences and state kept between refreshes.
 
 - **`items(ctx)`**: gathers the repositories `ghq list -p` prints and the folders holding `.git` under the four `files` scopes, reads Git's status for up to `checks` of them within the refresh's time budget, and lists them in parts of 500 with a `ttl` of 300 seconds. Dupin matches each keystroke against the catalogue it holds and asks again in the background once the `ttl` passes.
 - **`storage`**: one record, under the key `state`, holds every repository listed and what Git last said of each, so a refresh keeps the status of repositories it didn't read this time and the actions can check that a path is one it listed.
@@ -47,8 +47,8 @@ The bundled example of `files` scopes, declared preferences and state kept betwe
 ## Test it
 
 ```sh
-dupin ext test extensions/repo
-dupin ext render extensions/repo extensions/repo/fixtures/repos.json repos.png
+dupin ext test examples/extensions/repo
+dupin ext render examples/extensions/repo examples/extensions/repo/fixtures/repos.json repos.png
 ```
 
-`replies.files` gives each scope's folder contents, reported under `/Users/dupin`; `replies.exec` answers each profile by name and arguments, so nothing runs; `folders.json` leaves ghq undecided and denies Git with `replies.consent`. Run `dupin` from this checkout's build; see [Working on them](../README.md#working-on-them).
+`replies.files` gives each scope's folder contents, reported under `/Users/dupin`; `replies.exec` answers each profile by name and arguments, so nothing runs; `folders.json` leaves ghq undecided and denies Git with `replies.consent`.

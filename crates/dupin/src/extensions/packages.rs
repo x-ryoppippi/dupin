@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn choices_for_a_package_no_longer_bundled_are_ignored_quietly() {
-        const NO_LONGER_BUNDLED: &[&str] = &["agent"];
+        const NO_LONGER_BUNDLED: &[&str] = &["agent", "proc", "port", "repo", "window-management"];
         let dir = tempfile::tempdir().unwrap();
         let key = DataKey::generate().unwrap();
         let about = || package(Origin::Bundled, "About", "about", "blake3:shipped");

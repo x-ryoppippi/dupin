@@ -92,7 +92,7 @@ While you type, an extension may use what you allowed to read: GET and HEAD, fil
 <details>
 <summary>macOS access</summary>
 
-Calendars, reading or watching the clipboard, pasting and windows also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. Turning on a bundled extension that ships off, such as Window Management, is turning on its feature and asks for what its grants need; turning on any other extension never asks. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
+Calendars, reading or watching the clipboard, pasting and windows also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. Turning on a bundled extension that ships off is turning on its feature and asks for what its grants need; turning on any other extension never asks. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
 
 </details>
 
@@ -523,7 +523,7 @@ With `query`, a search sends the extension only what matches.
 
 ## Windows
 
-`"windows": ["read", "arrange"]` lets an extension read the displays and the focused window (`windows.displays()`, `windows.focused()`) and move it (`windows.setFrame(frame)`). Both need macOS Accessibility access. The bundled [Window Management](./window-management.md) is written this way.
+`"windows": ["read", "arrange"]` lets an extension read the displays and the focused window (`windows.displays()`, `windows.focused()`) and move it (`windows.setFrame(frame)`). Both need macOS Accessibility access. The [Window Management](./window-management.md) example is written this way.
 
 <details>
 <summary>Functions, frames and an example</summary>

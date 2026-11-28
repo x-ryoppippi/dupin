@@ -72,7 +72,6 @@ function row(listener: Listener, read: number): CatalogueItem {
 	actions.push(
 		{ title: 'Copy Address', copy: `localhost:${port}` },
 		{ title: 'Copy Port', copy: String(port) },
-		{ title: 'Show Process', run: 'showProcess', data: { pid } },
 		{
 			title: 'Terminate',
 			run: 'terminate',
@@ -104,11 +103,6 @@ export async function items(): Promise<ItemsResult> {
 }
 
 export const actions: Actions = {
-	/** Opens Processes with the PID typed, which lists the process that listens. */
-	showProcess(data) {
-		const { pid } = data as { pid: number };
-		return { type: 'enter', command: 'proc', query: String(pid) };
-	},
 	async terminate(data) {
 		const { pid, name } = data as unknown as Target;
 		if (!Number.isInteger(pid) || pid <= 1)

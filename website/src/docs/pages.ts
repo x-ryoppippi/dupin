@@ -45,14 +45,20 @@ export const sections = [
 			'features/clipboard.md',
 			'features/dictionary.md',
 			'features/emoji.md',
-			'features/repo.md',
 			'features/snippets.md',
 			'features/web-searches.md',
 			'features/maps.md',
-			'features/window-management.md',
 			'features/running-apps.md',
+		],
+	},
+	{
+		title: 'Example extensions',
+		intro: "Working packages in the repository that don't ship with Dupin, to install or copy.",
+		pages: [
 			'features/processes.md',
 			'features/ports.md',
+			'features/repo.md',
+			'features/window-management.md',
 		],
 	},
 	{

@@ -442,9 +442,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::extensions::{ACTION_DEADLINE, bundled, load_bundled};
+    use crate::extensions::{ACTION_DEADLINE, load_folder};
 
-    /// The bundled Processes package signals a child this test started, through the broker and
+    /// The Processes example signals a child this test started, through the broker and
     /// the runner the launcher uses, and refuses launchd, Dupin and a PID that now runs another
     /// program before running anything that signals.
     #[test]
@@ -459,9 +459,8 @@ mod tests {
             ..Services::none()
         };
         let bridge = Bridge::new(Broker::new(Base::default(), Local::default()), None, services);
-        let folder = bundled::find(&bundled::directory().unwrap(), "proc").unwrap();
-        let extension = load_bundled(&folder).unwrap();
-        bridge.set_bundled(&extension.package, extension.revision.clone(), true);
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/proc");
+        let extension = load_folder(&folder).unwrap();
         let _ = bridge.install(
             &extension.package,
             extension.revision.clone(),

@@ -71,7 +71,7 @@ When `config.toml` is read-only, Dupin saves edits in its [encrypted storage](./
 
 Focused window (`display = "active"`) uses any existing Accessibility grant. If access or the focused window is unavailable, the panel opens on the main display with a notice. When access is missing, choose **Set Up Accessibility** in the notice to request access or open Accessibility Settings.
 
-Enabling Calendar search or Paste snippets, setting a Selection hotkey for the first time, or turning on an extension such as Window Management in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
+Enabling Calendar search or Paste snippets, setting a Selection hotkey for the first time, or turning on an extension such as Running Apps in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
 
 </details>
 
@@ -137,7 +137,6 @@ With `settings` set, `config.toml` links into the Nix store. To change a locked 
 - [Keywords and aliases](./features/keywords.md#aliases)
 - [Launch at login](./features/settings.md#launch-at-login)
 - [Recent items](./features/recent-items.md#configuration)
-- [Repositories](./features/repo.md#configuration)
 - [Script commands](./features/scripts.md#configuration)
 - [Search selected text](./features/selected-text.md#configuration)
 - [Snippets](./features/snippets.md#configuration)
@@ -146,4 +145,3 @@ With `settings` set, `config.toml` links into the Nix store. To change a locked 
 - [Telemetry](./features/telemetry.md#configuration): `telemetry`, the anonymous daily usage ping
 - [Updates](./features/updates.md#configuration)
 - [Web searches](./features/web-searches.md#configuration)
-- [Window management](./features/window-management.md#configuration)

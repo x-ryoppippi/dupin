@@ -104,15 +104,6 @@
 							},
 							{
 								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 4242
-									}
-								},
-								"title": "Show Open Ports"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "node",
@@ -203,15 +194,6 @@
 									"data": null
 								},
 								"title": "Open Activity Monitor"
-							},
-							{
-								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 4242
-									}
-								},
-								"title": "Show Open Ports"
 							},
 							{
 								"run": {
@@ -308,15 +290,6 @@
 							},
 							{
 								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 321
-									}
-								},
-								"title": "Show Open Ports"
-							},
-							{
-								"run": {
 									"action": "terminate",
 									"data": {
 										"name": "Safari",
@@ -407,15 +380,6 @@
 									"data": null
 								},
 								"title": "Open Activity Monitor"
-							},
-							{
-								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 1
-									}
-								},
-								"title": "Show Open Ports"
 							}
 						],
 						"id": "1",
@@ -470,15 +434,6 @@
 									"data": null
 								},
 								"title": "Open Activity Monitor"
-							},
-							{
-								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 150
-									}
-								},
-								"title": "Show Open Ports"
 							}
 						],
 						"id": "150",
@@ -533,15 +488,6 @@
 									"data": null
 								},
 								"title": "Open Activity Monitor"
-							},
-							{
-								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 500
-									}
-								},
-								"title": "Show Open Ports"
 							}
 						],
 						"id": "500",
@@ -588,15 +534,6 @@
 									"data": null
 								},
 								"title": "Open Activity Monitor"
-							},
-							{
-								"run": {
-									"action": "showPorts",
-									"data": {
-										"pid": 510
-									}
-								},
-								"title": "Show Open Ports"
 							}
 						],
 						"id": "510",
