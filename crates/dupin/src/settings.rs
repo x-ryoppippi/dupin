@@ -117,6 +117,7 @@ pub fn check(source: &str) -> Result<Config, String> {
         None => error.message().to_owned(),
     })?;
     crate::composition::check(&config.advanced)?;
+    crate::list_keys::check(&config)?;
     crate::hotkey::parse(&config.hotkey).map_err(|_| format!("the hotkey {:?} is invalid", config.hotkey))?;
     crate::hotkey::parse(&config.selection_hotkey)
         .map_err(|_| format!("the selection hotkey {:?} is invalid", config.selection_hotkey))?;
@@ -203,6 +204,26 @@ script = "missing.sh"
         });
         assert_eq!(config, Config::parse(source).unwrap());
         assert_eq!(problem, None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_list_key_the_panel_uses_is_invalid_and_never_launched_with() {
+        let dir = scratch("taken-list-key");
+        let path = dir.join("config.toml");
+        let source = "file_limit = 37\nup_key = \"ctrl+k\"\ndown_key = \"ctrl+n\"\n";
+        std::fs::write(&path, source).unwrap();
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(config, Config::parse("file_limit = 37").unwrap());
+        assert!(
+            problem
+                .unwrap()
+                .starts_with("config.toml is invalid: `up_key`: ⌃K already shows a result's actions")
+        );
+        assert!(check(source).unwrap_err().contains("`up_key`"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

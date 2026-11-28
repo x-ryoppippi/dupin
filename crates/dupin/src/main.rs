@@ -37,6 +37,7 @@ mod hotkey;
 mod http;
 mod icons;
 mod latency;
+mod list_keys;
 mod log;
 mod mcp;
 mod notices;

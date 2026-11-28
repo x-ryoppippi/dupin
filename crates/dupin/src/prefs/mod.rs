@@ -31,6 +31,7 @@ use self::general::LoginPreference;
 use self::shortcut::ShortcutState;
 use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
+use crate::list_keys::ListKey;
 use crate::ui::Ui;
 use crate::update::Updater;
 
@@ -118,6 +119,8 @@ pub struct Prefs {
     /// The page ⌘, returns to: the last one shown other than Snapshots, which has its own way in.
     settings_page: Page,
     recorders: [ShortcutState; 2],
+    list_key_recorders: [ShortcutState; 2],
+    list_key_problems: [Option<String>; 2],
     shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
@@ -177,6 +180,7 @@ impl Prefs {
             }
             recorder
         });
+        let list_key_recorders = ListKey::ALL.map(|key| ShortcutState::new(key.shortcut(&config)));
         let active_radius = config.theme.corner_radius;
         Prefs {
             preview_dark: None,
@@ -192,6 +196,8 @@ impl Prefs {
             page: Page::General,
             settings_page: Page::General,
             recorders,
+            list_key_recorders,
+            list_key_problems: [None, None],
             shortcut_problems: [None, None],
             binding,
             panel,
@@ -309,6 +315,13 @@ impl Prefs {
                 self.shortcut_problems[i] = None;
             }
         }
+        for key in ListKey::ALL {
+            let shortcut = key.shortcut(&config);
+            if self.list_key_recorders[key as usize].shortcut() != shortcut.as_ref() {
+                self.list_key_recorders[key as usize] = ShortcutState::new(shortcut);
+                self.list_key_problems[key as usize] = None;
+            }
+        }
         self.reflect_launch_hotkey();
         if config != self.config {
             self.keywords.reflect(&config, Some(&self.config));
@@ -367,18 +380,33 @@ impl Prefs {
         next: Option<&Shortcut>,
     ) -> Result<(), ShortcutError> {
         let base = self.current.borrow().clone();
-        let result =
-            if next.is_some_and(|shortcut| crate::hotkey::binding_targets(&base).contains_key(shortcut)) {
-                Err(ShortcutError::Conflict)
-            } else {
-                self.binding.replace(kind, next)
-            };
+        let result = if next.is_some_and(|shortcut| {
+            crate::hotkey::binding_targets(&base).contains_key(shortcut)
+                || crate::list_keys::holding(&base, shortcut).is_some()
+        }) {
+            Err(ShortcutError::Conflict)
+        } else {
+            self.binding.replace(kind, next)
+        };
         self.shortcut_problems[kind as usize] = next
             .filter(|_| result == Err(ShortcutError::Conflict))
             .and_then(|next| self.binding.recorder_conflict(kind, next, &base));
         result?;
         self.config = base.clone();
         kind.set(&mut self.config, next);
+        self.save(&base);
+        Ok(())
+    }
+
+    fn change_list_key(&mut self, key: ListKey, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
+        let base = self.current.borrow().clone();
+        self.list_key_problems[key as usize] =
+            next.and_then(|next| crate::list_keys::problem(&base, key, next));
+        if self.list_key_problems[key as usize].is_some() {
+            return Err(ShortcutError::Conflict);
+        }
+        self.config = base.clone();
+        key.set(&mut self.config, next);
         self.save(&base);
         Ok(())
     }
@@ -690,16 +718,55 @@ mod tests {
     }
 
     #[test]
+    fn list_key_recording_refuses_what_is_taken_and_names_who_has_it() {
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut prefs = state(current.clone(), settings, false);
+        let actions: Shortcut = "ctrl+k".parse().unwrap();
+        assert_eq!(
+            prefs.change_list_key(ListKey::Up, Some(&actions)),
+            Err(ShortcutError::Conflict)
+        );
+        assert_eq!(
+            prefs.list_key_problems[ListKey::Up as usize].as_deref(),
+            Some("⌃K already shows a result's actions.")
+        );
+        assert!(current.borrow().up_key.is_empty());
+
+        let chord: Shortcut = "ctrl+p".parse().unwrap();
+        assert_eq!(prefs.change_list_key(ListKey::Up, Some(&chord)), Ok(()));
+        assert_eq!(prefs.list_key_problems[ListKey::Up as usize], None);
+        assert_eq!(current.borrow().up_key, "ctrl+p");
+
+        assert_eq!(
+            prefs.change_list_key(ListKey::Down, Some(&chord)),
+            Err(ShortcutError::Conflict)
+        );
+        assert_eq!(
+            prefs.list_key_problems[ListKey::Down as usize].as_deref(),
+            Some("⌃P is assigned to the Up key.")
+        );
+        assert_eq!(
+            prefs.change_hotkey(LauncherShortcut::Selection, Some(&chord)),
+            Err(ShortcutError::Conflict)
+        );
+        assert_eq!(prefs.change_list_key(ListKey::Up, None), Ok(()));
+        assert!(current.borrow().up_key.is_empty());
+    }
+
+    #[test]
     fn locked_general_controls_are_disabled() {
         use rune::accesskit::Role;
 
         let current = Rc::new(RefCell::new(Config::default()));
         let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
         let state = state(current, settings, false);
-        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        let mut runtime = rune::Runtime::new(state, view, (SIZE.0, SIZE.1 + 240.0), rune::Env::default());
         let controls = [
             ("hotkey", "Show Dupin", Role::Button),
             ("selection_hotkey", "Search selected text", Role::Button),
+            ("up_key", "Move up the list", Role::Button),
+            ("down_key", "Move down the list", Role::Button),
             ("display", "Display", Role::ComboBox),
             ("system_automation", "System Command Automation", Role::Switch),
         ];

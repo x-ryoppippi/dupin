@@ -19,6 +19,9 @@ impl Ui {
         if tx.focused().is_some() {
             return false;
         }
+        if self.configured_arrow(ev, tx).is_some() {
+            return self.key(ev, tx);
+        }
         if ev.key == Key::Backspace && !self.query.text.is_empty() {
             tx.focus("query", false);
             self.query_edit().key(ev, None);
@@ -41,6 +44,14 @@ impl Ui {
         if !self.session.command().private_results {
             crate::trace::key(ev);
         }
+        let mapped;
+        let ev = match self.configured_arrow(ev, tx) {
+            Some(key) => {
+                mapped = KeyEvent { key, ..ev.clone() };
+                &mapped
+            }
+            None => ev,
+        };
         let flipped;
         let ev = match list_key(&ev.key, self.grows_up()) {
             Some(key) => {
@@ -157,11 +168,29 @@ impl Ui {
             Key::Escape => Intent::Dismiss,
             _ => return false,
         };
+        let direction = match intent {
+            Intent::Up => Some("up"),
+            Intent::Down => Some("down"),
+            _ => None,
+        };
+        let previous = self.session.selected();
         let Some(effects) = self.session.intent(intent) else {
             return false;
         };
         self.apply(effects, tx);
+        if let Some(direction) = direction {
+            crate::trace::navigation(direction, previous, self.session.selected());
+        }
         true
+    }
+
+    /// ↑ or ↓ for one of config.toml's list keys, which the result, action and picker lists
+    /// take as the arrow; forms and script prompts keep the key.
+    fn configured_arrow(&self, ev: &KeyEvent, tx: &Tx) -> Option<Key> {
+        if self.script_entry.is_some() || self.script_card.is_some() || self.form_draft().is_some() {
+            return None;
+        }
+        crate::list_keys::arrow(&self.configuration.values.borrow(), ev, tx.physical_key())
     }
 
     /// A click on a result row.

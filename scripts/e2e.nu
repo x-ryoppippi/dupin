@@ -26,7 +26,7 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
         scripts-stage $out
         with-env {XDG_RUNTIME_DIR: $cli.runtime, XDG_DATA_HOME: $cli.data} { cli-stage $out $cli.binary }
     }
-    print 'e2e: Quick Look, Calculator, Settings, Bluetooth, Open with…, confirmed Trash, CLI picker, Snapshot controls and Script Commands passed'
+    print 'e2e: Quick Look, Calculator, Settings and list keys, Bluetooth, Open with…, confirmed Trash, CLI picker, Snapshot controls and Script Commands passed'
 }
 
 def main [] {

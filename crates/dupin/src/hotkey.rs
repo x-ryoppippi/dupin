@@ -355,6 +355,13 @@ impl Binding {
         shortcut: &Shortcut,
         config: &Config,
     ) -> Option<String> {
+        if let Some(key) = crate::list_keys::holding(config, shortcut) {
+            return Some(format!(
+                "{} is assigned to the {}.",
+                shortcut.keycaps().join(""),
+                key.name()
+            ));
+        }
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if matches!(state.targets.get(shortcut), Some(Target::Configured(_)))
             || binding_targets(config).contains_key(shortcut)
@@ -483,6 +490,9 @@ pub fn holder(config: &Config, shortcut: &Shortcut, except: Option<&str>) -> Opt
         .find(|kind| parse(kind.accelerator(config)).ok().flatten().as_ref() == Some(shortcut))
     {
         return Some(format!("the {} shortcut", kind.name()));
+    }
+    if let Some(key) = crate::list_keys::holding(config, shortcut) {
+        return Some(format!("the {}", key.name()));
     }
     let (_, target) = config.bindings.iter().find(|(accelerator, _)| {
         Some(accelerator.as_str()) != except

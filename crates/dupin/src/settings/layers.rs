@@ -76,6 +76,7 @@ impl Layers {
             }
         }
         crate::composition::check(&config.advanced)
+            .and_then(|()| crate::list_keys::check(&config))
             .map_err(|problem| format!("config.toml is invalid: {problem}"))?;
         Ok(Effective {
             config,
@@ -110,6 +111,10 @@ impl Layers {
         let mut config: Config = readable.try_into().unwrap_or_default();
         if crate::composition::check(&config.advanced).is_err() {
             config.advanced = Default::default();
+        }
+        if crate::list_keys::check(&config).is_err() {
+            config.up_key.clear();
+            config.down_key.clear();
         }
         (config, locked_keys)
     }
