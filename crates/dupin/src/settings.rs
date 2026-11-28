@@ -208,6 +208,26 @@ script = "missing.sh"
     }
 
     #[test]
+    fn a_list_key_the_panel_uses_is_invalid_and_never_launched_with() {
+        let dir = scratch("taken-list-key");
+        let path = dir.join("config.toml");
+        let source = "file_limit = 37\nup_key = \"ctrl+k\"\ndown_key = \"ctrl+n\"\n";
+        std::fs::write(&path, source).unwrap();
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(config, Config::parse("file_limit = 37").unwrap());
+        assert!(
+            problem
+                .unwrap()
+                .starts_with("config.toml is invalid: `up_key`: ⌃K already shows a result's actions")
+        );
+        assert!(check(source).unwrap_err().contains("`up_key`"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn an_unknown_key_at_launch_is_reported_and_costs_only_itself() {
         let dir = scratch("unknown-key");
         let path = dir.join("config.toml");

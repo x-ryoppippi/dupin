@@ -112,6 +112,10 @@ impl Layers {
         if crate::composition::check(&config.advanced).is_err() {
             config.advanced = Default::default();
         }
+        if crate::list_keys::check(&config).is_err() {
+            config.up_key.clear();
+            config.down_key.clear();
+        }
         (config, locked_keys)
     }
 }
