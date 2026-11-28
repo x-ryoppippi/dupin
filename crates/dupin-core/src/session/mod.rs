@@ -6,6 +6,7 @@ mod actions;
 mod intents;
 mod keywords;
 mod navigation;
+mod paths;
 mod search;
 mod selection;
 mod snapshots;

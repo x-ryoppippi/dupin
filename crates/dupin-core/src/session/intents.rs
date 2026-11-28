@@ -45,6 +45,9 @@ impl Session {
             self.search.deleting = false;
         }
         self.search.recalled = None;
+        if route_keyword && let Some(effects) = self.walk_path(text) {
+            return effects;
+        }
         if route_keyword
             && self.page().is_none()
             && self.search.command == *self.commands.default()
