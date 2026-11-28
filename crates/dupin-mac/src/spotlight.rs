@@ -28,7 +28,7 @@ use objc2_foundation::{
 const SLICE: Duration = Duration::from_millis(16);
 
 /// Shown in place of "No matches" when the searched disk has Spotlight indexing turned off.
-const INDEXING_OFF: &str = "Spotlight indexing is off for this disk  ·  type ~/ to browse folders";
+const INDEXING_OFF: &str = "Spotlight indexing is off here  ·  ⌫ back to apps and type ~/ to browse";
 
 /// What a Spotlight search matches the query words against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,7 +109,7 @@ impl Provider for SpotlightProvider {
             kinds: &self.kinds,
         };
         let mut found = false;
-        autoreleasepool(|_| {
+        let outcome = autoreleasepool(|_| {
             run_query(
                 request,
                 &mut |items| {
@@ -118,9 +118,9 @@ impl Provider for SpotlightProvider {
                 },
                 &job,
             )
-        })?;
-        // A disk with indexing off answers every query with nothing, which would otherwise
-        // read as "No matches".
+        });
+        // With indexing off, a query finds nothing or fails to start, which would otherwise
+        // read as "No matches" or a failure without a reason.
         let searched = folder.as_deref().or(home.as_deref()).unwrap_or(Path::new("/"));
         if !found
             && !request.is_cancelled()
@@ -130,8 +130,9 @@ impl Provider for SpotlightProvider {
                 empty_text: Some(INDEXING_OFF.into()),
                 ..Batch::default()
             });
+            return Ok(());
         }
-        Ok(())
+        outcome
     }
 }
 
@@ -162,11 +163,14 @@ fn indexing_off(volume: &Path) -> bool {
         })
 }
 
-/// `mdutil -s` says "Indexing disabled.", "Indexing and searching disabled." or "Spotlight
-/// server is disabled." when Spotlight can't answer for the volume. An unknown or error state
-/// claims nothing.
+/// The states `mdutil -s` reports when Spotlight can't answer for the volume. An unknown or
+/// error state claims nothing.
 fn reports_indexing_off(status: &str) -> bool {
-    !status.contains("Indexing enabled") && status.contains("disabled")
+    status.lines().map(str::trim).any(|line| {
+        line.starts_with("Indexing disabled.")
+            || line.starts_with("Indexing and searching disabled")
+            || line == "Spotlight server is disabled."
+    })
 }
 
 struct SearchJob<'a> {
@@ -572,6 +576,9 @@ mod tests {
         ));
         assert!(!reports_indexing_off(
             "/Volumes/Share:\n\tServer search enabled.\n"
+        ));
+        assert!(!reports_indexing_off(
+            "/Volumes/Indexing disabled.:\n\tIndexing enabled. \n"
         ));
     }
 
