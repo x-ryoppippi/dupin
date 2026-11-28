@@ -83,15 +83,54 @@ impl Layers {
             overlay,
         })
     }
+
+    /// What an invalid configuration still sets, for a launch with no previous configuration to
+    /// keep: each top-level key is read on its own over the defaults, so an unknown or invalid
+    /// key costs only itself. The configuration stays invalid; this never feeds a save.
+    fn readable(&self) -> (Config, LockedKeys) {
+        let Ok(mut table) = top_level(self.base_source(), "config.toml") else {
+            return (Config::default(), LockedKeys::new());
+        };
+        let mut locked_keys = LockedKeys::new();
+        if self.base_read_only {
+            locked_keys.extend(table.keys().cloned());
+            if let Some(Ok(mut merged)) = self.overlay.as_deref().map(|source| source.parse::<Table>()) {
+                merged.extend(table);
+                table = merged;
+            }
+        }
+        let readable: Table = table
+            .into_iter()
+            .filter(|(key, value)| {
+                Table::from_iter([(key.clone(), value.clone())])
+                    .try_into::<Config>()
+                    .is_ok()
+            })
+            .collect();
+        let mut config: Config = readable.try_into().unwrap_or_default();
+        if crate::composition::check(&config.advanced).is_err() {
+            config.advanced = Default::default();
+        }
+        (config, locked_keys)
+    }
 }
 
 pub fn load(paths: &Paths) -> (Config, LockedKeys, Option<String>) {
-    match paths.read().and_then(|layers| layers.effective()) {
-        Ok(effective) => (effective.config, effective.locked_keys, None),
+    let layers = match paths.read() {
+        Ok(layers) => layers,
         Err(error) => {
             let problem = format!("{error}; using the defaults");
             crate::log::warn(&problem);
-            (Config::default(), LockedKeys::new(), Some(problem))
+            return (Config::default(), LockedKeys::new(), Some(problem));
+        }
+    };
+    match layers.effective() {
+        Ok(effective) => (effective.config, effective.locked_keys, None),
+        Err(error) => {
+            let problem = format!("{error}; settings Dupin can't read use their defaults");
+            crate::log::warn(&problem);
+            let (config, locked_keys) = layers.readable();
+            (config, locked_keys, Some(problem))
         }
     }
 }
