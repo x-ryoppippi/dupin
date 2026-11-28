@@ -107,6 +107,7 @@ impl Ui {
         let problems: Vec<_> = [
             problem,
             read_problem,
+            update.config_warning,
             update.save_problem,
             update.watch_problem,
             update.save_notice,

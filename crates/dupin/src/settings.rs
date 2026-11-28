@@ -109,13 +109,16 @@ fn read_source(path: &Path) -> std::io::Result<String> {
 /// Whether `source` would be accepted as config.toml: it parses, and its hotkey is one the
 /// launcher can register.
 pub fn check(source: &str) -> Result<Config, String> {
-    let config = Config::parse(source).map_err(|error| match error.span() {
+    let (config, unknown) = Config::parse_with_unknown(source).map_err(|error| match error.span() {
         Some(span) => {
             let (line, column) = location(source, span.start);
             format!("line {line}, column {column}: {}", error.message())
         }
         None => error.message().to_owned(),
     })?;
+    if !unknown.is_empty() {
+        return Err(format!("unknown configuration keys: {}", unknown.join(", ")));
+    }
     crate::composition::check(&config.advanced)?;
     crate::hotkey::parse(&config.hotkey).map_err(|_| format!("the hotkey {:?} is invalid", config.hotkey))?;
     crate::hotkey::parse(&config.selection_hotkey)

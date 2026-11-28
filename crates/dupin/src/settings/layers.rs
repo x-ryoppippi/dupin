@@ -49,6 +49,7 @@ pub(super) struct Effective {
     pub config: Config,
     pub locked_keys: LockedKeys,
     pub overlay: Table,
+    pub unknown_keys: Vec<String>,
 }
 
 impl Layers {
@@ -59,14 +60,21 @@ impl Layers {
 
     pub fn effective(&self) -> Result<Effective, String> {
         let base = self.base_source();
-        let mut config = Config::parse(base).map_err(|e| parse_problem("config.toml", base, &e))?;
+        let (mut config, mut unknown_keys) =
+            Config::parse_with_unknown(base).map_err(|e| parse_problem("config.toml", base, &e))?;
         let mut locked_keys = LockedKeys::new();
         let mut overlay = Table::new();
         if self.base_read_only {
             let base = top_level(base, "config.toml")?;
             locked_keys.extend(base.keys().cloned());
             if let Some(source) = &self.overlay {
-                Config::parse(source).map_err(|e| parse_problem("the stored settings", source, &e))?;
+                let (_, overlay_unknown) = Config::parse_with_unknown(source)
+                    .map_err(|e| parse_problem("the stored settings", source, &e))?;
+                unknown_keys.extend(
+                    overlay_unknown
+                        .into_iter()
+                        .map(|key| format!("stored settings: `{key}`")),
+                );
                 overlay = top_level(source, "the stored settings")?;
                 let mut merged = overlay.clone();
                 merged.extend(base);
@@ -81,13 +89,25 @@ impl Layers {
             config,
             locked_keys,
             overlay,
+            unknown_keys,
         })
     }
 }
 
 pub fn load(paths: &Paths) -> (Config, LockedKeys, Option<String>) {
     match paths.read().and_then(|layers| layers.effective()) {
-        Ok(effective) => (effective.config, effective.locked_keys, None),
+        Ok(effective) => {
+            let problem = (!effective.unknown_keys.is_empty()).then(|| {
+                format!(
+                    "Unknown configuration keys ignored: {}",
+                    effective.unknown_keys.join(", ")
+                )
+            });
+            if let Some(problem) = &problem {
+                crate::log::warn(problem);
+            }
+            (effective.config, effective.locked_keys, problem)
+        }
         Err(error) => {
             let problem = format!("{error}; using the defaults");
             crate::log::warn(&problem);

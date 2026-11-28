@@ -16,6 +16,7 @@ pub struct Update {
     pub revision: u64,
     pub locked_keys: Option<LockedKeys>,
     pub result: Result<Config, String>,
+    pub config_warning: Option<String>,
     pub watch_problem: Option<String>,
     pub save_problem: Option<String>,
     pub save_notice: Option<String>,
@@ -262,14 +263,24 @@ where
 
     fn emit_snapshot(&mut self, revision: u64) {
         let layers = self.paths.read();
-        let (result, locked_keys) = match layers.as_ref().map_err(String::clone).and_then(Layers::effective) {
-            Ok(effective) => (Ok(effective.config), Some(effective.locked_keys)),
-            Err(error) => (Err(error), None),
-        };
+        let (result, locked_keys, config_warning) =
+            match layers.as_ref().map_err(String::clone).and_then(Layers::effective) {
+                Ok(effective) => {
+                    let warning = (!effective.unknown_keys.is_empty()).then(|| {
+                        format!(
+                            "Unknown configuration keys ignored: {}",
+                            effective.unknown_keys.join(", ")
+                        )
+                    });
+                    (Ok(effective.config), Some(effective.locked_keys), warning)
+                }
+                Err(error) => (Err(error), None, None),
+            };
         let update = Update {
             revision,
             locked_keys,
             result,
+            config_warning,
             watch_problem: self.watch_problem.clone(),
             save_problem: self.save_problem.clone(),
             save_notice: self.save_notice.clone(),

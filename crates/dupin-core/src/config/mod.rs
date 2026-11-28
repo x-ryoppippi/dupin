@@ -36,7 +36,7 @@ pub use theme::{Backdrop, Colors, DEFAULT_SEARCH_SYMBOL, FontFamily, SearchIcon,
 pub use web::WebSearch;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Config {
     /// The global shortcut that shows and hides the panel, as Rune parses accelerators:
     /// modifiers (`cmd`, `alt`, `ctrl`, `shift`) and a key joined by `+`.
@@ -144,6 +144,29 @@ impl Config {
     pub fn parse(src: &str) -> Result<Config, toml::de::Error> {
         toml::from_str(src)
     }
+
+    /// Parse the configuration while returning unrecognized top-level keys separately. This
+    /// lets a newer config file keep its known settings when an older Dupin reads it.
+    pub fn parse_with_unknown(src: &str) -> Result<(Config, Vec<String>), toml::de::Error> {
+        let table = toml::from_str::<toml::Table>(src)?;
+        // Fields omitted from the serialized default because they are empty or retired still
+        // belong to the config schema and must not be reported as unknown.
+        const OMITTED_KEYS: &[&str] = &["window_management", "web_searches", "sync", "aliases", "advanced"];
+        let defaults =
+            toml::Value::try_from(Config::default()).expect("the default configuration must serialize");
+        let mut known: std::collections::BTreeSet<String> = defaults
+            .as_table()
+            .into_iter()
+            .flat_map(|table| table.keys().cloned())
+            .collect();
+        known.extend(OMITTED_KEYS.iter().map(|key| (*key).to_owned()));
+        let unknown = table
+            .keys()
+            .filter(|key| !known.contains(*key))
+            .cloned()
+            .collect();
+        Ok((Config::parse(src)?, unknown))
+    }
 }
 
 /// The top-level keys whose value is the same choice on every Mac, which sync carries
@@ -184,11 +207,6 @@ impl<'de> Deserialize<'de> for Retired {
 #[cfg(test)]
 mod tests {
     use super::Config;
-
-    #[test]
-    fn rejects_unknown_keys() {
-        assert!(Config::parse("hotkye = \"alt+space\"").is_err());
-    }
 
     #[test]
     fn a_retired_key_loads_and_is_never_written() {
