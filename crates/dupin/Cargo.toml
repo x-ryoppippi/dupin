@@ -28,6 +28,7 @@ dupin-extension-http = { path = "../dupin-extension-http" }
 dupin-extension-install = { path = "../dupin-extension-install" }
 dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }
+dupin-spawn = { workspace = true }
 dupin-storage = { workspace = true }
 dupin-sync = { workspace = true }
 # The ping's wire format, without the schema the collector builds from it.

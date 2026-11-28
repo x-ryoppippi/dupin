@@ -53,7 +53,7 @@ export def run-suite [
     # Spotlight holds ⌘Space on a fresh macOS.
     let config = $out | path join config
     mkdir ($config | path join dupin)
-    "hotkey = \"alt+space\"\nbackdrop = \"flow\"\n" | save --force ($config | path join dupin config.toml)
+    "hotkey = \"alt+space\"\nbackdrop = \"flow\"\nup_key = \"ctrl+p\"\ndown_key = \"ctrl+n\"\n" | save --force ($config | path join dupin config.toml)
     try { prepare-scripts $out } catch {|failure|
         try { cleanup-scripts $out }
         try { cleanup $out }

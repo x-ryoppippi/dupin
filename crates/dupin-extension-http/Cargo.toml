@@ -9,9 +9,12 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
-libc = { workspace = true }
+dupin-spawn = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+libc = { workspace = true }
 
 [lints]
 workspace = true

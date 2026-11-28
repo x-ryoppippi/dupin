@@ -10,6 +10,7 @@ use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lo
 use super::shortcut::ShortcutKeycap;
 use crate::hotkey::LauncherShortcut;
 use crate::icons;
+use crate::list_keys::ListKey;
 
 const DISPLAY: &str = "display";
 const POSITION: &str = "position";
@@ -20,6 +21,8 @@ pub(super) fn page(s: &Prefs, k: &Kit) -> Vec<El> {
     let rows = vec![
         hotkey_setting(s, k),
         selection_hotkey_setting(s, k),
+        list_key_setting(s, k, ListKey::Up),
+        list_key_setting(s, k, ListKey::Down),
         display_setting(s, k),
         position_setting(s, k),
         rows_setting(s, k),
@@ -146,6 +149,42 @@ fn selection_hotkey_setting(s: &Prefs, k: &Kit) -> El {
             "Search selected text",
             locked,
         ),
+        s.lock_note(locked),
+    )
+}
+
+/// A row recording the chord the panel's lists take as ↑ or ↓.
+fn list_key_setting(s: &Prefs, k: &Kit, key: ListKey) -> El {
+    let (config_key, recorder, label, detail) = match key {
+        ListKey::Up => (
+            "up_key",
+            "up-key",
+            "Move up the list",
+            "Works as ↑ in results, actions and pickers",
+        ),
+        ListKey::Down => (
+            "down_key",
+            "down-key",
+            "Move down the list",
+            "Works as ↓ in results, actions and pickers",
+        ),
+    };
+    let locked = s.locked(config_key);
+    let i = key as usize;
+    let editor = ShortcutKeycap::new(recorder, label, &s.list_key_recorders[i])
+        .locked(locked)
+        .conflict(s.list_key_problems[i].clone())
+        .build(
+            k,
+            move |s: &mut Prefs| &mut s.list_key_recorders[i],
+            move |s: &mut Prefs, next| s.change_list_key(key, next),
+        );
+    setting_with_lock(
+        k,
+        &icons::KEYBOARD,
+        key.name(),
+        Some(detail),
+        editor,
         s.lock_note(locked),
     )
 }

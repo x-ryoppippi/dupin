@@ -20,6 +20,7 @@ serde_json = { workspace = true }
 sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
+dupin-spawn = { workspace = true }
 dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }
 dupin-js-runtime = { path = "../dupin-js-runtime" }
 dupin-plugin-protocol = { workspace = true }

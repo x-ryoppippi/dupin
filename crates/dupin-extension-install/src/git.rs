@@ -2,11 +2,10 @@
 //! tree and blobs itself, so no hook, filter, attribute, submodule or symlink in the repository
 //! takes effect, and limits apply before anything is written.
 
+use dupin_spawn::{Command, Stdio};
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};

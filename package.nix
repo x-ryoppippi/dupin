@@ -20,6 +20,7 @@ let
     (root + /Cargo.lock)
     (root + /VERSION)
     (root + /rustfmt.toml)
+    (root + /clippy.toml)
     (root + /crates)
     # The extension declarations `dupin ext new` copies into a package.
     (root + /sdk)

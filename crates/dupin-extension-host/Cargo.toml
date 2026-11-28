@@ -9,6 +9,7 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
+dupin-spawn = { workspace = true }
 dupin-js-runtime = { path = "../dupin-js-runtime" }
 dupin-plugin-protocol = { workspace = true }
 libc = { workspace = true }

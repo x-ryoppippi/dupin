@@ -491,10 +491,7 @@ mod tests {
             }
         };
 
-        let mut child = std::process::Command::new("/bin/sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
+        let mut child = dupin_spawn::Command::new("/bin/sleep").arg("30").spawn().unwrap();
         let pid = child.id();
         assert_eq!(
             act(

@@ -1,12 +1,12 @@
 //! File operations that never replace an existing entry.
 
+use dupin_spawn::Command;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use dupin_core::file_name;
 use objc2::rc::autoreleasepool;

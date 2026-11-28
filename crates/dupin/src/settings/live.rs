@@ -659,6 +659,20 @@ mod tests {
     }
 
     #[test]
+    fn an_invalid_read_only_base_still_launches_with_what_both_layers_set() {
+        let temp = TempDir::new();
+        let (paths, _, overlay) = linked_base(&temp, "hotkey = \"alt+space\"\nfuture_setting = true\n");
+        overlay.write(&"file_limit = 71".parse().unwrap()).unwrap();
+        let (config, locked, problem) = super::super::load(&paths);
+        assert!(problem.unwrap().starts_with("config.toml is invalid at line 2"));
+        assert_eq!(locked, ["future_setting".into(), "hotkey".into()].into());
+        assert_eq!(
+            config,
+            Config::parse("hotkey = \"alt+space\"\nfile_limit = 71").unwrap()
+        );
+    }
+
+    #[test]
     fn overlay_saves_merge_what_another_writer_stored_and_reject_conflicts() {
         let temp = TempDir::new();
         let (paths, _, overlay) = linked_base(&temp, "position = \"top\"");

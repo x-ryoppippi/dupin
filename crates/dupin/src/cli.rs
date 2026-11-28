@@ -353,7 +353,7 @@ fn owns_arguments(args: &[String]) -> bool {
     })
 }
 fn isolated_render(args: &[String], output: &str) -> Result<Value, String> {
-    use std::process::{Command, Stdio};
+    use dupin_spawn::{Command, Stdio};
     use std::time::{Duration, Instant};
     // Rune's headless API exits the process on renderer errors. Contain it so JSON callers
     // receive a structured error, including when GPU initialization or PNG output fails.

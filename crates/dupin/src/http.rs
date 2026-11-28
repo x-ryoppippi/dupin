@@ -1,4 +1,4 @@
-use std::process::Command;
+use dupin_spawn::Command;
 use std::time::Duration;
 
 pub fn curl(max: Duration, options: &[&str]) -> Command {

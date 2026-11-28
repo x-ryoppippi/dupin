@@ -1,0 +1,15 @@
+[package]
+name = "dupin-spawn"
+description = "Starts Dupin's child processes with posix_spawn, giving each only the descriptors it is handed."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+libc = { workspace = true }
+
+[lints]
+workspace = true

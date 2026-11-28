@@ -56,7 +56,7 @@ fn sleep() -> Result<(), String> {
 }
 
 fn sleep_displays() -> Result<(), String> {
-    let output = std::process::Command::new("/usr/bin/pmset")
+    let output = dupin_spawn::Command::new("/usr/bin/pmset")
         .arg("displaysleepnow")
         .output()
         .map_err(|error| error.to_string())?;

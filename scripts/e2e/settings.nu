@@ -9,7 +9,7 @@ use driver.nu [
     wait-for-log
     wait-frontmost
 ]
-use ../e2e-state.nu [has-match is-focused-match]
+use ../e2e-state.nu [has-match is-focused-match is-focused-query]
 
 export def settings-stage [out: path] {
     let focused = {|r| is-focused-match $r }
@@ -174,4 +174,50 @@ export def settings-stage [out: path] {
     wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
     poll $out settings-from-result $settings list-windows --app $DUPIN
     evidence $out settings-from-result
+
+    # This app uses the disposable XDG profile run-suite created under `out`. Search a common
+    # letter and require at least two results before asserting that the configured chords moved
+    # the selected row.
+    press $out navigation-close-settings cmd+w | ignore
+    press $out navigation-summon-panel alt+space | ignore
+    (poll
+        $out
+        navigation-query-field
+        $focused
+        find
+        --app
+        $DUPIN
+        --role
+        textfield
+        --first
+    ) | ignore
+    let log = $out | path join dupin.log
+    let results_before = log-count $log 'dupin-trace: results done query="a"'
+    type-text $out navigation-type-query a | ignore
+    (poll
+        $out
+        navigation-query
+        {|r| is-focused-query $r a }
+        find
+        --app
+        $DUPIN
+        --role
+        textfield
+        --first
+    ) | ignore
+    wait-for-log --after $results_before $log 'dupin-trace: results done query="a"'
+    let result_line = open --raw $log
+    | lines
+    | where {|line| $line | str contains 'dupin-trace: results done query="a"' }
+    | last
+    let count = $result_line | parse --regex 'items=(?<items>[0-9]+)' | get items.0 | into int
+    if $count < 2 { error make {msg: 'The E2E navigation query needs at least two results'} }
+    let moved_before = log-count $log 'dupin-trace: navigation down moved selection 0->1'
+    press $out navigation-custom-next ctrl+n | ignore
+    wait-for-log --after $moved_before $log 'dupin-trace: navigation down moved selection 0->1'
+    let moved_before = log-count $log 'dupin-trace: navigation up moved selection 1->0'
+    press $out navigation-custom-previous ctrl+p | ignore
+    wait-for-log --after $moved_before $log 'dupin-trace: navigation up moved selection 1->0'
+    evidence $out navigation-custom-keys
+    press $out navigation-close-panel escape | ignore
 }
