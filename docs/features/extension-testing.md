@@ -15,6 +15,7 @@ dupin ext render greeter greeter/fixtures/search.json search.png
 | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
 | [`dupin ext new <dir> [--ts \| --bundle]`](#creating-a-package)                                              | Creates a package in a new or empty folder.                                       |
 | [`dupin ext dev <dir> [--sourcemap]`](#developing-live)                                                      | Publishes a development copy to the extensions folder and keeps it current.       |
+| [`dupin ext types <dir> [--check] [--json]`](#updating-dupindts)                                             | Replaces the package's `dupin.d.ts` with this Dupin's.                            |
 | [`dupin ext check <dir>`](#checking-and-running)                                                             | Loads and compiles the package and says what it exports.                          |
 | [`dupin ext run <dir> --query Q [--json]`](#checking-and-running)                                            | Answers one query as the launcher would.                                          |
 | [`dupin ext test <dir> [--update] [--json]`](#testing-and-rendering)                                         | Replays every fixture and compares each step with its `expect`.                   |
@@ -68,9 +69,15 @@ The workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and
 <details>
 <summary><code>dupin.d.ts</code></summary>
 
-`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 5 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, accessories and answers, item actions, `views` with their lists, details and forms, `actions` with their effects on pages, `events`, the `filters` and kind actions a package [provides to `[advanced]`](./advanced.md#extensions), the capabilities and `DupinError`.
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it; [`dupin ext types`](#updating-dupindts) brings it up to date. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 5 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, accessories and answers, item actions, `views` with their lists, details and forms, `actions` with their effects on pages, `events`, the `filters` and kind actions a package [provides to `[advanced]`](./advanced.md#extensions), the capabilities and `DupinError`.
 
 </details>
+
+## Updating `dupin.d.ts`
+
+`dupin ext types <dir>` replaces the package's `dupin.d.ts` with the one this Dupin ships, so the editor and `tsc` see the API the launcher now offers. `dupin.d.ts` is a generated copy; keep your own declarations in other files. With `--check` it changes nothing and fails with `types-outdated` unless the file already matches, which suits CI.
+
+`dupin ext check` also says when the package's `dupin.d.ts` declares an older `apiVersion` than this Dupin's, and `--json` reports it as `typesOutdated`.
 
 ## Developing live
 

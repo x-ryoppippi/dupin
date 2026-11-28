@@ -1,5 +1,6 @@
 // Types for Dupin extensions, apiVersion 5. Dupin never reads this file; it is for editors and
-// `tsc --noEmit`. `dupin ext new` copies it into each package.
+// `tsc --noEmit`. `dupin ext new` copies it into each package, and `dupin ext types` replaces
+// that copy with a newer Dupin's.
 //
 // Dupin runs a TypeScript `dupin.main` as written by erasing its types, without type-checking.
 // Import these types with `import type { Item } from 'dupin'`: a type imported as a value stays
