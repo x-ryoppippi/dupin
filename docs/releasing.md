@@ -34,7 +34,9 @@ The Nix package is unsigned and never updates itself. The release builds come fr
 `.github/workflows/package.yml` runs it for both channels:
 
 - **stable**: merging the tagpr pull request packages the tag and uploads the three files to its release. `releases/latest/download/update.json` is the stable feed.
-- **nightly**: `.github/workflows/nightly.yml` runs daily (and on demand) when `main` has moved since the last nightly, moves the `nightly` tag to it and replaces the files on the `nightly` prerelease.
+- **nightly**: `.github/workflows/nightly.yml` builds `main`, moves the `nightly` tag to it and replaces the files on the `nightly` prerelease. It runs every six hours and on demand.
+
+A scheduled run first runs `just nightly-check` (`scripts/nightly.nu`), which reads the commit the published nightly was built from out of the `+<commit>` suffix of the `version` in its `update.json`, the feed installed copies are offered. When `main` is that commit, matched by prefix since the suffix is abbreviated, the run skips packaging and ends green with a notice that the nightly is already up to date. When there is no nightly yet it builds; when `update.json` is missing or names no commit it builds and warns. A run started by hand always builds.
 
 Try a signed bundle locally with `nu scripts/package-app.nu --channel nightly --identity "Developer ID Application: …"` (add `--notarize` with the notary variables set), or `--identity -` for an ad-hoc signature, which runs but never updates or sends the usage ping.
 

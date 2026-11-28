@@ -11,26 +11,44 @@ permissions: {}
 
 jobs:
   changed:
-    runs-on: ubuntu-slim
-    timeout-minutes: 5
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     permissions:
       contents: read
     outputs:
       sha: ${{ steps.head.outputs.sha }}
-      changed: ${{ steps.head.outputs.changed }}
+      # A dispatch skips the check, so only a scheduled run that found nothing new is 'false'.
+      build: ${{ steps.published.outputs.build != 'false' }}
     steps:
       - id: head
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          built="$(gh api "repos/$GITHUB_REPOSITORY/commits/nightly" --jq .sha 2>/dev/null || true)"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          if [ "$sha" = "$built" ]; then echo changed=false; else echo changed=true; fi >> "$GITHUB_OUTPUT"
+        run: echo "sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" >> "$GITHUB_OUTPUT"
+
+      # A scheduled run publishes only when main has moved since the published nightly, so
+      # installed copies aren't offered the same build again.
+      - if: github.event_name == 'schedule'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.head.outputs.sha }}
+          persist-credentials: false
+      - if: github.event_name == 'schedule'
+        uses: ./.github/actions/setup-nix-cache
+        with:
+          save: 'false'
+      - if: github.event_name == 'schedule'
+        run: nix profile install --inputs-from . nixpkgs#just nixpkgs#nushell
+      - id: published
+        name: Check whether the nightly is already up to date
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.head.outputs.sha }}
+        run: just nightly-check "$GITHUB_REPOSITORY" "$SHA"
 
   package:
     needs: changed
-    if: needs.changed.outputs.changed == 'true'
+    if: needs.changed.outputs.build == 'true'
     permissions:
       contents: write
       actions: read
