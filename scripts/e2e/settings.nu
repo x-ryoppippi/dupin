@@ -44,9 +44,16 @@ export def settings-stage [out: path] {
         $out
         'Move to previous result'
         ctrl+k
+        ctrl+KeyK
         navigation_up
     )
-    record-navigation-key $out 'Move to next result' ctrl+j navigation_down
+    (record-navigation-key
+        $out
+        'Move to next result'
+        ctrl+j
+        ctrl+KeyJ
+        navigation_down
+    )
     (poll
         $out
         acknowledgements
@@ -233,6 +240,7 @@ def record-navigation-key [
     out: path
     label: string
     chord: string
+    stored: string
     config_key: string
 ] {
     let button = (poll
@@ -259,8 +267,8 @@ def record-navigation-key [
         } catch {
             null
         }
-        if $value == $chord { return }
+        if $value == $stored { return }
         sleep 250ms
     }
-    error make {msg: $'Settings did not save ($config_key) = "($chord)"'}
+    error make {msg: $'Settings did not save ($config_key) = "($stored)"'}
 }
